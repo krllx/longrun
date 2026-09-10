@@ -36,7 +36,7 @@
 <div class="grid2">
   <div class="card project"><h4>1. Shared documents on disk</h4><p>One <code>.longrun/</code> per project with the notes every session sees, plus own notes per session. Hooks bring both back after every compaction, <code>/clear</code> and resume, and show what other sessions changed on every turn. Parts <a href="#l3">3</a>, <a href="#l5">5</a>, <a href="#l6">6</a>.</p></div>
   <div class="card session"><h4>2. Delegation: messages and tasks</h4><p>A message or a task for another session arrives there as a user turn: through the socket if it is running, through the inbox on its next turn if it is stopped. Sessions are named as you see them in the sidebar. Part <a href="#l7">7</a>.</p></div>
-  <div class="card dir"><h4>3. Reactivity: waiting that never oversleeps</h4><p>A watch is a check launchd runs every five minutes with no model. When the condition holds, the session wakes with the text you gave. No polling loop, no tokens spent waiting, no sleep that oversleeps. Part <a href="#l7">7</a>.</p></div>
+  <div class="card dir"><h4>3. Reactivity: waiting that never oversleeps</h4><p>A watch is a check a timer runs every five minutes with no model. When the condition holds, the session wakes with the text you gave. No polling loop, no tokens spent waiting, no sleep that oversleeps. Part <a href="#l7">7</a>.</p></div>
   <div class="card"><h4>4. Selective autonomy: the orchestrator</h4><p>One session keeps the board and drives the already open sessions to the goal: hands out tasks, unblocks, spots stuck peers, and asks the human through a dialog only when it must. The levers (stop, kill, resume) stay with the human. Part <a href="#l8">8</a>.</p></div>
 </div>
 
@@ -47,13 +47,13 @@
 <ol>
 <li><b>Install once.</b> In the skill repository:
 <pre><code>./install.sh            # the skill, 11 hooks in ~/.claude/settings.json, the CLI ~/.local/bin/longrun, the longrun MCP server
-longrun watch install   # a launchd agent: checks and the watcher every 5 minutes</code></pre></li>
+longrun watch install   # the timer: checks and the watcher every 5 minutes</code></pre></li>
 <li><b>Make the folder a project.</b> A project for longrun is the folder you open in Claude Code. Not necessarily a repository root: it can be a folder with several repositories, a subdirectory of a monorepo or an empty headquarters folder. Run <code>longrun init</code> there once: in a terminal or right in the Claude Code session, the agent runs it for you if asked. A <code>.longrun/</code> directory appears; when the folder is inside a repository, add it to the ignore file (or <code>longrun init --external</code>, which puts the directory under <code>~/.claude/longrun/</code>). From every worktree of the same project: <code>longrun link &lt;path to the project&gt;</code>. Check: <code>longrun where</code>.</li>
 <li><b>Tune it.</b> In the session tell the agent: "set up longrun" (or <code>/longrun onboard</code>). It runs <code>longrun onboard</code>, tells you briefly what the skill does and asks about the main settings: the autocompact window, the 5-hour window budget, the stuck thresholds, note sizes. It applies the answers itself with <code>longrun config set</code>. One exception: a hook cannot set the autocompact window, so the agent asks you to type <code>/autocompact 300k</code> (or the value you chose) in Claude Code. 50 thousand tokens before that threshold a hook asks the session to write its notes before compaction. The keys in detail (see part 9 below).</li>
 <li><b>Work.</b> Nothing to call. At start the session gets a digest (shared notes, own notes, who else is working), after compaction everything comes back by itself, other sessions' changes arrive on the next turn. The agent writes notes about dead ends and decisions on its own. You can ask in words: "write it down", "what have we tried", "session status", "hand it to the other session", "what is left", "tell me when the PR merges".</li>
 <li><b>Several sessions and a common goal.</b> In one of them: "take the orchestrator role, the goal is ...". It creates a task board and hands out work; the other sessions receive tasks as turns, nothing to learn. "Stop everyone" and "go on" are also words, in the orchestrator session (see part 8 below).</li>
 </ol>
-<div class="callout ok">Diagnostics in one command: <code>longrun where</code> (which project and session), <code>longrun status</code> (what each session does), <code>longrun watch status</code> (is launchd alive), <code>longrun config</code> (effective settings).</div>
+<div class="callout ok">Diagnostics in one command: <code>longrun where</code> (which project and session), <code>longrun status</code> (what each session does), <code>longrun watch status</code> (is the timer alive), <code>longrun config</code> (effective settings).</div>
 <div class="next"><a href="#l1">Next: why it is built this way</a></div>
 </section>
 
@@ -68,7 +68,7 @@ longrun watch install   # a launchd agent: checks and the watcher every 5 minute
   <div class="s bad"><b>Problem 4: many sessions, one goal</b>Five sessions on one project, and only the human knows what is done, what is stuck and what is next. Every hand-over goes through them.</div>
   <div class="s good"><b>Cure 1: documents on disk</b>A note on disk does not degrade. The hooks bring the notes back after every compaction, <code>/clear</code> and resume, and archive the compaction summaries verbatim.</div>
   <div class="s good"><b>Cure 2: messages and tasks</b>One <code>.longrun/</code> per project: shared notes every session sees, a list of sessions with their status, messages and tasks delivered as user turns.</div>
-  <div class="s good"><b>Cure 3: watches</b>launchd checks the condition every five minutes with no model and wakes the session when it holds. Reliable, reactive, free.</div>
+  <div class="s good"><b>Cure 3: watches</b>a timer checks the condition every five minutes with no model and wakes the session when it holds. Reliable, reactive, free.</div>
   <div class="s good"><b>Cure 4: the orchestrator</b>One session keeps the board, hands out tasks, spots stuck peers, and asks the human through a dialog only when it must.</div>
 </div>
 <p>The picture below is about problem 1. <b>Top row</b>: what the model holds in its context, left to right in time: first the full history, after compaction only the summary, and the agent reading that summary. <b>Bottom row</b>: the file on disk where the agent wrote one note at the very beginning. Dotted arrows: the note enters the context at start and again after compaction.</p>
@@ -95,7 +95,7 @@ longrun watch install   # a launchd agent: checks and the watcher every 5 minute
 </figure>
 <h3>What the skill is made of</h3>
 <div class="grid2">
-  <div class="card"><h4>Mechanics: hooks, CLI, launchd</h4><p>Eleven Claude Code hooks (see part 4 below), the <code>longrun</code> command and a launchd agent. The mechanics work without the model:</p>
+  <div class="card"><h4>Mechanics: hooks, CLI, a timer</h4><p>Eleven Claude Code hooks (see part 4 below), the <code>longrun</code> command and a timer (a launchd agent on macOS, a systemd user timer or cron on Linux). The mechanics work without the model:</p>
   <ul>
   <li>print the digest at session start and after every compaction;</li>
   <li>archive every compaction summary verbatim;</li>
@@ -157,7 +157,7 @@ longrun watch install   # a launchd agent: checks and the watcher every 5 minute
 <tr><td><code>meta.json</code></td><td>hooks on every event</td><td>with the session</td></tr>
 <tr><td><code>archive/compact/*.md</code></td><td>the PostCompact hook</td><td>older than 30 days or more than 40 of them</td></tr>
 <tr><td><code>inbox/*.md</code></td><td><code>send</code>, <code>watch</code>, <code>board</code>, <code>ask</code></td><td>on delivery into <code>.archive/</code>, from there after 30 days</td></tr>
-<tr><td><code>watch/w*.json</code></td><td><code>watch add</code>, the launchd tick</td><td>a week after it fired</td></tr>
+<tr><td><code>watch/w*.json</code></td><td><code>watch add</code>, the timer tick</td><td>a week after it fired</td></tr>
 </table>
 <div class="next"><a href="#l4">Next: hooks</a></div>
 </section>
@@ -194,7 +194,7 @@ longrun watch install   # a launchd agent: checks and the watcher every 5 minute
 <div class="kicker">Part 6, a scenario</div>
 <h2>One session survives compaction</h2>
 <p>Project <code>shop</code>, session A. The "Next" and "Back" buttons or the arrow keys. Left: who talks to whom at this step; right: the command and what it prints; below: what changed on disk.</p>
-<div class="legend"><span class="human"><i></i>human, dialog</span><span class="session"><i></i>session</span><span class="project"><i></i>project .longrun</span><span class="own"><i></i>own of a session</span><span class="launchd"><i></i>launchd</span><span class="global"><i></i>global</span></div>
+<div class="legend"><span class="human"><i></i>human, dialog</span><span class="session"><i></i>session</span><span class="project"><i></i>project .longrun</span><span class="own"><i></i>own of a session</span><span class="timer"><i></i>timer</span><span class="global"><i></i>global</span></div>
 <div id="p1"></div>
 <div class="callout">What to remember: dead ends and decisions are written right away, milestones go to the journal, after compaction everything comes back by itself, a lost detail is found by <code>recall</code>.</div>
 <div class="next"><a href="#l7">Next: two sessions</a></div>
@@ -206,9 +206,9 @@ longrun watch install   # a launchd agent: checks and the watcher every 5 minute
 <p>Session B opens in the same folder.</p>
 <div id="p2"></div>
 <h2 style="margin-top:32px">Hand work over and wait for an event</h2>
-<p>A message to another session arrives there as a user turn. Waiting for an event costs zero tokens: launchd runs the check.</p>
+<p>A message to another session arrives there as a user turn. Waiting for an event costs zero tokens: the timer runs the check.</p>
 <div id="p3"></div>
-<div class="callout warn">A <code>cmd</code> check runs under launchd: absolute paths only, no Touch ID, ssh or aliases. First <code>longrun watch test -- cmd '...'</code>.</div>
+<div class="callout warn">A <code>cmd</code> check runs from the timer, whose environment is nearly empty: absolute paths only, no Touch ID, ssh or aliases. First <code>longrun watch test -- cmd '...'</code>.</div>
 <div class="next"><a href="#l8">Next: the orchestrator</a></div>
 </section>
 
@@ -245,6 +245,7 @@ longrun config unset notes_max_bytes            # back to the default</code></pr
 <tr><td><code>watch_ttl_days</code></td><td>7</td><td>The default lifetime of a check (global only). Waiting for a release for weeks: 30, or <code>--for 30d</code> on that check.</td></tr>
 <tr><td><code>autocompact_window</code></td><td>0</td><td>Where Claude Code compacts, as set with <code>/autocompact N</code>; accepts <code>300k</code>, <code>1M</code>. 0 = follow Claude Code. A hook cannot run <code>/autocompact</code>, so this is the intent: <code>onboard</code> compares it with the Claude Code setting and asks you to type the command. Recommended for 1M-window models: 300k.</td></tr>
 <tr><td><code>pr_tool</code></td><td>auto</td><td>How pr-merged checks ask for the PR status: <code>gh</code> (GitHub CLI) or <code>arc</code> (Arcadia). <code>auto</code> looks at the folder the watch was registered from.</td></tr>
+<tr><td><code>watch_timer</code></td><td>auto</td><td>What runs the watch tick: <code>launchd</code> (macOS), <code>systemd</code> (a user timer), <code>cron</code>, <code>none</code>. <code>auto</code> picks whatever this machine has.</td></tr>
 <tr><td><code>hq</code></td><td>unset</td><td>The ledger and inbox layer for a project headquarters; turned on with <code>longrun init --hq</code>, not through config.</td></tr>
 </table>
 <div class="callout">The easiest way is not to memorise keys but to tell the agent "set up longrun": <code>longrun onboard</code> prints it a brief with the current value and meaning of every key, it asks you one at a time and applies the answers. The minimal set: the autocompact window 300k (type <code>/autocompact 300k</code> yourself), <code>budget_on false --global</code> if you do not need the orchestrator yet, <code>stuck_tool_min 60</code> if your builds are long. Touch the rest when the digest or the watcher starts getting in the way.</div>
@@ -257,7 +258,7 @@ longrun config unset notes_max_bytes            # back to the default</code></pr
 <div class="cheat">
 <pre><code># install
 ./install.sh            # the skill, 11 hooks, the CLI, the longrun MCP server
-longrun watch install   # the launchd agent, every 5 minutes
+longrun watch install   # the timer, every 5 minutes
 longrun init [--hq]     # in the project folder
 longrun link &lt;project&gt;  # from every worktree
 longrun where           # which project, which session</code></pre>
@@ -296,7 +297,7 @@ longrun config unset KEY [--global]</code></pre>
 <li>The digest is at most 9000 bytes. Evicted in order: the session list, watches, the journal tail, HANDOFF, the ledger. Notes are never evicted, hence the 5000 + 3000 budgets.</li>
 <li>Resume in the app is linked through <code>priorCliSessionIds</code>; <code>/clear</code> in the CLI through a heuristic: "same folder, an end with reason clear no more than three minutes ago".</li>
 <li>The socket and transcript formats are undocumented: on a Claude Code version change <code>send</code> into a running session breaks first, the inbox queue keeps working.</li>
-<li>Under launchd python may have no access to <code>~/Documents</code> (macOS TCC). Checks do not depend on it; a message is then placed into the session directory under <code>~/.claude</code>.</li>
+<li>Under the macOS timer python may have no access to <code>~/Documents</code> (TCC). Checks do not depend on it; a message is then placed into the session directory under <code>~/.claude</code>.</li>
 <li>Subagents do not get the digest. <code>/rewind</code> does not roll notes back.</li>
 </ul>
 <p>Details: <code>README.md</code>, <code>docs/REFERENCE.md</code>, <code>docs/ORCHESTRATOR.md</code> in the repository, and <code>longrun help</code>.</p>

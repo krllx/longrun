@@ -5,7 +5,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LR="$HERE/../skill/longrun/scripts/longrun"
 T="$(mktemp -d /tmp/longrun-orch.XXXXXX)"
-export CLAUDE_CONFIG_DIR="$T/claude" HOME="$T/home" LONGRUN_NO_LAUNCHD=1
+export CLAUDE_CONFIG_DIR="$T/claude" HOME="$T/home" LONGRUN_NO_TIMER=1
 export LONGRUN_NO_UI=1                     # never a real dialog or notification from a test
 mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/sessions"
 unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT CLAUDE_ENV_FILE CLAUDE_CODE_AUTO_COMPACT_WINDOW

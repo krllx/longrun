@@ -7,8 +7,9 @@ LR="$HERE/../skill/longrun/scripts/longrun"
 T="$(mktemp -d /tmp/longrun-test.XXXXXX)"
 export CLAUDE_CONFIG_DIR="$T/claude"      # keeps registry/global config out of ~/.claude
 export HOME="$T/home"; mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/projects/-proj"
-unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT
-export LONGRUN_NO_LAUNCHD=1                # never register a real launchd job from the test tree
+unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT XDG_CONFIG_HOME
+export LONGRUN_NO_TIMER=1                  # never register a real launchd/systemd/cron job from the test tree
+export LONGRUN_DESKTOP_DIR="$HOME/desktop-sessions"   # the Claude desktop app's metadata dir, wherever this OS puts it
 export LONGRUN_NO_UI=1                     # never a real dialog or notification from a test
 PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); echo "  ok   $1"; }
@@ -344,14 +345,14 @@ RES="$(PATH="$T/bin:$PATH" LONGRUN_DIR="$LOCAL" "$LR" send --resume gone-worker 
 check "--resume runs claude -p <text> --resume <sid> in the session's cwd with LONGRUN_* scrubbed" "echo \"\$RES\" | grep -q -- '-p From longrun session' && echo \"\$RES\" | grep -q -- '--resume 66666666-2222-4333-8444-555555555555 --max-turns 3' && echo \"\$RES\" | grep -q 'cwd: .*EDAINAPP-1375-screen' && echo \"\$RES\" | grep -q 'LONGRUN_DIR=\[\]'"
 NOHQ="$T/nohq"; mkdir -p "$NOHQ"; ( cd "$NOHQ" && "$LR" init >/dev/null ); ( cd "$NOHQ" && "$LR" send gone-worker "no hq here" >/tmp/lr-send5 2>&1 ); check "a message from another project lands where the TARGET's hooks look (its own project inbox)" "test \$? -eq 0 && ls '$LOCAL/inbox/'*-msg-to-66666666-* >/dev/null 2>&1"
 "$LR" inbox ack --all >/dev/null 2>&1; rm -f "$LOCAL/inbox/"*-msg-to-*
-DSK="$HOME/Library/Application Support/Claude/claude-code-sessions/aaaa/bbbb"; mkdir -p "$DSK"
+DSK="$LONGRUN_DESKTOP_DIR/aaaa/bbbb"; mkdir -p "$DSK"
 printf '{"sessionId":"local_66666666-2222-4333-8444-555555555555","cliSessionId":"66666666-2222-4333-8444-555555555555","cwd":"%s","title":"PR E: Шторка лотереи","isArchived":false,"lastActivityAt":1788779365881}' "$WT" > "$DSK/local_66666666-2222-4333-8444-555555555555.json"
 printf '{"sessionId":"local_88888888-2222-4333-8444-555555555555","cliSessionId":"88888888-2222-4333-8444-555555555555","cwd":"%s","title":"PR E: Шторка лотереи (fork)","isArchived":true,"lastActivityAt":1788779365999}' "$WT" > "$DSK/local_88888888-2222-4333-8444-555555555555.json"
 "$LR" send "PR E: Шторка лотереи" "by title" >/dev/null 2>&1; check "send resolves a desktop sidebar title (archived twin ignored)" "test \$? -eq 0 && grep -l 'by title' '$LOCAL/inbox/'*-msg-to-d66666666-* >/dev/null 2>&1"
 check "send --list shows desktop titles" "$LR send --list | grep -q 'PR E: Шторка лотереи'"
 rm -f "$LOCAL/inbox/"*-msg-to-*
 
-echo "== watch: deferred checks, launchd-free tick, delivery to a stopped and a running session"
+echo "== watch: deferred checks, timer-free tick, delivery to a stopped and a running session"
 export LONGRUN_SESSION=$SID
 WD="$CLAUDE_CONFIG_DIR/longrun/watch"
 "$LR" watch test -- at +1h >/tmp/lr-wt 2>&1; check "watch test: at +1h is not yet (rc 1)" "test \$? -eq 1 && grep -q 'not yet' /tmp/lr-wt"
@@ -362,7 +363,7 @@ OUTA="$("$LR" watch add --then "already" -- cmd 'true' 2>&1)"; check "watch add 
 FLAG="$T/flag-file"
 OUT1="$("$LR" watch add --to "PR E: Шторка лотереи" --every 1m --then "the flag appeared: run the tests" -- file "$FLAG" 2>&1)"
 check "watch add by sidebar title -> w1, inbox delivery announced" "echo \"\$OUT1\" | grep -q 'registered w1' && echo \"\$OUT1\" | grep -q 'PR E: Шторка лотереи \[66666666\]' && echo \"\$OUT1\" | grep -q 'inbox file' && test -f '$WD/w1.json'"
-check "watch add snapshots PATH for launchd" "test -f '$WD/env.json' && grep -q '/usr/bin' '$WD/env.json'"
+check "watch add snapshots PATH for the timer" "test -f '$WD/env.json' && grep -q '/usr/bin' '$WD/env.json'"
 check "watch ls shows it pending" "$LR watch ls | grep -q 'w1   pending'"
 "$LR" watch run --force >/dev/null; check "tick with the condition false keeps it pending" "grep -q '\"state\": \"pending\"' '$WD/w1.json' && grep -q '\"runs\": 2' '$WD/w1.json'"
 touch "$FLAG"; "$LR" watch run --force >/tmp/lr-tick; MSGW=$(ls "$LOCAL/inbox/"*-msg-to-d66666666-from-watch.md 2>/dev/null | head -1)
@@ -452,7 +453,7 @@ check "config shows the value with its source" "$LR config | grep -q 'notes_max_
 "$LR" config set pr_tool svn --global 2>/dev/null; check "pr_tool refuses unknown tools (exit 2)" "test \$? -eq 2"
 
 echo "== onboarding and the PR tool"
-O="$("$LR" onboard)"; check "onboard prints the brief with state and settings" "echo \"\$O\" | grep -q '^STATE' && echo \"\$O\" | grep -q 'autocompact_window *300k (global)' && echo \"\$O\" | grep -q 'launchd:   NOT installed'"
+O="$("$LR" onboard)"; check "onboard prints the brief with state and settings" "echo \"\$O\" | grep -q '^STATE' && echo \"\$O\" | grep -q 'autocompact_window *300k (global)' && echo \"\$O\" | grep -q 'timer: .*NOT installed'"
 check "onboard reports the autocompact mismatch with Claude Code" "echo \"\$O\" | grep -q 'longrun expects 300k: ask the user to type ./autocompact 300k'"
 D="$(cd "$WT" && "$LR" digest --source startup)"; check "digest suggests onboarding until it is done" "echo \"\$D\" | grep -q 'First time here: .longrun onboard'"
 "$LR" onboard done >/dev/null; D="$(cd "$WT" && "$LR" digest --source startup)"; check "onboard done records the date and silences the hint" "grep -q onboarded_at '$CLAUDE_CONFIG_DIR/longrun/config.json' && ! echo \"\$D\" | grep -q 'First time here'"
@@ -461,5 +462,36 @@ GIT="$T/gitrepo"; mkdir -p "$GIT/.git"; ARC="$T/arcrepo/sub"; mkdir -p "$ARC" "$
 check "pr-merged registered in a git repo picks gh, in an Arcadia checkout picks arc, discarded == closed" "python3 -c \"import json,glob,sys; w={json.load(open(f))['then']: json.load(open(f)) for f in glob.glob('$CLAUDE_CONFIG_DIR/longrun/watch/w*.json')}; sys.exit(0 if w['gh one']['check']['tool']=='gh' and w['arc one']['check']['tool']=='arc' and w['arc one']['check']['desc']=='PR 77 status == closed' else 1)\""
 "$LR" config set pr_tool arc --global >/dev/null; ( cd "$GIT" && "$LR" watch add --no-test --then "forced" -- pr-merged 43 >/dev/null 2>&1 ); check "pr_tool in the config overrides the folder" "python3 -c \"import json,glob,sys; w={json.load(open(f))['then']: json.load(open(f)) for f in glob.glob('$CLAUDE_CONFIG_DIR/longrun/watch/w*.json')}; sys.exit(0 if w['forced']['check']['tool']=='arc' else 1)\""
 "$LR" config unset pr_tool --global >/dev/null
+
+echo "== the platform layer: which timer, which dialog, where the credentials are"
+PY_IMPORT="import importlib.util,sys; sp=importlib.util.spec_from_loader('lr',importlib.machinery.SourceFileLoader('lr','$LR')); m=importlib.util.module_from_spec(sp); sp.loader.exec_module(m)"
+lrpy(){ python3 -c "import importlib.machinery,importlib.util; $PY_IMPORT
+$1"; }
+check "cron_spec turns seconds into a crontab schedule (and never goes below a minute)" \
+  "test \"\$(lrpy 'print(m.cron_spec(300), m.cron_spec(30), m.cron_spec(7200), sep=\"|\")')\" = '*/5 * * * *|*/1 * * * *|0 */2 * * *'"
+check "cron_strip removes our two lines and leaves the rest of the crontab alone" \
+  "test \"\$(lrpy 'print(m.cron_strip(\"@reboot foo\\n\" + m.CRON_MARK + \"\\n*/5 * * * * old\\n0 3 * * * backup\"))')\" = \"['@reboot foo', '0 3 * * * backup']\""
+check "the systemd units name the script, the interval and a log, and escape % for systemd" \
+  "lrpy 'sv,tm=m.systemd_unit_texts(600); print(sv+tm)' | grep -q 'Type=oneshot' && lrpy 'sv,tm=m.systemd_unit_texts(600); print(sv+tm)' | grep -q 'OnUnitActiveSec=600' && lrpy 'sv,tm=m.systemd_unit_texts(600); print(sv+tm)' | grep -q 'WantedBy=timers.target' && ! lrpy 'sv,tm=m.systemd_unit_texts(600); print(sv+tm)' | grep -q '[^%]%[a-zA-Z]'"
+check "watch_timer in the config pins the scheduler on any OS" \
+  "$LR config set watch_timer cron --global >/dev/null && $LR watch status | grep -q 'cron job' && $LR config set watch_timer none --global >/dev/null && $LR watch status | grep -q 'no scheduler'"
+LONGRUN_NO_TIMER= "$LR" watch install >/tmp/lr-ti 2>&1; check "watch install with watch_timer=none explains what to do instead (exit 1)" "test \$? -eq 1 && grep -q 'longrun watch run' /tmp/lr-ti"
+"$LR" config set watch_timer sysvinit --global 2>/dev/null; check "watch_timer refuses an unknown scheduler (exit 2)" "test \$? -eq 2"
+"$LR" config unset watch_timer --global >/dev/null
+check "auto picks launchd on macOS and systemd or cron on Linux" \
+  "case \"\$(lrpy 'print(m.timer_kind())')\" in launchd) test \"\$(uname)\" = Darwin ;; systemd|cron|none) test \"\$(uname)\" = Linux ;; *) false ;; esac"
+check "the desktop metadata dir follows the OS (Library on macOS, XDG on Linux)" \
+  "test \"\$(LONGRUN_DESKTOP_DIR= lrpy 'print(m.desktop_dir())')\" = \"\$(test \"\$(uname)\" = Darwin && echo \"\$HOME/Library/Application Support/Claude/claude-code-sessions\" || echo \"\$HOME/.config/Claude/claude-code-sessions\")\""
+check "the dialog program is chosen by OS: osascript on macOS, zenity/kdialog on a Linux desktop, none headless" \
+  "test \"\$(DISPLAY= WAYLAND_DISPLAY= lrpy 'print(m.dialog_tool() or \"-\")')\" = \"\$(test \"\$(uname)\" = Darwin && echo osascript || echo -)\""
+check "a machine with no dialog says why (headless, or nothing installed)" \
+  "DISPLAY= WAYLAND_DISPLAY= lrpy 'print(m.dialog_missing_reason())' | grep -qE 'osascript|DISPLAY|zenity'"
+check "with no dialog program the ask fails with a reason instead of hanging" \
+  "LONGRUN_NO_UI= lrpy 'm.dialog_tool=lambda: \"\"; d=m.dialog_show(\"q?\", [\"a\",\"b\"]); print(d[\"state\"], d[\"error\"])' | grep -q '^failed .'"
+check "the token comes from Claude Code's own credentials file when there is no keychain item" \
+  "mkdir -p '$CLAUDE_CONFIG_DIR' && printf '{\"claudeAiOauth\":{\"accessToken\":\"sk-test-not-a-real-token\"}}' > '$CLAUDE_CONFIG_DIR/.credentials.json' && test \"\$(lrpy 'tok,err=m.keychain_token(); print(bool(tok), err)')\" = 'True '"
+rm -f "$CLAUDE_CONFIG_DIR/.credentials.json"
+check "no credentials anywhere is an error, never an empty token" \
+  "lrpy 'tok,err=m.keychain_token(); print(repr(tok), err)' | grep -q \"^'' .\""
 
 echo; echo "PASS=$PASS FAIL=$FAIL  (tmp: $T)"; test $FAIL -eq 0

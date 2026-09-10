@@ -7,7 +7,7 @@
   Object.assign(N.P, { title: 'Project shop/.longrun', sub: ['NOTES.md  shared', 'inbox/  board.json', 'archive/'] });
   Object.assign(N.SA, { title: 'own of A', sub: ['notes.md', 'journal, meta'] });
   Object.assign(N.SB, { title: 'own of B', sub: ['notes.md', 'journal, meta'] });
-  Object.assign(N.L, { title: 'launchd, every 5 min', sub: ['watch, watcher, budget'] });
+  Object.assign(N.L, { title: 'timer, every 5 min', sub: ['watch, watcher, budget'] });
   Object.assign(N.G, { title: '~/.claude/longrun', sub: ['watch/, halt.json'] });
   Object.assign(N.D, { title: 'osascript dialog', sub: ['in front of every window'] });
 
@@ -34,7 +34,7 @@
   };
   C.GLOB.label = '~/.claude/longrun/  (global)';
   const GF = {
-    'watch/w1.json': ['One deferred check: what to check, whom to tell and what, when it expires.', 'watch add; the launchd tick updates it'],
+    'watch/w1.json': ['One deferred check: what to check, whom to tell and what, when it expires.', 'watch add; the timer tick updates it'],
     'halt.json': ['Stop for every session of every project: who, when, why.', 'halt / resume, the budget watcher'],
     'budget.json': ['Samples of the 5-hour window and the plan (20% per hour).', 'the watcher every 5 minutes'],
   };
@@ -63,8 +63,8 @@
     ['B wakes up: the message arrives as a turn', 'hook', 'The first hook of B (a turn, a tool call or a start) takes the file from the inbox and prints it into the context. For the model it is a request from a peer, not from the human: its permissions stay its own.'],
     ['And if B is running right now: the socket', 'CLI', 'A running session listens on a unix socket. The text goes there and shows up in B as a user turn between tool calls, no inbox. <code>--resume</code> wakes a stopped session through <code>claude -p --resume</code>.'],
     ['Waiting for an event: watch instead of polling', 'agent A', '"Check in two hours", "when the PR merges": no sleep loops, no reminders to the human. A deterministic check is registered. <code>add</code> tries it once right away: already true means nothing is registered, act now.'],
-    ['launchd checks every 5 minutes, no model', 'launchd', 'A tick costs zero tokens. The condition is not met: the record is updated and that is all. A laptop asleep catches up on wake. Three hard errors in a row or an expired deadline give one message "broken" or "expired".'],
-    ['The condition is met: a message to the recipient', 'launchd', 'The tick delivers the <code>--then</code> text the same ways as <code>send</code>: into the socket of a running session or into the inbox. The session reads "From longrun watch w1" and does what it says. It wrote that text itself, maybe before a compaction.'],
+    ['The timer checks every 5 minutes, no model', 'timer', 'A tick costs zero tokens. The condition is not met: the record is updated and that is all. A laptop asleep catches up on wake. Three hard errors in a row or an expired deadline give one message "broken" or "expired".'],
+    ['The condition is met: a message to the recipient', 'timer', 'The tick delivers the <code>--then</code> text the same ways as <code>send</code>: into the socket of a running session or into the inbox. The session reads "From longrun watch w1" and does what it says. It wrote that text itself, maybe before a compaction.'],
   ]);
   steps(C.s4, [
     ['A takes the orchestrator role', 'agent A, on the human\'s word', 'One session per project drives the goal. It gets the list of duties and <b>polls nothing</b>: events wake it. A second session is refused with the holder\'s name.'],
@@ -72,7 +72,7 @@
     ['B receives the task as a turn', 'hook', 'A worker session needs only three commands: <code>take</code>, <code>done</code>, <code>block</code>. It learns nothing else.'],
     ['B works and closes the task; a fact from outside', 'agent B', '<code>done</code> and <code>block</code> wake the orchestrator. A reviewer asked to rename a field: that is a <b>fact from outside</b>. The rule: record first (<code>fact</code>), decide second. The fact goes to the orchestrator too.'],
     ['The orchestrator wakes up and disposes', 'orchestrator', 'Reads the board and the facts, not transcripts: its own context must stay small. Every fact is closed explicitly: relayed, re-planned or asked the user.'],
-    ['Telemetry without tokens: flags in SESSIONS', 'hooks and the watcher', 'The PreToolUse, PostToolUse, Stop, PermissionRequest and Notification hooks write into meta.json when a tool started and ended and whether the session waits for a permission. The watcher (launchd) compares with the thresholds every 5 minutes and reports to the orchestrator once per episode.'],
+    ['Telemetry without tokens: flags in SESSIONS', 'hooks and the watcher', 'The PreToolUse, PostToolUse, Stop, PermissionRequest and Notification hooks write into meta.json when a tool started and ended and whether the session waits for a permission. The watcher (the timer) compares with the thresholds every 5 minutes and reports to the orchestrator once per episode.'],
     ['Stop everyone: halt', 'orchestrator, on the human\'s word', 'The halt.json file is global. The <b>PreToolUse</b> hook of every session answers with a refusal and the reason; the model sees it and tells the human what it was about to do. Only the human lifts it, in words, in the conversation: <code>longrun resume</code>.'],
     ['A question to the human in front of every window', 'agent B', 'Only for what cannot wait: a confirmation, an access, an action only the human can take. The dialog is drawn by osascript from a separate process: on top of every window, with a beep, no permissions needed. An answer within 90 seconds comes back inline.'],
     ['The human is away: the answer arrives later as a turn', 'waiting', 'After 90 seconds the command returns PENDING and the session goes on. The dialog stays open (6 hours by default); the click goes into the session\'s socket or its inbox. Cancel, Esc or expiry: CANCELLED / EXPIRED, the question is not repeated but put on the board.'],

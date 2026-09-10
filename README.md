@@ -38,7 +38,7 @@ English | [Русский](README.ru.md)
 ```bash
 git clone https://github.com/<you>/longrun-skill && cd longrun-skill
 ./install.sh            # skill, 11 hooks, CLI ~/.local/bin/longrun, MCP server
-longrun watch install   # launchd agent: watches and the watcher every 5 minutes
+longrun watch install   # the timer: watches and the watcher every 5 minutes
 cd ~/projects/shop && longrun init   # in the folder you open in Claude Code
 ```
 
@@ -88,7 +88,7 @@ longrun board assign T8 "PR 43: payments"      # a task instead of a message
 
 ### 3. Reactivity: wait without spending tokens
 
-A watch is a deterministic check that launchd runs every five minutes with no model involved. When the condition holds, the session gets the text as a message. A laptop asleep just delays the check.
+A watch is a deterministic check that a timer runs every five minutes with no model involved (a launchd agent on macOS, a systemd user timer or a cron job on Linux). When the condition holds, the session gets the text as a message. A laptop asleep just delays the check.
 
 ```bash
 longrun watch add --to "PR 43: payments" --then "rebase onto main" -- pr-merged 42

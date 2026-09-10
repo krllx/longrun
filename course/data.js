@@ -9,7 +9,7 @@ window.COURSE = (function () {
     P: { id: 'P', kind: 'project', x: 230, y: 110, w: 170, h: 96, title: 'Проект shop/.longrun', sub: ['NOTES.md  общие', 'inbox/  board.json', 'archive/'] },
     SA: { id: 'SA', kind: 'own', x: 440, y: 90, w: 110, h: 60, title: 'своё A', sub: ['notes.md', 'journal, meta'] },
     SB: { id: 'SB', kind: 'own', x: 440, y: 200, w: 110, h: 60, title: 'своё B', sub: ['notes.md', 'journal, meta'] },
-    L: { id: 'L', kind: 'launchd', x: 230, y: 250, w: 170, h: 50, title: 'launchd, раз в 5 мин', sub: ['watch, смотритель, бюджет'] },
+    L: { id: 'L', kind: 'timer', x: 230, y: 250, w: 170, h: 50, title: 'таймер, раз в 5 мин', sub: ['watch, смотритель, бюджет'] },
     G: { id: 'G', kind: 'global', x: 432, y: 10, w: 124, h: 44, title: '~/.claude/longrun', sub: ['watch/, halt.json'] },
     D: { id: 'D', kind: 'human', x: 230, y: 10, w: 150, h: 44, title: 'Диалог osascript', sub: ['поверх всех окон'] },
   };
@@ -44,7 +44,7 @@ window.COURSE = (function () {
     { path: '_index/<cli sid>.json', what: 'CLI id -> проект и ключ сессии. Так resume под новым id находит старый каталог.', who: 'хук SessionStart' },
   ] };
   const GLOB = { label: '~/.claude/longrun/  (глобальное)', prefix: '~/.claude/longrun/', files: [
-    { path: 'watch/w1.json', what: 'Одна отложенная проверка: что проверять, кому и что сказать, когда истекает.', who: 'watch add; тик launchd обновляет' },
+    { path: 'watch/w1.json', what: 'Одна отложенная проверка: что проверять, кому и что сказать, когда истекает.', who: 'watch add; тик таймера обновляет' },
     { path: 'halt.json', what: 'Стоп для всех сессий всех проектов: кто, когда, почему.', who: 'halt / resume, смотритель бюджета' },
     { path: 'budget.json', what: 'Замеры 5-часового окна и план (20% в час).', who: 'смотритель раз в 5 минут' },
   ] };

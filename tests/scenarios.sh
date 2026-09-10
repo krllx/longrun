@@ -8,7 +8,8 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LR="$HERE/../skill/longrun/scripts/longrun"
 T="$(mktemp -d /tmp/longrun-scen.XXXXXX)"
-export CLAUDE_CONFIG_DIR="$T/claude" HOME="$T/home" LONGRUN_NO_LAUNCHD=1
+export CLAUDE_CONFIG_DIR="$T/claude" HOME="$T/home" LONGRUN_NO_TIMER=1
+export LONGRUN_DESKTOP_DIR="$T/home/desktop-sessions"
 export LONGRUN_NO_UI=1                     # never a real dialog or notification from a test
 mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/projects/-proj" "$CLAUDE_CONFIG_DIR/sessions"
 unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT CLAUDE_ENV_FILE
@@ -79,7 +80,7 @@ check "S4.2 and the shared file is one" "as $C notes --shared | grep -q 'PR C = 
 S4="$(as $C status)"; check "S4.3 status lists both by key with their own-note counts" "echo \"\$S4\" | grep 'cccccccc' | grep -q 'notes=1' && echo \"\$S4\" | grep 'dddddddd' | grep -q 'notes=1'"
 
 echo "== S5: the desktop app resumes a session under a NEW CLI id: notes and journal continue"
-DSK="$HOME/Library/Application Support/Claude/claude-code-sessions/x/y"; mkdir -p "$DSK"
+DSK="$LONGRUN_DESKTOP_DIR/x/y"; mkdir -p "$DSK"
 A2=aaaa000a-0000-4000-8000-00000000000a
 printf '{"sessionId":"local_desk-A","cliSessionId":"%s","priorCliSessionIds":["%s"],"cwd":"%s","title":"PR E: Шторка лотереи","isArchived":false,"lastActivityAt":1788779365881}' $A2 $A "$WT_E" > "$DSK/local_desk-A.json"
 cd "$WT_E"; D5="$(start $A2 "$WT_E" startup)"

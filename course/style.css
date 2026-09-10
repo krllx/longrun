@@ -2,14 +2,14 @@
   --bg: #fbfbf9; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc;
   --panel: #ffffff; --code-bg: #f3f2ee; --term-bg: #1f2125; --term-fg: #e8e8e3; --term-dim: #8d9099;
   --accent: #c8501e; --accent-soft: #fbe6dc; --ok: #2f7d4f; --ok-soft: #e0f1e6; --warn: #b7791f; --warn-soft: #fbf0d9;
-  --project: #2b6cb0; --project-soft: #e1ecf8; --session: #6b46c1; --session-soft: #ece6f8; --launchd: #2c7a7b; --launchd-soft: #e0f2f1; --human: #b83280; --human-soft: #fbe4f0;
+  --project: #2b6cb0; --project-soft: #e1ecf8; --session: #6b46c1; --session-soft: #ece6f8; --timer: #2c7a7b; --timer-soft: #e0f2f1; --human: #b83280; --human-soft: #fbe4f0;
   --radius: 12px;
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #16171a; --fg: #ececea; --muted: #a0a09a; --line: #2e2f34; --panel: #1e1f23; --code-bg: #26272c;
-    --accent-soft: #3a2519; --ok-soft: #1c3326; --warn-soft: #3a2f16; --project-soft: #1c2a3d; --session-soft: #2a2140; --launchd-soft: #163232; --human-soft: #3b1a2e; }
+    --accent-soft: #3a2519; --ok-soft: #1c3326; --warn-soft: #3a2f16; --project-soft: #1c2a3d; --session-soft: #2a2140; --timer-soft: #163232; --human-soft: #3b1a2e; }
 }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -122,7 +122,7 @@ figcaption { color: var(--muted); font-size: 0.88rem; line-height: 1.55; margin-
 .diagram .node.kind-project rect { stroke: var(--project); } .diagram .node.kind-project.on rect { fill: var(--project-soft); }
 .diagram .node.kind-session rect { stroke: var(--session); } .diagram .node.kind-session.on rect { fill: var(--session-soft); }
 .diagram .node.kind-own rect { stroke: var(--session); stroke-dasharray: 4 3; } .diagram .node.kind-own.on rect { fill: var(--session-soft); }
-.diagram .node.kind-launchd rect { stroke: var(--launchd); } .diagram .node.kind-launchd.on rect { fill: var(--launchd-soft); }
+.diagram .node.kind-timer rect { stroke: var(--timer); } .diagram .node.kind-timer.on rect { fill: var(--timer-soft); }
 .diagram .node.kind-human rect { stroke: var(--human); } .diagram .node.kind-human.on rect { fill: var(--human-soft); }
 .diagram .node.kind-global rect { stroke: var(--muted); stroke-dasharray: 4 3; } .diagram .node.kind-global.on rect { fill: var(--code-bg); }
 .diagram .node.dim { opacity: .35; }
@@ -154,7 +154,7 @@ figcaption { color: var(--muted); font-size: 0.88rem; line-height: 1.55; margin-
 .player .stepname small { color: var(--muted); font-weight: 400; margin-left: 8px; }
 .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.82rem; color: var(--muted); margin-top: 6px; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; border: 2px solid; }
-.legend .project i { border-color: var(--project); } .legend .session i { border-color: var(--session); } .legend .own i { border-color: var(--session); border-style: dashed; } .legend .launchd i { border-color: var(--launchd); } .legend .human i { border-color: var(--human); } .legend .global i { border-color: var(--muted); border-style: dashed; }
+.legend .project i { border-color: var(--project); } .legend .session i { border-color: var(--session); } .legend .own i { border-color: var(--session); border-style: dashed; } .legend .timer i { border-color: var(--timer); } .legend .human i { border-color: var(--human); } .legend .global i { border-color: var(--muted); border-style: dashed; }
 .cheat { columns: 2; column-gap: 26px; font-size: 0.9rem; margin: 20px 0; }
 .cheat pre { break-inside: avoid; }
 .next { margin-top: 34px; }

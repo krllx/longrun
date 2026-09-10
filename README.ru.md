@@ -38,7 +38,7 @@
 ```bash
 git clone https://github.com/<you>/longrun-skill && cd longrun-skill
 ./install.sh            # скилл, 11 хуков, CLI ~/.local/bin/longrun, MCP-сервер
-longrun watch install   # launchd-агент: watch и watcher раз в 5 минут
+longrun watch install   # таймер: watch и watcher раз в 5 минут
 cd ~/projects/shop && longrun init   # в папке, которую открываешь в Claude Code
 ```
 
@@ -88,7 +88,7 @@ longrun board assign T8 "PR 43: платежи"      # задача вместо
 
 ### 3. Реактивность: ждать, не тратя токены
 
-Watch - это детерминированная проверка, которую launchd гоняет раз в пять минут без модели. Когда условие выполнилось, сессия получает текст сообщением. Спящий ноутбук лишь откладывает проверку.
+Watch - это детерминированная проверка, которую таймер гоняет раз в пять минут без модели (launchd на macOS, systemd-таймер пользователя или cron на Linux). Когда условие выполнилось, сессия получает текст сообщением. Спящий ноутбук лишь откладывает проверку.
 
 ```bash
 longrun watch add --to "PR 43: платежи" --then "перебазируйся на main" -- pr-merged 42

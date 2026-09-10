@@ -4,7 +4,7 @@ English | [Русский](REFERENCE.ru.md)
 
 # longrun - reference
 
-Version 0.4.0. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop), macOS. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
+Version 0.5.0. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop) on macOS; the Linux half of the platform layer (the systemd and cron timers, the credentials file, the choice of dialog program) was verified on Ubuntu 24.04 with python3 3.12, where all four suites pass as well. See section 12. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
 
 ## 1. Entities
 
@@ -22,7 +22,7 @@ Version 0.4.0. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop), macO
 | New CLI id for which the app has not yet written metadata | its own key for now; on every turn the hook re-reads the app files, and as soon as the chain is visible it re-binds the session and shows its own notes once, marked "continued from CLI id ..." |
 | `source=fork`, the app file has `forkedFromSessionId` | its own key, the parent's own notes are copied once |
 
-App files: `~/Library/Application Support/Claude/claude-code-sessions/*/*/local_*.json`, fields `sessionId` (the stable id of the sidebar entry), `cliSessionId`, `priorCliSessionIds`, `forkedFromSessionId`, `title`, `cwd`, `isArchived`, `lastActivityAt`. As of 07.09.2026, in 193 of 210 entries `cliSessionId` differs from `sessionId`, and five have a `priorCliSessionIds` chain: the app id is its own, not a former CLI id.
+App files: `~/Library/Application Support/Claude/claude-code-sessions/*/*/local_*.json` (macOS; on Linux `$XDG_CONFIG_HOME/Claude/...`, `LONGRUN_DESKTOP_DIR` overrides both), fields `sessionId` (the stable id of the sidebar entry), `cliSessionId`, `priorCliSessionIds`, `forkedFromSessionId`, `title`, `cwd`, `isArchived`, `lastActivityAt`. As of 07.09.2026, in 193 of 210 entries `cliSessionId` differs from `sessionId`, and five have a `priorCliSessionIds` chain: the app id is its own, not a former CLI id.
 
 ## 2. Files and formats
 
@@ -53,7 +53,7 @@ The project key is the project directory path with non-letter characters replace
 
 ### Global `~/.claude/longrun/`
 
-`registry.json` (`links`: directory -> project directory), `config.json` (global overrides), `sessions/_index/<CLI id>.json` (`local`, `cwd`, `skey`, `at`), `watch/` (`w<N>.json`, `env.json` with a PATH snapshot, `state.json`, `run.log`, `launchd.log`).
+`registry.json` (`links`: directory -> project directory), `config.json` (global overrides), `sessions/_index/<CLI id>.json` (`local`, `cwd`, `skey`, `at`), `watch/` (`w<N>.json`, `env.json` with a PATH snapshot, `state.json`, `run.log`, and the scheduler's own log: `launchd.log`, `systemd.log` or `cron.log`).
 
 ## 3. Commands
 
@@ -93,17 +93,17 @@ Exit codes: 0 ok, 1 not found / check did not pass, 2 invalid arguments or budge
 | `at 'YYYY-MM-DD HH:MM' | HH:MM | +2h` | the moment has come (HH:MM in the past = tomorrow) |
 | `file /path` | the file exists |
 | `http URL [--expect TEXT] [--token-file ~/.tokens/x] [--auth-scheme OAuth]` | a 2xx response and, if given, it contains the text; 401/403/404 - a hard error, everything else - "not yet" |
-| `cmd '<shell>'` | exit code 0 = done, 1 = not yet, 3 = give up. Absolute paths, no aliases, no Touch ID or ssh: runs under launchd with the PATH captured from the shell at `add` |
+| `cmd '<shell>'` | exit code 0 = done, 1 = not yet, 3 = give up. Absolute paths, no aliases, no Touch ID or ssh: runs from the timer with the PATH captured from the shell at `add` |
 
-Under launchd the interpreter may have no access to `~/Documents` (TCC): reading such a project's config then yields an empty config, and the message file is written to the second inbox `~/.claude/longrun/sessions/<project>/<session>/inbox/`, which hooks read on a par with the project inbox (`delivered.how` = `session-inbox:`). A delivery error of any other kind is recorded in the watch entry (`delivered.how` = `error: ...`) and in a macOS notification, the state is saved, the tick carries on: the watch does not hang in pending and does not fire twice.
+Under the macOS timer the interpreter may have no access to `~/Documents` (TCC): reading such a project's config then yields an empty config, and the message file is written to the second inbox `~/.claude/longrun/sessions/<project>/<session>/inbox/`, which hooks read on a par with the project inbox (`delivered.how` = `session-inbox:`). A delivery error of any other kind is recorded in the watch entry (`delivered.how` = `error: ...`) and in a desktop notification, the state is saved, the tick carries on: the watch does not hang in pending and does not fire twice.
 
-Behaviour: the check runs immediately (`--no-test` disables this): already true - nothing is registered; a hard error - refusal. Then a tick every `--every` (no more often than the launchd tick, 5 minutes). Three hard errors in a row - state `broken`, the `--for` deadline passed - `expired`; in both cases the recipient gets one message. Delivery: the socket if the recipient is running; `claude -p --resume` with `--wake`; otherwise a file in the inbox. Plus a macOS notification. The entry stores the recipient's stable app id, so renaming and resume do not get in the way. Other subcommands: `ls [--all]`, `rm <id>`, `test -- <check>`, `sessions`, `run [--force] [id]`, `install [--every 5m]`, `uninstall`, `status`.
+Behaviour: the check runs immediately (`--no-test` disables this): already true - nothing is registered; a hard error - refusal. Then a tick every `--every` (no more often than the timer itself, 5 minutes). Three hard errors in a row - state `broken`, the `--for` deadline passed - `expired`; in both cases the recipient gets one message. Delivery: the socket if the recipient is running; `claude -p --resume` with `--wake`; otherwise a file in the inbox. Plus a desktop notification. The entry stores the recipient's stable app id, so renaming and resume do not get in the way. Other subcommands: `ls [--all]`, `rm <id>`, `test -- <check>`, `sessions`, `run [--force] [id]`, `install [--every 5m]`, `uninstall`, `status`.
 
 ### Service commands
 
 `longrun digest [--source startup|compact|...]` (what the hook prints), `longrun gc` (clean up now), `longrun hook <Event>` (called by hooks, JSON on stdin), `longrun help`, `longrun rules`, `longrun version`.
 
-`longrun onboard` prints a brief for the first conversation about the skill: what it does, the caveats, the machine's state (project, launchd, the auto-compact window in Claude Code versus the `autocompact_window` key) and the list of settings worth asking the user about, with their current values and meaning. The agent retells it in the user's language, asks one at a time and applies the answers via `config set`; `longrun onboard done` writes `onboarded_at` into the global config, after which the digest stops suggesting `longrun onboard`.
+`longrun onboard` prints a brief for the first conversation about the skill: what it does, the caveats, the machine's state (project, the timer, the auto-compact window in Claude Code versus the `autocompact_window` key) and the list of settings worth asking the user about, with their current values and meaning. The agent retells it in the user's language, asks one at a time and applies the answers via `config set`; `longrun onboard done` writes `onboarded_at` into the global config, after which the digest stops suggesting `longrun onboard`.
 
 `longrun config` shows the effective settings and where each comes from (default / global / project); `longrun config set KEY VALUE` writes to the project's `config.json`, with `--global` to `~/.claude/longrun/config.json`; `longrun config unset KEY [--global]` restores the default. The value type is checked against the key's default (integer, float, true/false), an unknown key is rejected.
 
@@ -159,6 +159,7 @@ Cost: the digest is 350-2000 tokens depending on how full it is; per turn - only
 | `name` | not set | project name instead of the folder name |
 | `pr_tool` | `auto` | what to query PR status with in `pr-merged`/`pr-status` checks: `gh` (GitHub CLI), `arc` (Arcadia), `auto` - by the folder the watch was registered from |
 | `arc_root` (global only) | `~/arcadia` | where to call `arc pr status` from, Arcadia only |
+| `watch_timer` (global only) | `auto` | what runs the watch tick: `launchd` (macOS), `systemd` (a user timer), `cron`, `none` (nothing runs it; `longrun watch run` is yours to schedule). `auto` - launchd on macOS, a systemd user timer on Linux, cron where there is no user systemd |
 | `autocompact_window` | 0 | where Claude Code auto-compacts, as set by `/autocompact N`; accepts `300k`, `1M`. 0 - follow Claude Code (the `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable, then `autoCompactWindow` in settings.json, then the model's window). The key is the user's intent: a hook cannot run `/autocompact`, so `onboard` compares it with settings.json and asks the user to type the command themselves |
 | `board_block_bytes`, `facts_block_bytes` | 900, 900 | room in the digest for the board and for unhandled facts |
 | `ctx_sample_every`, `ctx_warn_before` | 5, 50000 | how often to read the context size from the transcript; how many tokens before the auto-compact window to warn |
@@ -191,7 +192,7 @@ What changes in habits: `longrun add` without `--shared` now writes to own notes
 
 ## 9. Tests
 
-`bash tests/run.sh` - 145 regression checks on synthetic data without API calls: setup and worktree linking, shared and own notes (deduplication, budget, refusal at the boundary, prune, rm, replace), ledger and inbox, all hooks on real payload shapes, compaction snapshot and archive, HANDOFF, binding hooks to the session when the shell leaves for another directory, reminder cadence, the digest with every budget full, recall ranking, 20 parallel writers into both files, gc and ageing, migration of three old layouts, notes-only mode, send into a socket and into an inbox with delivery by all three hooks, resume by sidebar title, watch with a tick without launchd, the config command (set, unset, --global, type check, limits from settings), onboard (the brief, the hint in the digest, done), gh/arc selection for PR checks.
+`bash tests/run.sh` - 158 regression checks on synthetic data without API calls: setup and worktree linking, shared and own notes (deduplication, budget, refusal at the boundary, prune, rm, replace), ledger and inbox, all hooks on real payload shapes, compaction snapshot and archive, HANDOFF, binding hooks to the session when the shell leaves for another directory, reminder cadence, the digest with every budget full, recall ranking, 20 parallel writers into both files, gc and ageing, migration of three old layouts, notes-only mode, send into a socket and into an inbox with delivery by all three hooks, resume by sidebar title, watch with a tick and no timer, the config command (set, unset, --global, type check, limits from settings), onboard (the brief, the hint in the digest, done), gh/arc selection for PR checks, and the platform layer (which scheduler this OS gets, the cron schedule and crontab editing, the systemd units, which dialog program, where the OAuth credentials come from).
 
 `bash tests/scenarios.sh` - 30 checks in eight scenarios, one per task from the README: orientation of a new session, own notes through compaction, the shared notes delta per turn, two sessions in one folder, resume under a new CLI id (immediately and with delayed app metadata), `/clear`, fork, handing over work (inbox, socket, watch by name). Output of the last runs: [tests/last-run.txt](../tests/last-run.txt), [tests/last-run-scenarios.txt](../tests/last-run-scenarios.txt).
 
@@ -207,7 +208,7 @@ A live run on `claude -p` (costs money): [tests/e2e-claude.md](../tests/e2e-clau
 
 **Breaks on a Claude Code version change:** the transcript format (recall, the pre-compaction snapshot: fewer matches, a shorter snapshot); the socket and session registry format (`send` into a live session; the inbox queue will keep working); the app file format (the resume chain, name resolution from the sidebar; without them a session resumed in the app starts with empty own notes, the old ones stay on disk and in `recall`); hook event field names; the 10000-character hook output limit; `CLAUDE_ENV_FILE` (without it the session is determined by cwd, which breaks with two sessions in one folder); hot pickup of hooks (verified empirically, not promised in the docs).
 
-**Not covered:** subagents do not receive the digest; Windows was not tested (`fcntl`, launchd); `/rewind` does not roll back notes; on resume two digests remain in the history until the next compaction (Claude Code behaviour); two sessions that ran `/clear` in one folder within three minutes may bind to the wrong key.
+**Not covered:** subagents do not receive the digest; Windows was not tested (`fcntl`, unix sockets, none of the three schedulers); `/rewind` does not roll back notes; on resume two digests remain in the history until the next compaction (Claude Code behaviour); two sessions that ran `/clear` in one folder within three minutes may bind to the wrong key.
 
 **Simpler, if all you need is re-injection:** the line `@.longrun/NOTES.md` in `CLAUDE.md` arrives after compaction without hooks and without the hook output limit. Hooks are needed for own notes, the summary archive, the failure journal, HANDOFF, sessions and messages.
 
@@ -228,7 +229,7 @@ One session of the project takes the role, the others report through the board. 
 | `~/.claude/longrun/budget.json` | the watcher, `budget check`, `resume` | the last sample (`utilization`, `resets_at`, `elapsed_min`, `expected`, `ratio`, `breach`, `week`), 6 hours of history, `snoozed_until`, `halted_at`, `report`, `error` |
 | `~/.claude/longrun/budget-report-<ts>.md` | the watcher | the budget stop report: window, plan, time to reset, live sessions with flags |
 | `<session>/asks.json` | `ask`, the detached process `ask _wait` | questions `Q<n>`: q, options, default, free_text, state pending/answered/cancelled/expired/failed, answer, text, asked, answered, claimed (the asker is still waiting inline), delivered (socket / inbox:<file> / spool:<file>) |
-| `~/.claude/longrun/ask.log` | the detached dialog processes | osascript output and errors |
+| `~/.claude/longrun/ask.log` | the detached dialog processes | output and errors of osascript, zenity or kdialog |
 
 ### Commands
 
@@ -248,9 +249,9 @@ One session of the project takes the role, the others report through the board. 
 | `halt "why" [--project]`, `resume` | forbid tools in all sessions (or only in this project) / lift |
 | `interrupt WHO [--match TEXT] [--yes] [--why TEXT]` | the list of the session's Bash processes (children of its `claude` with the shell-snapshot wrapper); `--yes` SIGTERM, SIGKILL after 1.5 s, a line in the target's journal and a message to it |
 | `budget [status]` | the rule, the last sample, expected and ratio, pace from history, snooze, the last stop |
-| `budget check` | sample now (token from Keychain via `/usr/bin/security`, endpoint `api.anthropic.com/api/oauth/usage`), verdict and stop on breach |
+| `budget check` | sample now (the token from the Keychain via `/usr/bin/security` on macOS, from `~/.claude/.credentials.json` on Linux; endpoint `api.anthropic.com/api/oauth/usage`), verdict and stop on breach |
 | `budget on|off`, `budget set pace|factor|quiet|every N` | the global config `~/.claude/longrun/config.json` |
-| `ask "question" [--options "Yes,No"] [--default Yes] [--text] [--title T] [--wait SEC] [--expire MIN] [--icon note|caution|stop]` | a dialog above all windows (osascript from its own process, a sound); the answer inline if it arrived within `--wait` (default `ask_wait_sec`), otherwise `PENDING Q<n>` and the answer as a turn into the socket or inbox; lines `ANSWER|CANCELLED|EXPIRED|FAILED Q<n>` |
+| `ask "question" [--options "Yes,No"] [--default Yes] [--text] [--title T] [--wait SEC] [--expire MIN] [--icon note|caution|stop]` | a dialog above all windows (osascript from its own process with a sound on macOS, zenity or kdialog on Linux); the answer inline if it arrived within `--wait` (default `ask_wait_sec`), otherwise `PENDING Q<n>` and the answer as a turn into the socket or inbox; lines `ANSWER|CANCELLED|EXPIRED|FAILED Q<n>` |
 | `ask ls`, `ask answer Q3 "..."` | this session's questions; record an answer the human gave in chat when the dialog went missing |
 | `ask --ledger "..."` | the former HQ-layer `ask`: a ledger item on the user plus a report in the inbox, no dialog |
 | `mcp` | a stdio MCP server with the tools `ask` and `notify`; `install.sh` registers it as `longrun` in user scope (`claude mcp add --scope user longrun -- ~/.local/bin/longrun mcp`) |
@@ -269,13 +270,34 @@ Every tick after the checks, `stuck_scan`: for every project with an orchestrato
 
 ### The 5-hour window budget
 
-Every tick after `stuck_scan`: `budget_scan` takes a sample no more often than `budget_check_every`, computes the window start as `resets_at - 5h`, expected = plan x hours since the window start, breach = used >= `budget_factor` x expected, except for the first `budget_quiet_min` minutes. A breach with the rule enabled, no halt in force and no snooze: `halt.json` with `kind: budget` for all projects, a report to a file, into the socket or inbox of every orchestrator, a macOS notification and a `STOP` dialog with the buttons Keep stopped / Resume all (a detached process, the tick does not wait for it; Resume all = `resume` on behalf of the human). `longrun resume` after such a stop sets `snoozed_until = resets_at`. A source error (no token, a Keychain dialog unanswered for longer than 25 s, HTTP 401 on an expired token) is written to the watcher's journal once and causes no stop. The token is never written to any file. Substituting the source in tests: `LONGRUN_BUDGET_FIXTURE=<json file>`.
+Every tick after `stuck_scan`: `budget_scan` takes a sample no more often than `budget_check_every`, computes the window start as `resets_at - 5h`, expected = plan x hours since the window start, breach = used >= `budget_factor` x expected, except for the first `budget_quiet_min` minutes. A breach with the rule enabled, no halt in force and no snooze: `halt.json` with `kind: budget` for all projects, a report to a file, into the socket or inbox of every orchestrator, a desktop notification and a `STOP` dialog with the buttons Keep stopped / Resume all (a detached process, the tick does not wait for it; Resume all = `resume` on behalf of the human). `longrun resume` after such a stop sets `snoozed_until = resets_at`. A source error (no token, a Keychain dialog unanswered for longer than 25 s, a missing credentials file, HTTP 401 on an expired token) is written to the watcher's journal once and causes no stop. The token is never written to any file. Substituting the source in tests: `LONGRUN_BUDGET_FIXTURE=<json file>`.
 
 ### Dialog with the human
 
-`ask` shows the dialog via `osascript` from its own process: no Automation permission is needed, the window comes to the front by itself (verified 09.09.2026), Focus mode hides notifications, not windows; a `beep` before showing. Up to three options - `display dialog` buttons (a button named Cancel and Esc give `CANCELLED`), more - a `choose from list` list, `--text` adds a field. The question is registered in `asks.json` and the journal, the dialog is held by the detached process `longrun ask _wait Q<n>` (setsid, survives the end of the Bash and MCP call). The asker waits for the answer up to `--wait` and returns it inline; when that runs out it clears `claimed`, and the dialog process delivers the answer itself via `deliver_to`: the session's socket (the turn starts immediately, even mid-turn), otherwise the inbox, otherwise the spool. The race between them is closed by the shared session lock: the answer either goes inline or as a message, but is never lost. `--expire` (default 360 min) closes the dialog by itself (`giving up after`, for the list - the process timeout); an unanswered question in a project with HQ becomes a ledger item on the user.
+`ask` shows the dialog with the program the OS has (section 12). On macOS that is `osascript` from its own process: no Automation permission is needed, the window comes to the front by itself (verified 09.09.2026), Focus mode hides notifications, not windows; a `beep` before showing. Up to three options - `display dialog` buttons (a button named Cancel and Esc give `CANCELLED`), more - a `choose from list` list, `--text` adds a field. The question is registered in `asks.json` and the journal, the dialog is held by the detached process `longrun ask _wait Q<n>` (setsid, survives the end of the Bash and MCP call). The asker waits for the answer up to `--wait` and returns it inline; when that runs out it clears `claimed`, and the dialog process delivers the answer itself via `deliver_to`: the session's socket (the turn starts immediately, even mid-turn), otherwise the inbox, otherwise the spool. The race between them is closed by the shared session lock: the answer either goes inline or as a message, but is never lost. `--expire` (default 360 min) closes the dialog by itself (`giving up after`, for the list - the process timeout); an unanswered question in a project with HQ becomes a ledger item on the user.
 
 The MCP server `longrun mcp`: JSON-RPC over stdio, one line per message, no dependencies; the methods initialize, tools/list, tools/call, ping, anything else - error -32601; tool calls run in threads so that cancellation and a second call do not wait for the first. It finds the session by the parent pid in `~/.claude/sessions/<pid>.json` (the server is a child process of `claude`; walks up to six levels), the project by the session index, otherwise by cwd; without a project the dialog is shown inline without late delivery. Per the Claude Code docs: the default MCP tool timeout is about 28 hours, the idle timeout of a stdio server is 30 minutes without a reply, a call longer than 2 minutes in an interactive session goes to a background task; hence `wait_sec` is capped at 1500 s. During halt the `mcp__longrun__*` tools are not forbidden.
 
-Environment variables for tests: `LONGRUN_ASK_FIXTURE=<json {"button","text","state"}>` replaces the dialog, `LONGRUN_ASK_FIXTURE_DELAY=<sec>` delays the answer, `LONGRUN_NO_UI=1` forbids real dialogs and notifications (without a fixture `ask` answers `FAILED`).
+Environment variables for tests: `LONGRUN_ASK_FIXTURE=<json {"button","text","state"}>` replaces the dialog, `LONGRUN_ASK_FIXTURE_DELAY=<sec>` delays the answer, `LONGRUN_NO_UI=1` forbids real dialogs and notifications (without a fixture `ask` answers `FAILED`), `LONGRUN_NO_TIMER=1` forbids touching launchd, systemd and crontab, `LONGRUN_DESKTOP_DIR=<dir>` replaces the desktop app metadata directory.
 
+---
+
+## 12. Platform: macOS and Linux
+
+Everything except three things is plain POSIX python with no dependencies, and works the same on both. The three things are decided at runtime, once, by what the machine actually has.
+
+**The timer that runs the tick.** `longrun watch install` writes whichever the config key `watch_timer` says, and by default the one this OS provides:
+
+| OS | What is created | Where | State |
+|---|---|---|---|
+| macOS | a launchd agent `com.longrun.watch`, `StartInterval`, `RunAtLoad` | `~/Library/LaunchAgents/com.longrun.watch.plist` | `launchctl print gui/<uid>/com.longrun.watch` |
+| Linux with a systemd user manager | `longrun-watch.service` (`Type=oneshot`) plus `longrun-watch.timer` (`OnUnitActiveSec`, `OnBootSec=1min`), enabled with `--now` and started once immediately | `~/.config/systemd/user/` | `systemctl --user list-timers longrun-watch.timer`, `journalctl --user -u longrun-watch.service` |
+| Linux without one (a container, WSL1, a bare `su`) | one line in the user's crontab, marked with a comment so `uninstall` removes exactly it and nothing else | `crontab -l` | `longrun watch status` |
+
+A timer of any kind starts a check with an almost empty environment, which is why the PATH is snapshotted from a real shell into `watch/env.json` at `add` and `install` time; on Linux `DISPLAY`, `WAYLAND_DISPLAY`, `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` are snapshotted too, so a notification from the tick can still reach the desktop. Interval accuracy: launchd catches up missed intervals on wake, `OnUnitActiveSec` is measured on `CLOCK_BOOTTIME` and behaves the same, cron simply has a floor of one minute. A systemd **user** timer only runs while the user has a session: on a server without `loginctl enable-linger <user>` it stops at logout, and `watch install` says so when linger is off.
+
+**The dialog behind `ask` and `mcp__longrun__ask`.** macOS: `osascript`. Linux: `zenity`, else `kdialog`, and only when `DISPLAY` or `WAYLAND_DISPLAY` is set. Neither program can show buttons and a text field at once, so with `--text` on Linux the field wins and the button reported back is the default one. zenity maps the options onto `--question` (`--ok-label` is the default option, `--extra-button` the middle one), more than three onto `--list`, and honours `--expire` through its own `--timeout`; kdialog uses `--yesno` and `--menu`, and its expiry is the kill of the process. A machine with no dialog at all - a server, an ssh session, no zenity installed - is not an error state: `ask` returns `FAILED Q<n>` with the reason, and the skill tells the agent to ask in the chat instead.
+
+**Claude Code's own OAuth token** (read only by the budget rule, never printed or logged). macOS: the login keychain item `Claude Code-credentials` via `/usr/bin/security`, falling back to the file. Linux: `~/.claude/.credentials.json` (`$CLAUDE_CONFIG_DIR` is honoured), the file Claude Code writes there itself. Missing credentials disable the budget rule with one line in the watcher's log; nothing else changes.
+
+Smaller differences, all handled the same way: the desktop app's metadata lives under `~/Library/Application Support/Claude` on macOS and `$XDG_CONFIG_HOME/Claude` on Linux (no desktop app at all simply means no sidebar titles - addressing by session id keeps working); a spawned check gets `LANG=en_US.UTF-8` on macOS and `LANG=C.UTF-8` on Linux; the PATH snapshot also looks into `/home/linuxbrew/.linuxbrew/bin` and `/usr/local/sbin`.

@@ -32,7 +32,7 @@ We want one session per project that:
 | Orchestrator | an ordinary project session that took the role; one per project | lock `.longrun/orchestrator.json` (session, pid, since when, goal) |
 | Worker | any other project session; learns nothing new except `board take/done/block` | as today |
 | Board | goal + tasks with statuses todo / doing (who, since when) / blocked (why) / done (result) / dropped | `.longrun/board.json`, rendered into every session's digest |
-| Watcher | the launchd tick `longrun watch`, already exists; gets rules about snags and budget | as today |
+| Watcher | the timer tick `longrun watch`, already exists; gets rules about snags and budget | as today |
 | Asker | MCP server `longrun-ask`: a dialog in front of every window, the answer arrives in the session as a turn | new, separate binary |
 
 The lock is taken with `longrun orchestrate start --goal "..."`; a second session is refused with
@@ -262,7 +262,7 @@ python3 -c 'import subprocess,json,urllib.request;t=json.loads(subprocess.run(["
 | --- | --- | --- |
 | Context threshold | auto-compaction window 300k for all sessions, a warning 50k before it | the human runs `/autocompact 300k` once (saved in `autoCompactWindow`); the longrun hooks read the window from settings and from 250k ask the worker to write its notes, an event goes to the orchestrator |
 | Budget pace | 20% per hour, tolerance 1.5 | default values in the watcher config; the rule stays silent for the first 30 minutes of the window |
-| Dialog | `osascript` | `display dialog` and `choose from list`, activation through System Events, sound; nothing to install |
+| Dialog | `osascript` (macOS), `zenity` / `kdialog` (Linux) | `display dialog` and `choose from list`, activation through System Events, sound; nothing to install |
 | Who shows dialogs | any project session | the `longrun-ask` server is registered in user scope; the answer is returned to the asking session through its socket, the server finds the session by the parent pid in `~/.claude/sessions/<pid>.json` |
 | Where the orchestrator lives | the project's HQ folder | the lock in `.longrun/orchestrator.json` plus a mirror in `~/.claude/longrun/projects/<key>/`, because launchd under ~/Documents is unreliable (EPERM, see note n9) |
 | Automatic sources | none for now; wake only by `--wake-on` | a `fact` from the watcher lands in the inbox, a wake-up only on a `--wake-on` match; msngr and pr-comments stay in stage 4 |

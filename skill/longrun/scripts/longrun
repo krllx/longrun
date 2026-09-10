@@ -30,8 +30,12 @@ import sys
 import time
 import uuid
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 HOME = os.path.expanduser("~")
+IS_MAC = sys.platform == "darwin"
+IS_LINUX = sys.platform.startswith("linux")
+XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")
+UTF8_LOCALE = "en_US.UTF-8" if IS_MAC else "C.UTF-8"  # what a spawned check gets; C.UTF-8 is the one Linux always has
 GLOBAL_DIR = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "longrun")
 REGISTRY = os.path.join(GLOBAL_DIR, "registry.json")
 GLOBAL_CONFIG = os.path.join(GLOBAL_DIR, "config.json")
@@ -81,12 +85,14 @@ DEFAULTS = {
     "budget_check_every": 300,      # seconds between samples (the endpoint rate-limits)
     "ask_wait_sec": 90,             # `ask` blocks this long for the answer; a later answer arrives as a message
     "ask_expire_min": 360,          # the dialog closes by itself after this (0 = never)
-    "ask_beep": True,               # the dialog beeps once (a Focus mode silences notifications, not alerts)
+    "ask_beep": True,               # the dialog beeps once (macOS only: a Focus mode silences notifications, not alerts)
     "note_max_chars": 400,          # `add` refuses a longer line: one fact, one line
     "watch_ttl_days": 7,            # a watch that never fires is reported back and dropped after this (--for overrides)
     "watch_check_timeout_sec": 90,  # seconds per check; a hung gh/curl must not block the tick
     "watch_hard_errors": 3,         # consecutive hard errors (rc 3) before a watch is reported as broken
     "pr_tool": "auto",              # how pr-merged / pr-status ask: gh (GitHub CLI) | arc (Arcadia) | auto = by the folder
+    "watch_timer": "auto",          # what runs the watch tick: launchd | systemd (user timer) | cron | none.
+                                    # auto = launchd on macOS, else a systemd user timer, else cron
     # "hq": True/False              # opt-in multi-session layer (ledger, inbox, ask, report, status).
     #                               # Unset = inferred: on when a hub is linked or a ledger already exists.
 }
@@ -121,7 +127,7 @@ def die(msg, code=1):
 
 
 def read(path, default=""):
-    """Missing or unreadable (launchd has no TCC grant for ~/Documents) reads as empty: never crash on a read."""
+    """Missing or unreadable (the macOS timer has no TCC grant for ~/Documents) reads as empty: never crash."""
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
@@ -1425,7 +1431,7 @@ def my_tasks(b, skey):
 
 
 def orch_paths(store):
-    """The lock in the project, and its mirror outside ~/Documents (launchd cannot read the project there)."""
+    """The lock in the project, and its mirror outside ~/Documents (the macOS timer cannot read it there)."""
     return (os.path.join(store.local, "orchestrator.json"),
             os.path.join(GLOBAL_DIR, "projects", dir_key(store.local), "orchestrator.json"))
 
@@ -1879,7 +1885,7 @@ def cmd_halt(store, args):
     if me:
         journal(store, me, "* HALT: %s" % clip(text, 200))
     notify_orchestrator(store, "HALT by %s: %s. Every session's tool calls are refused until `longrun resume`." % (myname, text), wake=True, from_sid=me)
-    notify_mac("longrun HALT", clip(text, 200))
+    notify_user("longrun HALT", clip(text, 200))
     print("HALT set%s: %s. Tool calls in %s are refused with this reason; `longrun resume` lifts it." % (" for this project" if only else " (all projects)", text, "this project" if only else "every session"))
     return 0
 
@@ -1958,24 +1964,45 @@ USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 WINDOW_5H = 5 * 3600
 
 
-def keychain_token():
-    """Claude Code's OAuth access token from the login keychain item "Claude Code-credentials". Never printed,
-    never logged: it lives in this process only. -> (token, error)"""
+def credentials_file():
+    """Where Claude Code keeps its OAuth credentials as a file: the only store on Linux, and on macOS the
+    fallback when the keychain item is missing (it exists there too when the login keychain is unavailable)."""
+    return os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), ".credentials.json")
+
+
+def token_from_json(raw, where):
     try:
-        r = subprocess.run(["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
-                           capture_output=True, text=True, timeout=25)
-    except subprocess.TimeoutExpired:
-        return "", "keychain did not answer in 25 s (a Keychain dialog is probably waiting: click Always Allow)"
-    except OSError as e:
-        return "", "cannot run security: %s" % e
-    if r.returncode != 0:
-        return "", "keychain: %s" % clip((r.stderr or "").strip() or "item not found", 120)
-    try:
-        d = json.loads(r.stdout.strip())
-        tok = (d.get("claudeAiOauth") or {}).get("accessToken") or ""
+        tok = ((json.loads(raw) or {}).get("claudeAiOauth") or {}).get("accessToken") or ""
     except ValueError:
-        return "", "keychain item is not the JSON Claude Code writes"
-    return (tok, "") if tok else ("", "no accessToken in the keychain item")
+        return "", "%s is not the JSON Claude Code writes" % where
+    return (tok, "") if tok else ("", "no accessToken in %s" % where)
+
+
+def keychain_token():
+    """The OAuth access token, from the login keychain item "Claude Code-credentials" on macOS and from
+    ~/.claude/.credentials.json on Linux. Never printed, never logged: it lives in this process only.
+    -> (token, error)"""
+    if IS_MAC and os.path.exists("/usr/bin/security"):
+        try:
+            r = subprocess.run(["/usr/bin/security", "find-generic-password", "-s", "Claude Code-credentials", "-w"],
+                               capture_output=True, text=True, timeout=25)
+        except subprocess.TimeoutExpired:
+            return "", "keychain did not answer in 25 s (a Keychain dialog is probably waiting: click Always Allow)"
+        except OSError as e:
+            return "", "cannot run security: %s" % e
+        if r.returncode == 0:
+            tok, err = token_from_json(r.stdout.strip(), "the keychain item")
+            if tok:
+                return tok, ""
+            if not os.path.exists(credentials_file()):
+                return "", err
+        elif not os.path.exists(credentials_file()):
+            return "", "keychain: %s" % clip((r.stderr or "").strip() or "item not found", 120)
+    raw = read(credentials_file())
+    if not raw:
+        return "", ("no credentials: neither the keychain item \"Claude Code-credentials\" nor %s" % credentials_file()
+                    if IS_MAC else "%s does not exist (log in with `claude` first)" % credentials_file())
+    return token_from_json(raw, credentials_file())
 
 
 def parse_iso(s):
@@ -2084,7 +2111,7 @@ def budget_report(sample, v, cfg):
 
 def budget_scan(force=False, quiet=True):
     """One watcher step: sample the usage window (not more often than budget_check_every), judge the pace, and
-    on a breach halt everything, report to the orchestrators and the Mac. -> the state record."""
+    on a breach halt everything, report to the orchestrators and to the desktop. -> the state record."""
     cfg = budget_cfg()
     b = load_budget()
     if not cfg.get("budget_on", True) and not force:
@@ -2132,7 +2159,7 @@ def budget_scan(force=False, quiet=True):
                 sid = orch_sid(st, o)
                 if sid and orch_state(st, o) != "ended":
                     deliver_to(st, sid, report, wake=True, sender="longrun budget")
-        notify_mac("longrun BUDGET STOP", h["reason"])
+        notify_user("longrun BUDGET STOP", h["reason"])
         halt_dialog_spawn(h["reason"], rp)
         watch_log("BUDGET STOP: %s" % h["reason"])
         if not quiet:
@@ -2193,7 +2220,8 @@ def cmd_budget(store, args):
         if b.get("halted_at"):
             print("last budget stop: %s%s" % (b["halted_at"], (" (report %s)" % b["report"]) if b.get("report") else ""))
     else:
-        print("no sample yet: `longrun budget check` (reads the token from the keychain; the watcher does the same every tick)")
+        print("no sample yet: `longrun budget check` (reads Claude Code's own token: the keychain on macOS, %s on Linux;\n"
+              "the watcher does the same every tick)" % credentials_file())
     h = load_halt()
     if h.get("reason"):
         print("HALT in force since %s by %s: %s" % (h.get("at"), h.get("by"), h.get("reason")))
@@ -2239,11 +2267,40 @@ def pending_asks(store, sid):
     return [it for it in load_asks(store, sid)["items"] if it.get("state") == "pending"]
 
 
+def has_display():
+    """Is there a screen to put a dialog on. macOS always has one; on Linux a headless box (ssh, a container,
+    a server) has neither DISPLAY nor WAYLAND_DISPLAY, and asking there would hang or fail."""
+    if IS_MAC:
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def dialog_tool():
+    """The program that shows the dialog: osascript on macOS, zenity or kdialog on Linux. "" = nothing usable."""
+    if IS_MAC:
+        return "osascript" if shutil.which("osascript") else ""
+    if not has_display():
+        return ""
+    for t in ("zenity", "kdialog"):
+        if shutil.which(t):
+            return t
+    return ""
+
+
+def dialog_missing_reason():
+    if IS_MAC:
+        return "osascript is not on PATH"
+    if not has_display():
+        return "no desktop session here (DISPLAY and WAYLAND_DISPLAY are unset), a dialog has nowhere to appear"
+    return "no dialog program: install zenity (apt install zenity / dnf install zenity) or kdialog"
+
+
 def dialog_show(question, options, default="", free_text=False, title="", expire=0, beep=True, icon="note"):
-    """Block until the user answers a macOS dialog. osascript shows it from its own process: no Automation
-    permission, it comes to the front by itself (verified 2026-09-09), and a Focus mode silences notifications,
-    not this. Up to three options are buttons, more make a list; free_text adds a text field.
-    -> {"state": answered|cancelled|expired|failed, "button", "text", "error"}.
+    """Block until the user answers a desktop dialog: osascript on macOS, zenity or kdialog on Linux.
+    Up to three options are buttons, more make a list; free_text adds a text field (on Linux the text field
+    replaces the buttons: zenity and kdialog cannot show both).
+    -> {"state": answered|cancelled|expired|failed, "button", "text", "error"}. A machine with no dialog
+    program, or a headless one, fails cleanly and the caller asks in the chat instead.
     LONGRUN_ASK_FIXTURE=<file> replaces the dialog (tests): JSON {"button","text","state"}, served after
     LONGRUN_ASK_FIXTURE_DELAY seconds; LONGRUN_NO_UI without a fixture fails the dialog instead of showing one."""
     options = [str(o).strip() for o in (options or []) if str(o).strip()][:8] or ["OK"]
@@ -2254,12 +2311,98 @@ def dialog_show(question, options, default="", free_text=False, title="", expire
         if not d:
             return {"state": "failed", "button": "", "text": "", "error": "fixture missing"}
         return {"state": d.get("state") or "answered", "button": d.get("button") or options[-1], "text": d.get("text") or "", "error": ""}
-    if sys.platform != "darwin" or not shutil.which("osascript"):
-        return {"state": "failed", "button": "", "text": "", "error": "no osascript on this platform"}
-    icon = icon if icon in ASK_ICONS else "note"
+    tool = dialog_tool()
+    if not tool:
+        return {"state": "failed", "button": "", "text": "", "error": dialog_missing_reason()}
     title = clip(title or "longrun", 80)
     q = clip(question, 2000)
     expire = int(expire or 0)
+    if tool == "zenity":
+        return dialog_zenity(q, options, default, free_text, title, expire)
+    if tool == "kdialog":
+        return dialog_kdialog(q, options, default, free_text, title, expire)
+    return dialog_osascript(q, options, default, free_text, title, expire, beep, icon)
+
+
+def run_dialog(cmd, expire):
+    """Run a dialog program and hand back (rc, stdout). A dialog that outlives `expire` is killed: the
+    caller turns that into "expired", the same as a giving-up osascript dialog."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                           timeout=(expire + 60) if expire > 0 else None)
+    except subprocess.TimeoutExpired:
+        return None, ""
+    except Exception as e:
+        return -1, str(e)
+    return r.returncode, (r.stdout or "").rstrip("\n")
+
+
+def dialog_zenity(q, options, default, free_text, title, expire):
+    """zenity: --entry for free text, --list for more than three options, otherwise --question, whose OK
+    button is the default (the last option, as on macOS) and whose extra button is the middle one.
+    Timeout is zenity's own --timeout, which exits 5."""
+    cmd = ["zenity", "--title", title]
+    if expire > 0:
+        cmd += ["--timeout", str(expire)]
+    if free_text:
+        cmd += ["--entry", "--text", q, "--entry-text", ""]
+    elif len(options) > 3:
+        cmd += ["--list", "--text", q, "--column", "Option"] + options
+    else:
+        cmd += ["--question", "--text", q, "--ok-label", options[-1],
+                "--cancel-label", options[0] if len(options) > 1 else "Cancel"]
+        if len(options) == 3:
+            cmd += ["--extra-button", options[1]]
+    rc, out = run_dialog(cmd, expire)
+    if rc is None or rc == 5:
+        return {"state": "expired", "button": "", "text": "", "error": ""}
+    if rc == 0:
+        if free_text:
+            return {"state": "answered", "button": default or options[-1], "text": out, "error": ""}
+        return {"state": "answered", "button": out if len(options) > 3 else options[-1], "text": "", "error": ""}
+    if rc == 1:
+        if out and out in options:   # an extra button was pressed: zenity prints its label and still exits 1
+            return {"state": "answered", "button": out, "text": "", "error": ""}
+        if len(options) > 1 and not free_text and len(options) <= 3:
+            return {"state": "answered", "button": options[0], "text": "", "error": ""}  # the cancel button IS an option
+        return {"state": "cancelled", "button": "", "text": "", "error": ""}
+    return {"state": "failed", "button": "", "text": "", "error": clip(out, 200) or ("zenity exit %s" % rc)}
+
+
+def dialog_kdialog(q, options, default, free_text, title, expire):
+    """kdialog: --inputbox for free text, --yesno for two options, --menu for more. It has no timeout of
+    its own, so the expiry is the kill in run_dialog."""
+    cmd = ["kdialog", "--title", title]
+    if free_text:
+        cmd += ["--inputbox", q, ""]
+    elif len(options) == 1:
+        cmd += ["--msgbox", q]
+    elif len(options) == 2:
+        cmd += ["--yesno", q, "--yes-label", options[-1], "--no-label", options[0]]
+    else:
+        cmd += ["--menu", q]
+        for o in options:
+            cmd += [o, o]
+    rc, out = run_dialog(cmd, expire)
+    if rc is None:
+        return {"state": "expired", "button": "", "text": "", "error": ""}
+    if rc == 0:
+        if free_text:
+            return {"state": "answered", "button": default or options[-1], "text": out, "error": ""}
+        if len(options) > 2:
+            return {"state": "answered", "button": out or options[-1], "text": "", "error": ""}
+        return {"state": "answered", "button": options[-1], "text": "", "error": ""}
+    if rc == 1:
+        if len(options) == 2 and not free_text:
+            return {"state": "answered", "button": options[0], "text": "", "error": ""}
+        return {"state": "cancelled", "button": "", "text": "", "error": ""}
+    return {"state": "failed", "button": "", "text": "", "error": clip(out, 200) or ("kdialog exit %s" % rc)}
+
+
+def dialog_osascript(q, options, default, free_text, title, expire, beep, icon):
+    """osascript shows the dialog from its own process: no Automation permission, it comes to the front by
+    itself (verified 2026-09-09), and a Focus mode silences notifications, not this."""
+    icon = icon if icon in ASK_ICONS else "note"
     lines = ["on run argv", "set q to item 1 of argv", "set t to item 2 of argv", "set d to item 3 of argv", "set opts to items 4 thru -1 of argv", "activate"]
     if beep:
         lines.append("beep")
@@ -2525,14 +2668,15 @@ def halt_dialog_spawn(reason, report_path=""):
 # ----------------------------------------------------------------------------- the stdio MCP server (tools: ask, notify)
 MCP_TOOLS = [
     {"name": "ask",
-     "description": "Ask the user a question in a macOS dialog that comes to the front of every window (a Focus mode or Do Not Disturb "
-                    "does not hide it; it beeps once). Use it only when the work cannot continue without the user's decision or action "
+     "description": "Ask the user a question in a desktop dialog that comes to the front of every window (osascript on macOS, "
+                    "where a Focus mode does not hide it; zenity or kdialog on Linux). Use it only when the work cannot continue without the user's decision or action "
                     "right now: a choice between approaches, an approval, something only they can do (enter a credential, send a message, "
                     "click Allow). Not for routine questions you would ask in the chat, and never the same question twice: an unanswered "
                     "question stays open and its answer arrives later as a message from `longrun ask`. Up to 3 options become buttons, "
                     "more become a list; free_text adds a text field. Blocks up to wait_sec (default 90) and returns the answer; past that "
                     "it returns PENDING Q<n> and the answer comes as a message. CANCELLED means the user declined (Esc or Cancel): decide "
-                    "yourself or put the question on the board (`longrun board block`).",
+                    "yourself or put the question on the board (`longrun board block`). FAILED means this machine has no dialog "
+                    "(a server, an ssh session, no zenity installed): ask in the chat instead.",
      "inputSchema": {"type": "object", "required": ["question"], "properties": {
          "question": {"type": "string", "description": "The question, with the context the user needs to answer it (2-4 lines at most)."},
          "options": {"type": "array", "items": {"type": "string"}, "description": "Answer options, 1-8. Default [\"OK\"]. Avoid the word Cancel: it is treated as declining."},
@@ -2543,7 +2687,8 @@ MCP_TOOLS = [
          "expire_min": {"type": "integer", "description": "Minutes until the dialog closes by itself (default 360, 0 = never)."},
          "icon": {"type": "string", "enum": ["note", "caution", "stop"]}}}},
     {"name": "notify",
-     "description": "A macOS notification to the user, no answer expected. A Focus mode may hide it; for something the user must see now use `ask`.",
+     "description": "A desktop notification to the user, no answer expected (Notification Center on macOS, notify-send on Linux). "
+                    "A Focus mode, or a machine with no desktop, may swallow it; for something the user must see now use `ask`.",
      "inputSchema": {"type": "object", "required": ["text"], "properties": {
          "text": {"type": "string"}, "title": {"type": "string"}}}},
 ]
@@ -2627,7 +2772,7 @@ def mcp_serve(args):
             if name == "ask":
                 text = mcp_ask(c, a)
             elif name == "notify":
-                notify_mac(str(a.get("title") or "longrun"), str(a.get("text") or ""))
+                notify_user(str(a.get("title") or "longrun"), str(a.get("text") or ""))
                 text = "notified (a Focus mode may hide it; for something the user must see now use `ask`)"
             else:
                 reply(mid, error={"code": -32602, "message": "unknown tool %s" % name})
@@ -2936,7 +3081,7 @@ def deliver_inbox(store, sid):
 
 def session_spool(store, sid):
     """A second inbox inside the session's own dir (under ~/.claude): where a message lands when the project
-    inbox cannot be written, e.g. from the launchd tick, which has no TCC grant for a project under ~/Documents."""
+    inbox cannot be written, e.g. from the macOS tick, which has no TCC grant for a project under ~/Documents."""
     return os.path.join(session_dir(store, sid), "inbox")
 
 
@@ -3061,7 +3206,7 @@ WATCH_DIR = os.path.join(GLOBAL_DIR, "watch")
 WATCH_LABEL = "com.longrun.watch"
 WATCH_PLIST = os.path.join(HOME, "Library", "LaunchAgents", WATCH_LABEL + ".plist")
 WATCH_KINDS = ("pr-merged", "pr-status", "at", "cmd", "http", "file")
-WATCH_DEFAULT_EVERY = 300          # seconds; also the launchd StartInterval, so anything shorter is pointless
+WATCH_DEFAULT_EVERY = 300          # seconds; also the interval of the timer itself, so shorter is pointless
 WATCH_DEFAULT_TTL = 7 * 86400      # fallback for old records; the live value is config watch_ttl_days
 WATCH_CHECK_TIMEOUT = 90           # fallback; the live value is config watch_check_timeout_sec
 WATCH_HARD_ERRORS = 3              # fallback; the live value is config watch_hard_errors
@@ -3073,14 +3218,23 @@ def watch_cfg(key, fallback):
         return type(fallback)(load_config(None).get(key, fallback))
     except (TypeError, ValueError):
         return fallback
-DESKTOP_SESSIONS_GLOB = os.path.join(HOME, "Library", "Application Support", "Claude", "claude-code-sessions", "*", "*", "local_*.json")
+def desktop_dir():
+    """Where the Claude desktop app keeps its per-session metadata: the Electron user-data dir, which is
+    ~/Library/Application Support/Claude on macOS and $XDG_CONFIG_HOME/Claude on Linux. Missing (no desktop
+    app, or a terminal-only Linux box) simply means no sidebar names: everything else works.
+    LONGRUN_DESKTOP_DIR overrides it (tests, and an app installed somewhere unusual)."""
+    d = os.environ.get("LONGRUN_DESKTOP_DIR")
+    if d:
+        return d
+    base = os.path.join(HOME, "Library", "Application Support") if IS_MAC else XDG_CONFIG
+    return os.path.join(base, "Claude", "claude-code-sessions")
 
 
 def desktop_sessions():
     """Claude desktop app sessions as the sidebar shows them: title, the CLI session id behind it, cwd.
     Read from the app's own metadata files (verified 2026-09-07, desktop 2.1.260 on macOS)."""
     out = []
-    for f in glob.glob(DESKTOP_SESSIONS_GLOB):
+    for f in glob.glob(os.path.join(desktop_dir(), "*", "*", "local_*.json")):
         d = read_json(f)
         sid = d.get("cliSessionId")
         if sid and not d.get("isArchived"):
@@ -3200,7 +3354,7 @@ def session_cwd(sid, store=None):
 
 def session_store_for(sid, fallback=None):
     """The store a session's hooks bind to (recorded by SessionStart), so a message can be queued where
-    THAT session will look, even from another project or from the launchd tick with no cwd at all."""
+    THAT session will look, even from another project or from the tick, which has no cwd at all."""
     idx = read_json(session_index_path(sid))
     if idx.get("local") and os.path.isdir(idx["local"]):
         return Store(idx["local"])
@@ -3280,13 +3434,17 @@ def peer_for(sid):
 # --- checks. Each returns (rc, output): 0 = condition met, 1 = not yet, 3 = hard error (misconfigured,
 # discarded, unreachable in a way that will not fix itself). Deterministic code, no model involved.
 def watch_env():
-    """Environment for a check under launchd, which starts with an almost empty PATH: the snapshot taken
-    at install/add time from a real shell, plus HOME. Aliases (`ya`) do not exist here: absolute paths."""
+    """Environment for a check started by the timer, which has an almost empty PATH of its own (launchd and
+    cron both do): the snapshot taken at install/add time from a real shell, plus HOME. Shell aliases do not
+    exist here either: absolute paths."""
     saved = read_json(os.path.join(WATCH_DIR, "env.json"))
     path = saved.get("PATH") or os.environ.get("PATH") or "/usr/local/bin:/usr/bin:/bin"
     env = {"PATH": path, "HOME": HOME, "USER": os.environ.get("USER") or os.path.basename(HOME),
-           "LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8", "TMPDIR": os.environ.get("TMPDIR") or "/tmp",
+           "LANG": UTF8_LOCALE, "LC_ALL": UTF8_LOCALE, "TMPDIR": os.environ.get("TMPDIR") or "/tmp",
            "LONGRUN_WATCH": "1"}
+    for k in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
+        if saved.get(k):
+            env[k] = saved[k]
     for k in ("SSH_AUTH_SOCK",):
         if saved.get(k):
             env[k] = saved[k]
@@ -3295,17 +3453,20 @@ def watch_env():
 
 def snapshot_env():
     """Remember the PATH of the shell we are called from (minus per-session Claude plugin dirs and dirs that
-    do not exist) so the launchd tick finds gh, arc, python3, curl, claude the same way this shell does."""
+    do not exist) so the tick finds gh, arc, python3, curl, claude the same way this shell does."""
     cur = read_json(os.path.join(WATCH_DIR, "env.json"))
     parts = [p for p in (os.environ.get("PATH") or "").split(":") if p and os.path.isdir(p) and "local-agent-mode-sessions" not in p and "/plugins/cache/" not in p]
-    for p in ("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin", os.path.join(HOME, ".local", "bin")):
+    for p in ("/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/local/bin", "/usr/local/sbin",
+              "/usr/bin", "/bin", "/usr/sbin", "/sbin", os.path.join(HOME, ".local", "bin")):
         if p not in parts and os.path.isdir(p):
             parts.append(p)
     new = ":".join(parts)
     if len(new) >= len(cur.get("PATH") or ""):  # never replace a rich snapshot with a poorer one (a hook's PATH)
         cur["PATH"] = new
-    if os.environ.get("SSH_AUTH_SOCK"):
-        cur["SSH_AUTH_SOCK"] = os.environ["SSH_AUTH_SOCK"]
+    # a check (and notify-send) needs these to reach the desktop session on Linux; on macOS they are absent and skipped
+    for k in ("SSH_AUTH_SOCK", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
+        if os.environ.get(k):
+            cur[k] = os.environ[k]
     cur["at"] = ts()
     write_json(os.path.join(WATCH_DIR, "env.json"), cur)
     return cur
@@ -3523,7 +3684,7 @@ def parse_check(argv, cwd):
     return c
 
 
-# --- watch records: ~/.claude/longrun/watch/w<N>.json, one file each, global so one launchd job serves every project
+# --- watch records: ~/.claude/longrun/watch/w<N>.json, one file each, global so one timer serves every project
 def watch_lock():
     return Lock(WATCH_DIR)
 
@@ -3562,7 +3723,7 @@ def watch_log(line):
 
 # --- delivery: the only moment tokens are spent. Live session -> its inbox socket now; stopped ->
 # `claude -p --resume` when --wake was asked, else a file in the inbox its hooks read at its next
-# tool call, turn or start. Plus a macOS notification for the human.
+# tool call, turn or start. Plus a desktop notification for the human, where there is a desktop.
 def watch_message(w, kind, detail):
     to_name = w["to"].get("name") or sid8(w["to"]["sid"])
     head = {"fired": "CONDITION MET: %s" % w["check"]["desc"],
@@ -3582,12 +3743,19 @@ def watch_message(w, kind, detail):
     return "\n".join(lines)
 
 
-def notify_mac(title, text):
-    if sys.platform != "darwin" or not shutil.which("osascript") or os.environ.get("LONGRUN_NO_UI"):
+def notify_user(title, text):
+    """A desktop notification when the machine has one (osascript on macOS, notify-send on Linux). Best
+    effort by design: on a server there is nobody looking at the screen, and the message is delivered to
+    the session anyway."""
+    if os.environ.get("LONGRUN_NO_UI"):
         return
+    title, text = clip(title, 60), clip(text, 200)
     try:
-        subprocess.run(["osascript", "-e", 'display notification %s with title %s' % (json.dumps(clip(text, 200)), json.dumps(clip(title, 60)))],
-                       capture_output=True, timeout=10)
+        if IS_MAC and shutil.which("osascript"):
+            subprocess.run(["osascript", "-e", 'display notification %s with title %s' % (json.dumps(text), json.dumps(title))],
+                           capture_output=True, timeout=10)
+        elif has_display() and shutil.which("notify-send"):
+            subprocess.run(["notify-send", "-a", "longrun", title, text], capture_output=True, timeout=10)
     except Exception:
         pass
 
@@ -3636,7 +3804,7 @@ def watch_deliver(w, kind, detail):
             body = "# to %s (%s) from longrun watch %s (%s)\n\n%s\n" % (w["to"].get("name") or sid8(sid), addr, w["id"], ts(), text)
             err = ""
             for base, label in ((store.inbox, "inbox"), (session_spool(store, sid), "session-inbox")):
-                try:  # the project may live under ~/Documents, which launchd's python cannot touch (TCC)
+                try:  # the project may live under ~/Documents, which the macOS timer cannot touch (TCC)
                     os.makedirs(base, exist_ok=True)
                     write_atomic(os.path.join(base, name), body)
                     how = "%s:%s" % (label, name)
@@ -3651,7 +3819,7 @@ def watch_deliver(w, kind, detail):
         except Exception:
             pass
     if w.get("notify", True):
-        notify_mac("longrun watch %s: %s" % (w["id"], kind), "%s -> %s" % (w["check"]["desc"], w["to"].get("name") or sid8(sid)))
+        notify_user("longrun watch %s: %s" % (w["id"], kind), "%s -> %s" % (w["check"]["desc"], w["to"].get("name") or sid8(sid)))
     w["delivered"] = {"how": how, "at": ts(), "kind": kind}
     return how
 
@@ -3665,13 +3833,13 @@ def deliver_or_log(w, kind, out):
         err = "%s: %s" % (type(e).__name__, clip(str(e), 200))
         watch_log("%s delivery FAILED (%s): %s" % (w["id"], kind, err))
         w["delivered"] = {"how": "error: " + err, "at": ts(), "kind": kind}
-        notify_mac("longrun watch %s: delivery failed" % w["id"], err)
+        notify_user("longrun watch %s: delivery failed" % w["id"], err)
         return "error"
 
 
 def watch_tick(force=False, only=None, quiet=False):
     """One pass over every pending watch: run the due checks, deliver what fired, expire the old. Called by
-    launchd every WATCH_DEFAULT_EVERY seconds (missed intervals while the Mac slept run once on wake)."""
+    the timer every WATCH_DEFAULT_EVERY seconds (intervals missed while the machine slept run once on wake)."""
     os.makedirs(WATCH_DIR, exist_ok=True)
     lockf = open(os.path.join(WATCH_DIR, ".tick.lock"), "a+")
     try:
@@ -3788,12 +3956,148 @@ def stuck_scan():
     return n
 
 
-# --- launchd
+# --- the timer that runs the tick with no model involved: launchd on macOS, a systemd user timer on Linux,
+# --- cron where there is no user systemd (containers, WSL1, minimal images). Same tick, three schedulers.
+WATCH_UNIT = "longrun-watch"       # systemd user unit: longrun-watch.service + longrun-watch.timer
+CRON_MARK = "# longrun watch (managed by `longrun watch install` - do not edit this line or the next)"
+_SYSTEMD_OK = None
+
+
+def timer_log_path(kind):
+    return os.path.join(WATCH_DIR, {"launchd": "launchd.log", "systemd": "systemd.log"}.get(kind, "cron.log"))
+
+
+def timer_python():
+    """The interpreter the timer starts. /usr/bin/python3 is the one that survives a brew/pyenv upgrade;
+    a machine without it (NixOS, a venv-only box) gets the one running right now."""
+    return "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
+
+
+def timer_script():
+    return os.path.realpath(os.path.abspath(__file__))
+
+
+def systemctl(*args):
+    try:
+        r = subprocess.run(["systemctl", "--user"] + list(args), capture_output=True, text=True, timeout=30)
+        return r.returncode, (r.stdout or "") + (r.stderr or "")
+    except Exception as e:
+        return 1, str(e)
+
+
+def systemd_user_ok():
+    """Is there a systemd user manager we can talk to. Present on desktop Linux and on any distro with
+    logind; absent in most containers, in WSL1 and under a bare `su`, where cron takes over."""
+    global _SYSTEMD_OK
+    if _SYSTEMD_OK is None:
+        _SYSTEMD_OK = bool(IS_LINUX and shutil.which("systemctl") and systemctl("show-environment")[0] == 0)
+    return _SYSTEMD_OK
+
+
+def timer_kind():
+    """Which scheduler this machine uses. Config watch_timer pins it (launchd|systemd|cron|none);
+    auto = launchd on macOS, a systemd user timer on Linux, cron when there is no user systemd."""
+    want = str(load_config(None).get("watch_timer") or "auto").strip().lower()
+    if want in ("launchd", "systemd", "cron", "none"):
+        return want
+    if IS_MAC:
+        return "launchd"
+    if systemd_user_ok():
+        return "systemd"
+    if shutil.which("crontab"):
+        return "cron"
+    return "none"
+
+
+def timer_name(kind=None):
+    return {"launchd": "launchd agent", "systemd": "systemd user timer", "cron": "cron job",
+            "none": "no scheduler on this machine"}[kind or timer_kind()]
+
+
+def timer_target(kind=None):
+    """What the user can look at to see the timer for themselves."""
+    kind = kind or timer_kind()
+    if kind == "launchd":
+        return WATCH_PLIST
+    if kind == "systemd":
+        return os.path.join(systemd_dir(), WATCH_UNIT + ".timer")
+    if kind == "cron":
+        return "crontab of %s" % (os.environ.get("USER") or os.path.basename(HOME))
+    return "-"
+
+
+def timer_installed(kind=None):
+    kind = kind or timer_kind()
+    if kind == "launchd":
+        return os.path.exists(WATCH_PLIST)
+    if kind == "systemd":
+        return os.path.exists(os.path.join(systemd_dir(), WATCH_UNIT + ".timer"))
+    if kind == "cron":
+        return CRON_MARK in crontab_read()
+    return False
+
+
+def timer_state(kind=None):
+    kind = kind or timer_kind()
+    if kind == "launchd":
+        return launchd_state()
+    if kind == "systemd":
+        return systemd_state()
+    if kind == "cron":
+        for line in crontab_read().splitlines():
+            if line.strip() and not line.startswith("#") and timer_script() in line:
+                return "in crontab: %s" % line.split(timer_python())[0].strip()
+        return "not in crontab"
+    return "no scheduler"
+
+
+def timer_install(interval=None, quiet=False):
+    interval = int(interval or WATCH_DEFAULT_EVERY)
+    if os.environ.get("LONGRUN_NO_TIMER") or os.environ.get("LONGRUN_NO_LAUNCHD"):
+        die("LONGRUN_NO_TIMER is set (tests / sandbox): not touching the scheduler", 1)
+    kind = timer_kind()
+    if kind == "none":
+        die("no scheduler here: no launchd (macOS), no systemd user manager, no crontab. Run `longrun watch run`\n"
+            "from whatever this machine does have, every few minutes; everything else works as usual.", 1)
+    os.makedirs(WATCH_DIR, exist_ok=True)
+    snapshot_env()
+    if kind == "launchd":
+        return launchd_install(interval, quiet)
+    if kind == "systemd":
+        return systemd_install(interval, quiet)
+    return cron_install(interval, quiet)
+
+
+def timer_uninstall():
+    kind = timer_kind()
+    if kind == "launchd":
+        launchctl("bootout", "%s/%s" % (launchd_domain(), WATCH_LABEL))
+        if os.path.exists(WATCH_PLIST):
+            os.remove(WATCH_PLIST)
+    elif kind == "systemd":
+        systemctl("disable", "--now", WATCH_UNIT + ".timer")
+        for f in (WATCH_UNIT + ".timer", WATCH_UNIT + ".service"):
+            fp = os.path.join(systemd_dir(), f)
+            if os.path.exists(fp):
+                os.remove(fp)
+        systemctl("daemon-reload")
+    elif kind == "cron":
+        cron_write("\n".join(cron_strip(crontab_read())))
+    else:
+        print("nothing to remove: watch_timer is none, so no scheduler was ever installed")
+        return 0
+    print("removed the %s; pending watches are kept in %s and will not be checked until `longrun watch install`" % (
+        timer_name(kind), WATCH_DIR))
+    return 0
+
+
+# --- launchd (macOS)
+WATCH_LABEL = "com.longrun.watch"
+
+
 def launchd_plist_text(interval):
-    py = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
-    me = os.path.realpath(os.path.abspath(__file__))
-    env = watch_env()
-    log = os.path.join(WATCH_DIR, "launchd.log")
+    py, me, env = timer_python(), timer_script(), watch_env()
+    log = timer_log_path("launchd")
 
     def esc(s):
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -3818,13 +4122,13 @@ def launchd_plist_text(interval):
   <dict>
     <key>PATH</key><string>%s</string>
     <key>HOME</key><string>%s</string>
-    <key>LANG</key><string>en_US.UTF-8</string>
+    <key>LANG</key><string>%s</string>
   </dict>
   <key>StandardOutPath</key><string>%s</string>
   <key>StandardErrorPath</key><string>%s</string>
 </dict>
 </plist>
-""" % (WATCH_LABEL, esc(py), esc(me), int(interval), esc(env["PATH"]), esc(HOME), esc(log), esc(log))
+""" % (WATCH_LABEL, esc(py), esc(me), int(interval), esc(env["PATH"]), esc(HOME), UTF8_LOCALE, esc(log), esc(log))
 
 
 def launchctl(*args):
@@ -3839,10 +4143,6 @@ def launchd_domain():
     return "gui/%d" % os.getuid()
 
 
-def launchd_installed():
-    return os.path.exists(WATCH_PLIST)
-
-
 def launchd_state():
     rc, out = launchctl("print", "%s/%s" % (launchd_domain(), WATCH_LABEL))
     if rc != 0:
@@ -3852,13 +4152,7 @@ def launchd_state():
     return "%s%s" % (st.group(1) if st else "loaded", (", last exit " + lx.group(1).strip()) if lx else "")
 
 
-def watch_install(interval=WATCH_DEFAULT_EVERY, quiet=False):
-    if os.environ.get("LONGRUN_NO_LAUNCHD"):
-        die("LONGRUN_NO_LAUNCHD is set (tests / sandbox): not touching launchd", 1)
-    if sys.platform != "darwin":
-        die("the launchd tick is macOS only; on other systems run `longrun watch run` from cron", 1)
-    os.makedirs(WATCH_DIR, exist_ok=True)
-    snapshot_env()
+def launchd_install(interval, quiet):
     os.makedirs(os.path.dirname(WATCH_PLIST), exist_ok=True)
     write_atomic(WATCH_PLIST, launchd_plist_text(interval))
     launchctl("bootout", "%s/%s" % (launchd_domain(), WATCH_LABEL))
@@ -3867,15 +4161,147 @@ def watch_install(interval=WATCH_DEFAULT_EVERY, quiet=False):
         die("launchctl bootstrap failed: %s\nplist written to %s" % (out.strip(), WATCH_PLIST), 1)
     if not quiet:
         print("installed %s (%s): every %s, %s" % (WATCH_LABEL, WATCH_PLIST, fmt_duration(interval), launchd_state()))
-        print("log: %s" % os.path.join(WATCH_DIR, "launchd.log"))
+        print("log: %s" % timer_log_path("launchd"))
     return 0
 
 
-def watch_uninstall():
-    launchctl("bootout", "%s/%s" % (launchd_domain(), WATCH_LABEL))
-    if os.path.exists(WATCH_PLIST):
-        os.remove(WATCH_PLIST)
-    print("removed %s; pending watches are kept in %s and will not be checked until `longrun watch install`" % (WATCH_LABEL, WATCH_DIR))
+# --- systemd user timer (Linux)
+def systemd_dir():
+    return os.path.join(XDG_CONFIG, "systemd", "user")
+
+
+def systemd_unit_texts(interval):
+    """A oneshot service plus a monotonic timer. OnUnitActiveSec is measured on CLOCK_BOOTTIME, so a laptop
+    that slept through several intervals fires once on wake, the way launchd catches up."""
+    def esc(s):
+        return str(s).replace("%", "%%")   # % starts a specifier in a unit file
+    log = timer_log_path("systemd")
+    service = """[Unit]
+Description=longrun watch tick: deferred checks for Claude Code sessions
+
+[Service]
+Type=oneshot
+Environment=PATH=%s
+Environment=LANG=%s
+Environment=LC_ALL=%s
+ExecStart=%s %s watch run --quiet
+StandardOutput=append:%s
+StandardError=append:%s
+""" % (esc(watch_env()["PATH"]), UTF8_LOCALE, UTF8_LOCALE, esc(timer_python()), esc(timer_script()), esc(log), esc(log))
+    timer = """[Unit]
+Description=longrun watch tick every %s
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=%d
+AccuracySec=30s
+Unit=%s.service
+
+[Install]
+WantedBy=timers.target
+""" % (fmt_duration(interval), int(interval), WATCH_UNIT)
+    return service, timer
+
+
+def systemd_state():
+    rc, out = systemctl("is-active", WATCH_UNIT + ".timer")
+    st = (out.strip().splitlines() or ["unknown"])[0]
+    rc2, res = systemctl("show", WATCH_UNIT + ".service", "-p", "Result", "--value")
+    res = res.strip()
+    return "%s%s" % (st, (", last run %s" % res) if res and res != "success" else "")
+
+
+def linger_hint():
+    """A user timer only runs while the user has a session, unless linger is on. On a laptop you are logged
+    in anyway; on a server you are not, and the tick would silently stop when you log out."""
+    user = os.environ.get("USER") or os.path.basename(HOME)
+    try:
+        r = subprocess.run(["loginctl", "show-user", user, "-p", "Linger", "--value"],
+                           capture_output=True, text=True, timeout=15)
+        if r.returncode == 0 and r.stdout.strip() == "yes":
+            return ""
+    except Exception:
+        return ""
+    return ("note: linger is off, so the timer only runs while you are logged in. To keep it ticking after "
+            "logout: sudo loginctl enable-linger %s" % user)
+
+
+def systemd_install(interval, quiet):
+    os.makedirs(systemd_dir(), exist_ok=True)
+    service, timer = systemd_unit_texts(interval)
+    write_atomic(os.path.join(systemd_dir(), WATCH_UNIT + ".service"), service)
+    write_atomic(os.path.join(systemd_dir(), WATCH_UNIT + ".timer"), timer)
+    systemctl("daemon-reload")
+    rc, out = systemctl("enable", "--now", WATCH_UNIT + ".timer")
+    if rc != 0:
+        die("systemctl --user enable failed: %s\nunits written to %s" % (out.strip(), systemd_dir()), 1)
+    systemctl("start", WATCH_UNIT + ".service")   # one tick right away, the way launchd RunAtLoad does it
+    if not quiet:
+        print("installed %s.timer (%s): every %s, %s" % (WATCH_UNIT, systemd_dir(), fmt_duration(interval), systemd_state()))
+        print("log: %s   (also `journalctl --user -u %s.service`)" % (timer_log_path("systemd"), WATCH_UNIT))
+        hint = linger_hint()
+        if hint:
+            print(hint)
+    return 0
+
+
+# --- cron (Linux without a user systemd)
+def crontab_read():
+    try:
+        r = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=20)
+    except Exception:
+        return ""
+    return r.stdout if r.returncode == 0 else ""
+
+
+def cron_write(text):
+    text = (text or "").strip("\n")
+    try:
+        r = subprocess.run(["crontab", "-"], input=(text + "\n") if text else "\n",
+                           capture_output=True, text=True, timeout=20)
+    except Exception as e:
+        return 1, str(e)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+def cron_strip(text):
+    """Our two lines out of a crontab, leaving everything else byte for byte."""
+    out, skip = [], False
+    for line in (text or "").splitlines():
+        if line.strip() == CRON_MARK:
+            skip = True
+            continue
+        if skip:
+            skip = False
+            continue
+        out.append(line)
+    return out
+
+
+def cron_spec(interval):
+    """Seconds -> a crontab schedule. Cron's floor is a minute, so anything shorter becomes every minute."""
+    m = max(1, int(round(interval / 60.0)))
+    if m <= 59:
+        return "*/%d * * * *" % m
+    return "0 */%d * * *" % max(1, min(23, int(round(m / 60.0))))
+
+
+def cron_line(interval):
+    log = timer_log_path("cron").replace("%", "\\%")   # % means newline-on-stdin to cron
+    return "%s %s %s watch run --quiet >> %s 2>&1" % (cron_spec(interval), timer_python(), timer_script(), log)
+
+
+def cron_install(interval, quiet):
+    if not shutil.which("crontab"):
+        die("crontab is not installed: `longrun config set watch_timer none --global` and run `longrun watch run` yourself", 1)
+    lines = cron_strip(crontab_read()) + [CRON_MARK, cron_line(interval)]
+    rc, out = cron_write("\n".join(lines))
+    if rc != 0:
+        die("crontab refused the job: %s" % clip(out.strip(), 200), 1)
+    if not quiet:
+        print("installed a cron job (%s): %s" % (timer_target("cron"), cron_spec(interval)))
+        print("log: %s" % timer_log_path("cron"))
+        print("note: cron gives a job an almost empty environment; checks use the PATH snapshot in %s" % os.path.join(WATCH_DIR, "env.json"))
     return 0
 
 
@@ -3891,7 +4317,7 @@ WATCH_HELP = """longrun watch - register a check that runs on a timer with NO mo
              file /absolute/path                 the file appears
              http URL [--expect TEXT] [--token-file ~/.tokens/x] [--auth-scheme OAuth]
              cmd '<shell>'                       exit 0 = done, 1 = not yet, 3 = give up. Absolute paths, no aliases,
-                                                 no Touch ID / ssh prompts: it runs under launchd with a copied PATH.
+                                                 no Touch ID / ssh prompts: it runs from the timer with a copied PATH.
       --then text is delivered to WHO as a user turn when the check passes (or when the watch breaks or expires).
       --wake  if WHO is not running, start it headless (`claude -p --resume`) instead of queueing to its inbox.
       The check runs once right away: already true -> nothing is registered, act now; hard error -> refused.
@@ -3899,9 +4325,10 @@ WATCH_HELP = """longrun watch - register a check that runs on a timer with NO mo
   watch rm ID              cancel
   watch test -- CHECK      run a check once, print rc and output (0 done, 1 not yet, 3 hard error)
   watch sessions           who can be a target: title, id, running or not
-  watch run [--force] [ID] one tick now (what launchd does every 5 minutes)
-  watch install [--every 5m] | uninstall | status    the launchd agent (%s)
-""" % WATCH_LABEL
+  watch run [--force] [ID] one tick now (what the timer does every 5 minutes)
+  watch install [--every 5m] | uninstall | status    the timer that runs the tick: a launchd agent on macOS,
+                          a systemd user timer on Linux, a cron job where there is no user systemd
+"""
 
 
 def cmd_watch(args):
@@ -3958,12 +4385,13 @@ def cmd_watch(args):
         every = WATCH_DEFAULT_EVERY
         if "--every" in rest:
             every = parse_duration(rest[rest.index("--every") + 1])
-        return watch_install(every)
+        return timer_install(every)
     if sub == "uninstall":
-        return watch_uninstall()
+        return timer_uninstall()
     if sub == "status":
         pend = [w for w in load_watches() if w.get("state") == "pending"]
-        print("launchd: %s (%s)" % (launchd_state() if launchd_installed() else "NOT INSTALLED - run `longrun watch install`", WATCH_PLIST))
+        kind = timer_kind()
+        print("%s: %s (%s)" % (timer_name(kind), timer_state(kind) if timer_installed(kind) else "NOT INSTALLED - run `longrun watch install`", timer_target(kind)))
         st = read_json(os.path.join(WATCH_DIR, "state.json"))
         print("last tick: %s (%s check(s) run)   pending: %d   dir: %s   PATH snapshot: %s" % (
             st.get("last_tick", "never"), st.get("last_tick_run", 0), len(pend), WATCH_DIR, read_json(os.path.join(WATCH_DIR, "env.json")).get("at", "-")))
@@ -4042,16 +4470,17 @@ def watch_add(store, args):
     path = "socket (running now)" if target["live"] else ("claude -p --resume (--wake)" if opts["wake"] else "inbox file, read at its next tool call, turn or start")
     print("registered %s: %s" % (wid, check["desc"]))
     print("  to:       %s [%s]  delivery when it fires: %s" % (target["name"], sid8(target["sid"]), path))
-    print("  every:    %s (launchd tick is %s; a Mac asleep catches up on wake)   expires: %s" % (fmt_duration(w["every"]), fmt_duration(WATCH_DEFAULT_EVERY), fmt_epoch(w["expires"])))
+    print("  every:    %s (the tick runs every %s; a machine that slept catches up on wake)   expires: %s" % (
+        fmt_duration(w["every"]), fmt_duration(WATCH_DEFAULT_EVERY), fmt_epoch(w["expires"])))
     print("  then:     %s" % clip(w["then"], 200))
     if opts["test"]:
         print("  first run: not yet (%s)" % clip(out, 160))
-    if not launchd_installed() and not os.environ.get("LONGRUN_NO_LAUNCHD"):
+    if not timer_installed() and not (os.environ.get("LONGRUN_NO_TIMER") or os.environ.get("LONGRUN_NO_LAUNCHD")):
         try:
-            watch_install(quiet=True)
-            print("  launchd:  %s was not installed; installed it now (%s)" % (WATCH_LABEL, launchd_state()))
+            timer_install(quiet=True)
+            print("  timer:    the %s was not installed; installed it now (%s)" % (timer_name(), timer_state()))
         except SystemExit:
-            print("  launchd:  NOT INSTALLED and auto-install failed: run `longrun watch install` or the watch will never be checked")
+            print("  timer:    NOT INSTALLED and auto-install failed: run `longrun watch install` or the watch will never be checked")
     return 0
 
 
@@ -4086,7 +4515,7 @@ def watch_block(sid, budget=700):
     mine = [w for w in load_watches() if w.get("state") == "pending" and w["to"]["sid"] == sid]
     if not mine:
         return ""
-    lines = ["WATCH %d pending for this session (checked by launchd, no tokens spent; you will get a message when one fires):" % len(mine)]
+    lines = ["WATCH %d pending for this session (checked on a timer, no tokens spent; you will get a message when one fires):" % len(mine)]
     for w in mine:
         lines.append("  %s %s every %s, next %s -> then: %s" % (w["id"], w["check"]["desc"], fmt_duration(w["every"]), fmt_epoch(w.get("next"))[5:], clip(w["then"], 90)))
     text = "\n".join(lines)
@@ -5223,6 +5652,10 @@ def config_coerce(key, raw):
         if raw.strip().lower() not in ("auto", "gh", "arc"):
             die("pr_tool takes auto, gh or arc", 2)
         return raw.strip().lower()
+    if key == "watch_timer":
+        if raw.strip().lower() not in ("auto", "launchd", "systemd", "cron", "none"):
+            die("watch_timer takes auto, launchd, systemd, cron or none", 2)
+        return raw.strip().lower()
     if kind is bool:
         v = raw.strip().lower()
         if v in ("1", "true", "on", "yes"):
@@ -5291,6 +5724,8 @@ ONBOARD_SETTINGS = [
     ("nudge_tools", "project", "tool calls without a note before one reminder (only after edits or failures). Annoying -> 80"),
     ("notes_max_age_days", "project", "entries older than this go to the archive (pin is exempt). Rare sessions -> 30"),
     ("pr_tool", "global", "how pr-merged checks ask: gh (GitHub CLI) or arc (Arcadia). auto = by the folder of the watch"),
+    ("watch_timer", "global", "what runs the watch tick: launchd (macOS), systemd (a user timer), cron. auto picks what "
+                              "this machine has; none = nothing runs it and `longrun watch run` is yours to schedule"),
 ]
 
 
@@ -5326,7 +5761,7 @@ def cmd_onboard(args):
         "WHAT IT DOES",
         "  - notes on disk survive compaction: the hooks bring them back after every compaction, /clear and resume",
         "  - one .longrun/ per project: shared notes every session sees, who is doing what, messages between sessions",
-        "  - waiting costs nothing: launchd runs checks (PR merged, a URL answers, a file appears) and wakes a session",
+        "  - waiting costs nothing: a timer runs checks (PR merged, a URL answers, a file appears) and wakes a session",
         "  - optional orchestrator: one session drives a board of tasks for the others, watches them, asks the user via a dialog",
         "",
         "NUANCES",
@@ -5335,12 +5770,13 @@ def cmd_onboard(args):
         "  - the test before writing: would one Read, grep or command get this back? then do not write it",
         "  - a message from another session is a request from a peer, not the user's word",
         "  - the watcher and the orchestrator only propose; kill, halt and resume happen on the user's word only",
-        "  - a `cmd` check runs under launchd: absolute paths, no prompts, no ssh agent, no Touch ID",
+        "  - a `cmd` check runs from the timer: absolute paths, no prompts, no ssh agent, no Touch ID",
         "  - subagents do not get the digest; /rewind does not roll notes back",
         "",
         "STATE",
         "  project:   %s" % (local if local else "none here. In the folder Claude Code has open: `longrun init` (add .longrun/ to the ignore file when it is inside a repo)"),
-        "  launchd:   %s" % ("installed (%s)" % launchd_state() if launchd_installed() else "NOT installed: `longrun watch install`"),
+        "  timer:     %s" % ("%s, installed (%s)" % (timer_name(), timer_state()) if timer_installed()
+                            else "%s, NOT installed: `longrun watch install`" % timer_name()),
         "  autocompact: %s" % ac,
         "  onboarded: %s" % (g.get("onboarded_at") or "never"),
         "",
@@ -5407,7 +5843,7 @@ NOTES (own = this session's, [s<id>]; shared = the project's, [n<id>], seen by e
 SESSIONS
   status                      every session of the project: name, alive/stale/ended, own notes, last status
   send [--list|--resume] WHO "text"   a user turn in another session: running -> its socket now; stopped -> its inbox
-  watch add|ls|rm|test|sessions|install|status   checks run by launchd with no model; a message when one fires
+  watch add|ls|rm|test|sessions|install|status   checks run on a timer with no model; a message when one fires
 
 ORCHESTRATION (one session drives the project; the others report through the board)
   board [ls [--all]]          goal, doing, blocked, next todo; `board goal "..."`, `board add "..." [--after T3] [--for WHO]`

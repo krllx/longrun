@@ -6,7 +6,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LR="$HERE/../skill/longrun/scripts/longrun"
 T="$(mktemp -d /tmp/longrun-ask.XXXXXX)"
-export CLAUDE_CONFIG_DIR="$T/claude" HOME="$T/home" LONGRUN_NO_LAUNCHD=1 LONGRUN_NO_UI=1
+export CLAUDE_CONFIG_DIR="$T/claude" HOME="$T/home" LONGRUN_NO_TIMER=1 LONGRUN_NO_UI=1
 mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/sessions"
 unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT CLAUDE_ENV_FILE LONGRUN_ASK_FIXTURE LONGRUN_ASK_FIXTURE_DELAY
 PASS=0; FAIL=0
