@@ -1,8 +1,8 @@
-# Prompts for the README banner (hero.png)
+# Prompts for the README banner
 
-Target for all three: a wide banner, 1600 x 600 px (aspect 8:3), PNG, dark background so it sits well in
-GitHub's dark and light themes. The README currently shows the hand-drawn `hero.svg`; generate a `hero.png`
-and point the `<img>` in README.md at it.
+Variant A below is the one that produced the current banner, `hero.jpg`. The other two are kept for a
+redraw. Target for all three: a wide banner, roughly 8:3, dark background so it sits well in GitHub's dark
+and light themes. Save the result next to this file and point the `<img>` in README.md and README.ru.md at it.
 
 Palette used by the site and the course, worth keeping so the banner matches:
 background `#141414`, accent orange `#d97757`, text `#f2f0eb`, muted `#9a9a94`,

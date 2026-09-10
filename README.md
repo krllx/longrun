@@ -1,7 +1,7 @@
 English | [Русский](README.ru.md)
 
 <p align="center">
-  <img src="assets/hero.svg" alt="longrun: memory that survives compaction" width="720">
+  <img src="assets/hero.jpg" alt="longrun: memory that survives compaction" width="820">
 </p>
 
 <h1 align="center">longrun</h1>
