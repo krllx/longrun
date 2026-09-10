@@ -32,7 +32,13 @@
 <main>
 
 <h1>longrun</h1>
-<p class="lead">Shared project memory and per-session memory for Claude Code. The course shows what the skill is made of, how the parts connect and what happens on disk, step by step, on a toy project <code>shop</code>. Command output is shown the way longrun prints it. If you do not need the internals, part 0 is enough.</p>
+<p class="lead">Memory and coordination for Claude Code sessions. The skill exists so that sessions can coordinate in four ways: through shared documents on disk, through messages and tasks handed to the session that has the context, through watches that wake a session when an event fires, and through one session that drives the others to a goal. The course shows how each works, step by step, on a toy project <code>shop</code>. If you do not need the internals, part 0 is enough.</p>
+<div class="grid2">
+  <div class="card project"><h4>1. Shared documents on disk</h4><p>One <code>.longrun/</code> per project with the notes every session sees, plus own notes per session. Hooks bring both back after every compaction, <code>/clear</code> and resume, and show what other sessions changed on every turn. Parts <a href="#l3">3</a>, <a href="#l5">5</a>, <a href="#l6">6</a>.</p></div>
+  <div class="card session"><h4>2. Delegation: messages and tasks</h4><p>A message or a task for another session arrives there as a user turn: through the socket if it is running, through the inbox on its next turn if it is stopped. Sessions are named as you see them in the sidebar. Part <a href="#l7">7</a>.</p></div>
+  <div class="card dir"><h4>3. Reactivity: waiting that never oversleeps</h4><p>A watch is a check launchd runs every five minutes with no model. When the condition holds, the session wakes with the text you gave. No polling loop, no tokens spent waiting, no sleep that oversleeps. Part <a href="#l7">7</a>.</p></div>
+  <div class="card"><h4>4. Selective autonomy: the orchestrator</h4><p>One session keeps the board and drives the already open sessions to the goal: hands out tasks, unblocks, spots stuck peers, and asks the human through a dialog only when it must. The levers (stop, kill, resume) stay with the human. Part <a href="#l8">8</a>.</p></div>
+</div>
 
 <section class="lesson" id="l0">
 <div class="kicker">Part 0</div>
@@ -56,12 +62,16 @@ longrun watch install   # a launchd agent: checks and the watcher every 5 minute
 <h2>Why</h2>
 <p>The model's context is finite. On a long run compaction always happens: automatically when the window is full, or by hand through <code>/compact</code>. Claude Code tells the hooks before and after (PreCompact, PostCompact), and longrun catches both moments. But compaction still loses: the history is squeezed into a summary, and the next compaction squeezes the summary.</p>
 <div class="stripe">
-  <div class="s bad"><b>Disease 1: compaction</b>The first thing the summary drops is "what we tried and why it failed". Half an hour later the agent proposes the fix it already reverted.</div>
-  <div class="s bad"><b>Disease 2: several sessions</b>Each lives in its own window. One opened a PR, the other does not know and says "the PR is not created yet". A dead end walked by one is walked again by the other.</div>
-  <div class="s good"><b>Cure 1</b>A note on disk does not degrade. The hooks bring the notes back into the context after every compaction, <code>/clear</code> and resume, and archive the compaction summaries verbatim.</div>
-  <div class="s good"><b>Cure 2</b>One <code>.longrun/</code> directory per project: shared notes every session sees, a list of sessions with their status, messages between them.</div>
+  <div class="s bad"><b>Problem 1: compaction</b>The first thing the summary drops is "what we tried and why it failed". Half an hour later the agent proposes the fix it already reverted.</div>
+  <div class="s bad"><b>Problem 2: several sessions</b>Each lives in its own window. One opened a PR, the other does not know and says "the PR is not created yet". A dead end walked by one is walked again by the other.</div>
+  <div class="s bad"><b>Problem 3: waiting</b>"Tell me when the PR merges" turns into a polling loop that burns tokens on every wake-up, or into a sleep that oversleeps the event.</div>
+  <div class="s bad"><b>Problem 4: many sessions, one goal</b>Five sessions on one project, and only the human knows what is done, what is stuck and what is next. Every hand-over goes through them.</div>
+  <div class="s good"><b>Cure 1: documents on disk</b>A note on disk does not degrade. The hooks bring the notes back after every compaction, <code>/clear</code> and resume, and archive the compaction summaries verbatim.</div>
+  <div class="s good"><b>Cure 2: messages and tasks</b>One <code>.longrun/</code> per project: shared notes every session sees, a list of sessions with their status, messages and tasks delivered as user turns.</div>
+  <div class="s good"><b>Cure 3: watches</b>launchd checks the condition every five minutes with no model and wakes the session when it holds. Reliable, reactive, free.</div>
+  <div class="s good"><b>Cure 4: the orchestrator</b>One session keeps the board, hands out tasks, spots stuck peers, and asks the human through a dialog only when it must.</div>
 </div>
-<p>The picture below is about disease 1. <b>Top row</b>: what the model holds in its context, left to right in time: first the full history, after compaction only the summary, and the agent reading that summary. <b>Bottom row</b>: the file on disk where the agent wrote one note at the very beginning. Dotted arrows: the note enters the context at start and again after compaction.</p>
+<p>The picture below is about problem 1. <b>Top row</b>: what the model holds in its context, left to right in time: first the full history, after compaction only the summary, and the agent reading that summary. <b>Bottom row</b>: the file on disk where the agent wrote one note at the very beginning. Dotted arrows: the note enters the context at start and again after compaction.</p>
 <figure>
 <svg viewBox="0 0 700 175" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, sans-serif" font-size="12">
   <text x="10" y="18" fill="var(--muted)">The model context over time</text>
@@ -129,8 +139,8 @@ longrun watch install   # a launchd agent: checks and the watcher every 5 minute
 <h2>Files on disk</h2>
 <p>Every file came from a specific problem:</p>
 <ul>
-<li><b>notes.md of a session</b>: disease 1. This session's dead ends and decisions that must survive compaction.</li>
-<li><b>NOTES.md of the project</b>: disease 2. Facts any session needs: a PR number, a decision, a quirk of the environment.</li>
+<li><b>notes.md of a session</b>: problem 1. This session's dead ends and decisions that must survive compaction.</li>
+<li><b>NOTES.md of the project</b>: problem 2. Facts any session needs: a PR number, a decision, a quirk of the environment.</li>
 <li><b>journal.md</b>: a timeline without tokens. Milestones from the agent, and the mechanics append start, end, failed commands, compactions. It shows what a session did without reading the transcript.</li>
 <li><b>archive/compact/</b> and <b>archive/precompact/</b>: every compaction summary verbatim and the snapshot before it (HANDOFF). The first is found by <code>recall</code>, the second comes back in the digest after compaction.</li>
 <li><b>inbox/</b>: a message for a session that is not running now waits for its next turn.</li>
