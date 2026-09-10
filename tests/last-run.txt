@@ -1,0 +1,147 @@
+== init (project) and a linked worktree
+  ok   project init --hq
+  ok   worktree link -> registry entry, nothing written into the worktree
+  ok   where in the worktree resolves to the project
+  ok   session state lives outside the project and the worktree
+== shared notes: add / dedupe / budget / rm / replace / prune
+  ok   own note without a session is refused (exit 3) and points at --shared
+  ok   add --shared writes [n1] into the project NOTES.md
+  ok   duplicate detected
+  ok   bad tag rejected
+  ok   budget refuses with exit 2 and candidates
+  ok   NOTES.md never exceeds cap (759 B)
+  ok   prune --auto --shared shrinks to <=60% (390 B) and archives
+  ok   prune keeps dead/decision over fact
+  ok   rm n1 archives
+  ok   replace n2
+  ok   add after prune fits
+  ok   shared entries carry the author label
+== ledger + ask + inbox
+  ok   ledger in the project
+  ok   ledger DUE shown
+  ok   ledger done with outcome
+  ok   ask --ledger -> ledger @user + inbox file
+  ok   hand-edited ledger line survives a rewrite
+  ok   hand-edited line is listed but not addressable as L0
+  ok   report from stdin
+  ok   inbox ls counts 2
+  ok   inbox ack archives
+== hooks with real payload shapes
+  ok   SessionStart prints digest with shared notes, own notes, ledger and the commands
+  ok   SessionStart exports env for Bash
+  ok   SessionStart creates the session dir with meta + journal
+  ok   session index records project and key
+  ok   own note lands in the session dir as [s1], not in the project
+  ok   own note has no author label
+  ok   rm s2 removes an own note and archives it in the session dir
+  ok   replace s1
+  ok   notes shows both files
+  ok   40 read-only commands are not activity: no nudge, edits counter stays 0
+  ok   PostToolUse nudges at the window boundary only (call 80 yes, 81 no) once edits exist
+  ok   UserPromptSubmit on turn 1: ledger items yes, nudge no (turn window not reached)
+  ok   UserPromptSubmit nudges on turn 8 and stays quiet on turn 9 (once per window, not every turn)
+  ok   no nudge right after a note
+  ok   PostToolUseFailure -> FAIL line in journal
+  ok   PreCompact snapshot has user msgs + edited files + FAIL
+  ok   PostCompact archives the summary verbatim under the project archive, named by session
+  ok   SessionStart(compact) digest: own notes + journal tail + archive pointer
+  ok   SessionStart(compact) digest carries the mechanical HANDOFF (failure + framing + files)
+  ok   HANDOFF skips one-word replies and carries the /compact instructions as FOCUS
+  ok   a failed command counts as activity for the nudge (no edits needed)
+  ok   handoff appears only after a compaction, not on plain startup
+  ok   compactions counted
+  ok   PostToolUse with the shell cwd outside the project still counts in the session's dir
+  ok   SessionStart(compact) with the shell cwd elsewhere injects THIS session's shared + own notes
+  ok   hooks ignore an inherited LONGRUN_DIR and bind to their own cwd's project
+  ok   the compaction that hit while the shell was elsewhere is counted for this session
+  ok   Stop stores last status
+  ok   SessionEnd marks ended
+== recall: notes, journal, archived summary, transcript
+  ok   recall finds archived summary + transcript
+  ok   recall finds the own note first
+  ok   recall finds FAIL line in journal
+  ok   recall miss exits 1
+== digest size cap
+  ok   digest respects inject_max_bytes (1491 B <= 1500)
+  ok   all budgets full: digest fits (8836 B <= 9000) and keeps the @user/DUE rows
+  ok   all budgets full: neither notes file is what gives way
+== recall ranking: curated notes are not crowded out by a noisy archive
+  ok   recall shows the NOTES.md hit despite 15 noisier archive hits
+== status and concurrency
+  ok   status lists the session with its state, own-note count and NEEDS USER
+  ok   status hides a session with no tool calls and no turns (app noise), --all shows it
+  ok   20 parallel shared adds, none lost (20)
+  ok   ids unique under concurrency
+  ok   20 parallel own adds, none lost (20)
+== gc retention
+  ok   gc archives expired shared and own notes and deletes old archive files
+  ok   archive/notes.md ages line by line: the old line is gone, recent lines stay
+  ok   gc archives a session silent for a week into archive/sessions/<key>/
+== older layouts are migrated, not orphaned
+  ok   a running session's first hook after the upgrade migrates its flat files first (counters continue: 51)
+  ok   flat files meeting an existing new-layout dir are merged: counters summed, old journal lines first
+  ok   gc moves 0.1 heartbeats out of the project dir and 0.2 flat files into per-session dirs
+  ok   migrated history stays visible to status and recall
+  ok   a 0.2 worktree store resolves to its hub as the project
+  ok   the notes it held are parked in the project archive and recall finds them
+== notes-only mode (the HQ layer is opt-in)
+  ok   plain init creates no ledger and no inbox
+  ok   where reports notes-only
+  ok   shared notes/recall work in notes-only mode
+  ok   HQ command refused with exit 4 and a way out
+  ok   digest has no LEDGER block in notes-only mode
+  ok   a worktree of a notes-only project is notes-only too (no ledger/report hints)
+  ok   a hand-written heading in NOTES.md is kept, not silently dropped
+  ok   --hq turns the layer on afterwards
+== gc auto-prunes cheap entries so writing never simply stops
+  ok   gc auto-archived cheap todo entries (797 -> 488 B)
+  ok   gc never auto-archives a dead end
+== recall reaches earlier sessions' transcripts and other sessions' own notes
+  ok   recall finds a detail from a previous session's transcript
+  ok   recall reports how many transcripts it scanned
+  ok   recall reaches the current session's subagent transcripts
+  ok   recall reaches other sessions' own notes
+== send: socket to a live peer, inbox to a stopped one, delivery by the target's hooks
+  ok   send --list shows the running peer with its socket
+  ok   --resume is refused for a running session
+  ok   send to a running peer goes over its socket as a user message with a sender stamp
+  ok   send to a session that is not running queues a file in the project inbox
+  ok   the target's UserPromptSubmit delivers the message once and archives it
+  ok   the target's PostToolUse delivers a message between tool calls as additionalContext
+  ok   the target's SessionStart digest carries a queued message
+  ok   --resume runs claude -p <text> --resume <sid> in the session's cwd with LONGRUN_* scrubbed
+  ok   a message from another project lands where the TARGET's hooks look (its own project inbox)
+  ok   send resolves a desktop sidebar title (archived twin ignored)
+  ok   send --list shows desktop titles
+== watch: deferred checks, launchd-free tick, delivery to a stopped and a running session
+  ok   watch test: at +1h is not yet (rc 1)
+  ok   watch test: missing file is not yet
+  ok   watch test: cmd exit 3 is a hard error
+  ok   watch add refuses a check that fails hard
+  ok   watch add with an already-true check registers nothing
+  ok   watch add by sidebar title -> w1, inbox delivery announced
+  ok   watch add snapshots PATH for launchd
+  ok   watch ls shows it pending
+  ok   tick with the condition false keeps it pending
+  ok   tick fires: message queued in the TARGET's inbox with the --then text
+  ok   fired watch logged in the target's journal
+  ok   the target's next SessionStart delivers the fired watch
+  ok   watch ls hides fired, --all shows it with delivery
+  ok   watch follows the desktop entry to the new CLI id (rename + resume)
+  ok   the resumed session (new CLI id) receives the message addressed to its desktop id
+  ok   the resumed session continues the prior's dir (priorCliSessionIds): same key, journal continues, no second dir
+  ok   three hard errors -> broken, reported to the registering session
+  ok   expired watch is reported and closed
+  ok   fired watch reaches a running session over its socket as a user turn
+  ok   unknown target refused
+  ok   watch rm cancels
+  ok   unwritable project inbox -> message spooled in the session dir, watch marked fired, tick exit 0
+  ok   the target's hooks read the session spool too and archive the message
+  ok   digest lists pending watches for this session
+== env exports are shell-quoted
+  ok   a path with a space survives the env file
+== inert outside a project
+  ok   hook inert when no longrun project
+  ok   cli refuses without a project (exit 3)
+
+PASS=128 FAIL=0  (tmp: /tmp/longrun-test.gCGOLW)

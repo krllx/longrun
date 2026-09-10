@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>longrun: мини-курс</title>
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+  <div class="brand">longrun <small>мини-курс, 11 частей, около 15 минут</small></div>
+  <div class="lang"><a href="../">English</a></div>
+  <ol>
+    <li><a href="#l0"><span class="num">0</span>Быстрый старт</a></li>
+    <li><a href="#l1"><span class="num">1</span>Зачем</a></li>
+    <li><a href="#l2"><span class="num">2</span>Три сущности</a></li>
+    <li><a href="#l3"><span class="num">3</span>Файлы на диске</a></li>
+    <li><a href="#l4"><span class="num">4</span>Хуки: где живет механика</a></li>
+    <li><a href="#l5"><span class="num">5</span>Заметки: что писать</a></li>
+    <li><a href="#l6"><span class="num">6</span>Сценарий: одна сессия</a></li>
+    <li><a href="#l7"><span class="num">7</span>Сценарий: две сессии, передача, ожидание</a></li>
+    <li><a href="#l8"><span class="num">8</span>Сценарий: оркестратор</a></li>
+    <li><a href="#l9"><span class="num">9</span>Настройки</a></li>
+    <li><a href="#l10"><span class="num">10</span>Шпаргалка и границы</a></li>
+  </ol>
+  <div class="progress"><i></i></div>
+</nav>
+<main>
+
+<h1>longrun</h1>
+<p class="lead">Общая память проекта и своя память сессии для Claude Code. Курс показывает, из чего скилл состоит, как части связаны и что происходит на диске, шаг за шагом, на игрушечном проекте <code>shop</code>. Выводы команд показаны так, как их печатает longrun. Кому внутренности не нужны, хватит части 0.</p>
+
+<!-- ================= 0 ================= -->
+<section class="lesson" id="l0">
+<div class="kicker">Часть 0</div>
+<h2>Быстрый старт: поставить и просто работать</h2>
+<p>Скилл рассчитан на то, что человек работает в сессиях как обычно, а заметки, дайджесты и доставку сообщений ведут хуки и модель по инструкции. Ниже все, что нужно сделать руками.</p>
+<ol>
+<li><b>Установить один раз.</b> В репозитории скилла:
+<pre><code>./install.sh            # скилл, 11 хуков в ~/.claude/settings.json, CLI ~/.local/bin/longrun, MCP-сервер longrun
+longrun watch install   # агент launchd: проверки и смотритель раз в 5 минут</code></pre></li>
+<li><b>Сделать папку проектом.</b> Проект для longrun - это папка, которую вы открываете в Claude Code. Не обязательно корень репозитория: это может быть папка с несколькими репозиториями, подкаталог монорепозитория или пустая папка-штаб. В ней один раз выполнить <code>longrun init</code>: в терминале или прямо в сессии Claude Code, агент выполнит его сам, если попросить. Появится каталог <code>.longrun/</code>; если папка внутри репозитория, добавьте его в ignore (или <code>longrun init --external</code>, тогда каталог ляжет под <code>~/.claude/longrun/</code>). Из каждого worktree того же проекта: <code>longrun link &lt;путь к проекту&gt;</code>. Проверка: <code>longrun where</code>.</li>
+<li><b>Настроить под себя.</b> В сессии сказать агенту: "настрой longrun" (или <code>/longrun onboard</code>). Он выполнит <code>longrun onboard</code>, коротко расскажет, что делает скилл, и спросит про главные настройки: окно автокомпакции, бюджет 5-часового окна, пороги зависания, размеры заметок. Ответы применит сам через <code>longrun config set</code>. Одно исключение: окно автокомпакции хук выставить не может, поэтому агент попросит вас ввести <code>/autocompact 300k</code> (или выбранное значение) в Claude Code. За 50 тысяч токенов до этого порога хук попросит сессию записать заметки перед компакцией. Подробно про ключи (см. дальше часть 9).</li>
+<li><b>Работать.</b> Ничего вызывать не нужно. На старте сессия получает дайджест (общие заметки, свои, кто еще работает), после компакции все возвращается само, чужие изменения приходят на следующем ходу. Агент сам пишет заметки о тупиках и решениях. Словами можно попросить: "запиши", "что мы уже пробовали", "статус сессий", "передай другой сессии", "что осталось", "скажи, когда PR вольется".</li>
+<li><b>Когда сессий несколько и есть общая цель.</b> В одной из них: "возьми роль оркестратора, цель: ...". Она заведет доску задач и будет раздавать работу; остальным сессиям задачи приходят ходом, ничего учить не надо. "Стоп всем" и "продолжаем" тоже словами, в сессии оркестратора (см. дальше часть 8).</li>
+</ol>
+<div class="callout ok">Диагностика в одну команду: <code>longrun where</code> (какой проект и сессия), <code>longrun status</code> (кто из сессий что делает), <code>longrun watch status</code> (жив ли launchd), <code>longrun config</code> (действующие настройки).</div>
+<div class="next"><a href="#l1">Дальше: зачем это устроено именно так</a></div>
+</section>
+
+<!-- ================= 1 ================= -->
+<section class="lesson" id="l1">
+<div class="kicker">Часть 1</div>
+<h2>Зачем</h2>
+<p>Контекст модели конечен. На длинной дистанции компакция случается всегда: автоматически, когда окно заполнено, или вручную через <code>/compact</code>. Claude Code сообщает об этом хукам до и после (PreCompact, PostCompact), и longrun ловит оба момента. Но саму потерю компакция не отменяет: история сжимается в резюме, следующая компакция сжимает резюме.</p>
+<div class="stripe">
+  <div class="s bad"><b>Болезнь 1: компакция</b>Первым из резюме пропадает "что пробовали и почему не вышло". Через полчаса агент предлагает фикс, который сам же откатил.</div>
+  <div class="s bad"><b>Болезнь 2: несколько сессий</b>Каждая живет в своем окне. Одна открыла PR, другая об этом не знает и говорит "PR еще не создан". Тупик, пройденный одной, вторая проходит заново.</div>
+  <div class="s good"><b>Лечение 1</b>Заметка на диске не деградирует. Хуки возвращают заметки в контекст после каждой компакции, <code>/clear</code> и resume, а резюме компакций архивируют дословно.</div>
+  <div class="s good"><b>Лечение 2</b>Один каталог <code>.longrun/</code> на проект: общие заметки, которые видит каждая сессия, список сессий с их статусом, сообщения между ними.</div>
+</div>
+<p>Картинка ниже про болезнь 1. <b>Верхняя строка</b>: что модель держит в контексте, слева направо во времени: сначала полная история, после компакции только резюме, и агент, который читает это резюме. <b>Нижняя строка</b>: файл на диске, куда агент в самом начале записал одну заметку. Пунктирные стрелки: заметка попадает в контекст при старте и снова после компакции.</p>
+<figure>
+<svg viewBox="0 0 700 175" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, sans-serif" font-size="12">
+  <text x="10" y="18" fill="var(--muted)">Контекст модели во времени</text>
+  <rect x="10" y="30" width="326" height="26" rx="6" fill="var(--session-soft)" stroke="var(--session)"/>
+  <text x="20" y="47" fill="var(--fg)">1. история: пробовали X, упало, откатили, взяли Y...</text>
+  <path d="M338,43 L352,43" stroke="var(--muted)" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="356" y="30" width="150" height="26" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="366" y="47" fill="var(--fg)">2. резюме: "делали Y"</text>
+  <path d="M508,43 L522,43" stroke="var(--muted)" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="526" y="30" width="164" height="26" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="536" y="47" fill="var(--fg)">3. агент: "попробуем X!"</text>
+  <text x="10" y="92" fill="var(--muted)">Файл заметок сессии на диске (longrun)</text>
+  <rect x="10" y="102" width="680" height="30" rx="6" fill="var(--project-soft)" stroke="var(--project)"/>
+  <text x="20" y="121" fill="var(--fg)" font-family="ui-monospace, Menlo, monospace" font-size="11">[s1] dead: X fails: it needs a real Redis, use REDIS_URL=fake://</text>
+  <text x="10" y="160" fill="var(--muted)" font-size="11">одна заметка: [s1] ее номер (s = своя, n = общая), dead = тег "тупик", дальше сам факт одной строкой по-английски</text>
+  <path d="M120,100 L120,60" stroke="var(--project)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a1)"/>
+  <path d="M580,100 L580,60" stroke="var(--project)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a1)"/>
+  <defs><marker id="a1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker></defs>
+</svg>
+<figcaption>Резюме теряет причины. Строка на диске стоит 26 токенов и приходит обратно после каждой компакции, поэтому на шаге 3 агент видит, что X уже пробовали.</figcaption>
+</figure>
+<h3>Из чего состоит скилл</h3>
+<div class="grid2">
+  <div class="card"><h4>Механика: хуки, CLI, launchd</h4><p>Одиннадцать хуков Claude Code (см. дальше часть 4), команда <code>longrun</code> и агент launchd. Механика работает без участия модели:</p>
+  <ul>
+  <li>печатает дайджест на старте сессии и после каждой компакции;</li>
+  <li>архивирует каждое резюме компакции дословно;</li>
+  <li>пишет упавшие команды в журнал;</li>
+  <li>перед компакцией снимает HANDOFF: последние просьбы человека и правленые файлы, чтобы после компакции продолжить с того же места;</li>
+  <li>доставляет сообщения между сессиями;</li>
+  <li>гоняет отложенные проверки без модели: PR влит, URL отвечает, файл появился;</li>
+  <li>следит за сессиями для оркестратора, сессии, которая ведет проект к цели (см. дальше часть 8).</li>
+  </ul></div>
+  <div class="card"><h4>Инструкция модели: SKILL.md</h4><p>Что делает модель, потому что ее так попросили: пишет заметку одной строкой, когда наткнулась на тупик, приняла решение или узнала факт об окружении; зовет <code>recall</code>, когда чего-то не хватает в контексте; передает работу той сессии, у которой больше контекста. Про то, что писать (см. дальше часть 5).</p></div>
+</div>
+<div class="next"><a href="#l2">Дальше: три сущности</a></div>
+</section>
+
+<!-- ================= 2 ================= -->
+<section class="lesson" id="l2">
+<div class="kicker">Часть 2</div>
+<h2>Три сущности, больше ничего</h2>
+<div class="grid3">
+  <div class="card project"><h4>Проект</h4><p>Общая память группы сессий: каталог <code>.longrun/</code>, который <code>longrun init</code> создает в папке проекта (или вне дерева с <code>--external</code>). Внутри:</p>
+  <ul>
+  <li>общие заметки <code>[n1]</code>, <code>[n2]</code>: одна строка = один факт, видят все сессии;</li>
+  <li>inbox: сообщения сессиям, которые сейчас не работают;</li>
+  <li>доска задач оркестратора;</li>
+  <li>архив резюме компакций и снимков.</li>
+  </ul><p>Подробнее (см. дальше часть 3).</p></div>
+  <div class="card session"><h4>Сессия</h4><p>Один разговор Claude Code, в приложении одна строка в сайдбаре. Свое у нее:</p>
+  <ul>
+  <li>свои заметки <code>[s1]</code>: то же самое, но видит только эта сессия;</li>
+  <li>журнал: хронология, вехи, падения, компакции;</li>
+  <li>meta: счетчики и последний статус.</li>
+  </ul><p>Лежат под <code>~/.claude/longrun/</code>, не в репозитории.</p></div>
+  <div class="card dir"><h4>Каталог</h4><p>Папка, где сессия стартовала: корень, worktree, подкаталог. Ничего не хранит. Только говорит, к какому проекту относится сессия.</p></div>
+</div>
+<figure id="fig-entities"></figure>
+<p>Слово "проект" значит только каталог <code>.longrun/</code>: не проект в монорепозитории и не папка транскриптов Claude Code. Worktree привязывается к проекту командой <code>longrun link</code>, своих заметок у него нет. Сессия принадлежит одному проекту. При resume приложение выдает сессии новый CLI id; longrun идет по цепочке <code>priorCliSessionIds</code>, и свои заметки продолжаются.</p>
+<div class="next"><a href="#l3">Дальше: файлы</a></div>
+</section>
+
+<!-- ================= 3 ================= -->
+<section class="lesson" id="l3">
+<div class="kicker">Часть 3</div>
+<h2>Файлы на диске</h2>
+<p>Каждый файл появился из конкретной задачи:</p>
+<ul>
+<li><b>notes.md сессии</b>: болезнь 1. Тупики и решения этой сессии, которые должны пережить компакцию.</li>
+<li><b>NOTES.md проекта</b>: болезнь 2. Факты, которые нужны любой сессии: номер PR, решение, особенность окружения.</li>
+<li><b>journal.md</b>: хронология без токенов. Вехи от агента, а механика дописывает старт, конец, упавшие команды, компакции. По нему видно, что сессия делала, не читая транскрипт.</li>
+<li><b>archive/compact/</b> и <b>archive/precompact/</b>: резюме каждой компакции дословно и снимок перед ней (HANDOFF). Первое находит <code>recall</code>, второе возвращается в дайджест после компакции.</li>
+<li><b>inbox/</b>: сообщение сессии, которая сейчас не работает, ждет ее следующего хода.</li>
+<li><b>meta.json</b>: счетчики, последний ответ, идущий инструмент. Из него строки SESSIONS и флаги для оркестратора.</li>
+<li><b>board.json</b>, <b>watch/</b>, <b>halt.json</b>, <b>budget.json</b>: доска оркестратора, отложенные проверки, стоп всем, замеры бюджета. Про них в частях 7 и 8.</li>
+</ul>
+<p>Все общее лежит в проекте. Все свое лежит вне дерева репозитория и вне синхронизируемых папок, потому что переписывается на каждом вызове инструмента. Нажмите на файл.</p>
+<div class="files"><div class="tree" id="tree-all"></div><div class="fileinfo" id="tree-all-info"><span style="color:var(--muted)">Кто пишет, когда создается, что внутри.</span></div></div>
+<table>
+<tr><th>Файл</th><th>Кто пишет</th><th>Когда удаляется</th></tr>
+<tr><td><code>NOTES.md</code> проекта</td><td>агент: <code>add --shared</code>, <code>rm</code>, <code>replace</code>, <code>prune</code></td><td>записи старше 14 дней в архив (кроме <code>pin</code>); <code>rm</code> уносит строку в <code>archive/notes.md</code></td></tr>
+<tr><td><code>notes.md</code> сессии</td><td>агент: <code>add</code>, <code>rm</code>, <code>replace</code>, <code>prune</code></td><td>вместе с сессией, молчавшей 7 дней (в <code>archive/sessions/</code>)</td></tr>
+<tr><td><code>journal.md</code></td><td>хуки и <code>longrun log</code></td><td>хвост старше 200 строк в архив</td></tr>
+<tr><td><code>meta.json</code></td><td>хуки на каждом событии</td><td>с сессией</td></tr>
+<tr><td><code>archive/compact/*.md</code></td><td>хук PostCompact</td><td>старше 30 дней или больше 40 штук</td></tr>
+<tr><td><code>inbox/*.md</code></td><td><code>send</code>, <code>watch</code>, <code>board</code>, <code>ask</code></td><td>при доставке в <code>.archive/</code>, оттуда через 30 дней</td></tr>
+<tr><td><code>watch/w*.json</code></td><td><code>watch add</code>, тик launchd</td><td>через неделю после срабатывания</td></tr>
+</table>
+<div class="next"><a href="#l4">Дальше: хуки</a></div>
+</section>
+
+<!-- ================= 4 ================= -->
+<section class="lesson" id="l4">
+<div class="kicker">Часть 4</div>
+<h2>Хуки: где живет механика</h2>
+<p>Claude Code зовет внешнюю команду на каждое событие сессии. longrun ставит одиннадцать таких команд, все это один python-скрипт. Хук это отдельный процесс на событие, поэтому после установки новый код работает во всех сессиях сразу. Нажмите на хук в цикле.</p>
+<div class="hooks"><div id="hookloop"></div><div class="hookinfo" id="hookinfo"><h4>Цикл одной сессии</h4><div>Старт, потом ходы: запрос человека, вызовы инструментов, ответ. Когда контекст переполнен, компакция и снова SessionStart. Хуки на каждом узле.</div></div></div>
+<div class="callout ok">Единственное, что попадает в контекст модели из хуков: дайджест на SessionStart, дельта общих заметок и сообщения на UserPromptSubmit, редкое напоминание записать заметку, предупреждение о контексте и отказ при halt. Остальное пишется в файлы молча.</div>
+<div class="next"><a href="#l5">Дальше: что писать</a></div>
+</section>
+
+<!-- ================= 5 ================= -->
+<section class="lesson" id="l5">
+<div class="kicker">Часть 5</div>
+<h2>Заметки: что писать и куда</h2>
+<p>Одна строка, по-английски, до 400 символов (тот же факт по-русски стоит в полтора раза больше токенов, а бюджеты жесткие). Тест один: <b>вернет ли это одна команда, Read или grep?</b> Если да, не писать.</p>
+<table>
+<tr><th>Тег</th><th>Что</th><th>Куда обычно</th></tr>
+<tr><td><span class="tag">dead</span></td><td>подход не сработал, и почему</td><td>свои; общие, если туда может зайти другая сессия</td></tr>
+<tr><td><span class="tag">decision</span></td><td>выбор и причина</td><td>общие, если касается других</td></tr>
+<tr><td><span class="tag">fact</span></td><td>факт об окружении, который стоил усилий</td><td>общие</td></tr>
+<tr><td><span class="tag">ctx</span></td><td>рамки задачи от человека</td><td>свои</td></tr>
+<tr><td><span class="tag">pin</span></td><td>факт без срока давности: номер PR, ветка, хост</td><td>общие</td></tr>
+<tr><td><span class="tag">todo</span></td><td>короткий хвост за агентом</td><td>свои</td></tr>
+</table>
+<p>Вехи (запушил, PR открыт, тесты зеленые) в журнал через <code>longrun log</code>. То, что переживет задачу (кто пользователь, как он работает), в автопамять Claude Code, не сюда.</p>
+<h3>Проверьте себя: куда это?</h3>
+<div class="quiz" id="quiz"></div>
+<div class="next"><a href="#l6">Дальше: первый сценарий</a></div>
+</section>
+
+<!-- ================= 6 ================= -->
+<section class="lesson" id="l6">
+<div class="kicker">Часть 6, сценарий</div>
+<h2>Одна сессия переживает компакцию</h2>
+<p>Проект <code>shop</code>, сессия A. Кнопки "Дальше" и "Назад" или стрелки на клавиатуре. Слева, кто с кем говорит на этом шаге; справа, команда и что она печатает; внизу, что изменилось на диске.</p>
+<div class="legend"><span class="human"><i></i>человек, диалог</span><span class="session"><i></i>сессия</span><span class="project"><i></i>проект .longrun</span><span class="own"><i></i>свое сессии</span><span class="launchd"><i></i>launchd</span><span class="global"><i></i>глобальное</span></div>
+<div id="p1"></div>
+<div class="callout">Что запомнить: тупики и решения пишутся сразу, вехи в журнал, после компакции все возвращается само, потерянную деталь ищет <code>recall</code>.</div>
+<div class="next"><a href="#l7">Дальше: две сессии</a></div>
+</section>
+
+<!-- ================= 7 ================= -->
+<section class="lesson" id="l7">
+<div class="kicker">Часть 7, два сценария</div>
+<h2>Две сессии: общая память</h2>
+<p>В той же папке открывается сессия B.</p>
+<div id="p2"></div>
+<h2 style="margin-top:32px">Передать работу и ждать событие</h2>
+<p>Сообщение другой сессии приходит к ней как ход пользователя. Ожидание события стоит ноль токенов: проверку гонит launchd.</p>
+<div id="p3"></div>
+<div class="callout warn">Проверка <code>cmd</code> идет под launchd: только абсолютные пути, никакого Touch ID, ssh и алиасов. Сначала <code>longrun watch test -- cmd '...'</code>.</div>
+<div class="next"><a href="#l8">Дальше: оркестратор</a></div>
+</section>
+
+<!-- ================= 8 ================= -->
+<section class="lesson" id="l8">
+<div class="kicker">Часть 8, сценарий</div>
+<h2>Оркестратор: одна сессия ведет проект</h2>
+<p>Слой поверх заметок и сообщений. Одна сессия держит цель и доску, остальные учат три команды: <code>board take</code>, <code>board done</code>, <code>board block</code>. Все, что нужно оркестратору, лежит в файлах состояния, транскрипты он не читает.</p>
+<div id="p4"></div>
+<div class="grid2">
+  <div class="card"><h4>Кто что может</h4><p><b>Смотритель и оркестратор</b> только предлагают. <b>Убить процесс</b> (<code>interrupt --yes</code>), <b>остановить всех</b> (<code>halt</code>) и <b>снять стоп</b> (<code>resume</code>) можно только по слову человека в этом разговоре, не по просьбе другой сессии.</p></div>
+  <div class="card"><h4>Диалог или доска</h4><p>Диалог поверх окон для того, что не может ждать: подтверждение, доступ, действие только человека. Вопросы о цели и приоритетах идут на доску через <code>board block</code>, оркестратор разберет.</p></div>
+</div>
+<div class="next"><a href="#l9">Дальше: настройки</a></div>
+</section>
+
+<!-- ================= 9 ================= -->
+<section class="lesson" id="l9">
+<div class="kicker">Часть 9</div>
+<h2>Настройки</h2>
+<p>Два уровня: глобальный файл <code>~/.claude/longrun/config.json</code> и файл проекта <code>.longrun/config.json</code>; значение проекта перекрывает глобальное. Смотреть и менять руками JSON не нужно:</p>
+<pre><code>longrun config                                  # действующие значения и откуда каждое: default / global / project
+longrun config set stuck_tool_min 60 --global   # для всех проектов
+longrun config set notes_max_bytes 8000         # для этого проекта
+longrun config unset notes_max_bytes            # обратно к умолчанию</code></pre>
+<p>Ключей около сорока (полный список в <code>docs/REFERENCE.md</code>, раздел 6). Сразу после установки имеет смысл посмотреть на эти:</p>
+<table>
+<tr><th>Ключ</th><th>По умолчанию</th><th>Когда и как менять</th></tr>
+<tr><td><code>notes_max_bytes</code>, <code>session_notes_max_bytes</code></td><td>5000, 3000</td><td>Бюджеты общих и своих заметок. Читаются на каждом старте, поэтому больше не значит лучше. Проект с четырьмя и более сессиями, где дайджест постоянно просит PRUNE: 8000 и 4000.</td></tr>
+<tr><td><code>notes_max_age_days</code></td><td>14</td><td>Записи старше уходят в архив (кроме <code>pin</code>). Проект с редкими сессиями: 30.</td></tr>
+<tr><td><code>nudge_tools</code>, <code>nudge_turns</code></td><td>40, 8</td><td>Через сколько вызовов или ходов без заметки напомнить (и только если были правки или падения). Раздражает: 80 и 16.</td></tr>
+<tr><td><code>ctx_warn_before</code></td><td>50000</td><td>За сколько токенов до окна автокомпакции просить записать заметки. Работает в паре с <code>/autocompact 300k</code> в Claude Code; 50k хватает.</td></tr>
+<tr><td><code>stuck_tool_min</code>, <code>stuck_turn_min</code>, <code>stuck_wait_min</code></td><td>30, 60, 10</td><td>Пороги смотрителя для оркестратора: инструмент, ход, ожидание разрешения (минуты). Сборки по 40 минут в порядке вещей: <code>stuck_tool_min</code> 60.</td></tr>
+<tr><td><code>budget_on</code>, <code>budget_pace_pct_per_hour</code>, <code>budget_factor</code></td><td>true, 20, 1.5</td><td>Правило 5-часового окна: план в процентах в час и во сколько раз его можно превысить до стопа. Работаете в одной сессии без оркестратора: <code>budget_on false --global</code>. Хотите потратить окно за три часа: pace 33.</td></tr>
+<tr><td><code>ask_wait_sec</code>, <code>ask_expire_min</code></td><td>90, 360</td><td>Сколько секунд диалог ждет ответ инлайн; через сколько минут закрывается сам. Обычно оставить.</td></tr>
+<tr><td><code>watch_ttl_days</code></td><td>7</td><td>Срок проверки по умолчанию (только глобально). Ждете релиз неделями: 30, или <code>--for 30d</code> у конкретной проверки.</td></tr>
+<tr><td><code>autocompact_window</code></td><td>0</td><td>Где Claude Code делает автокомпакцию, как задано <code>/autocompact N</code>; принимает <code>300k</code>, <code>1M</code>. 0 = следовать за Claude Code. Хук не может выполнить <code>/autocompact</code>, поэтому это намерение: <code>onboard</code> сравнивает его с настройкой Claude Code и просит ввести команду вас. Рекомендация для моделей с окном 1M: 300k.</td></tr>
+<tr><td><code>pr_tool</code></td><td>auto</td><td>Чем проверки pr-merged спрашивают статус PR: <code>gh</code> (GitHub CLI) или <code>arc</code> (Arcadia). <code>auto</code> смотрит на папку, из которой зарегистрирован watch.</td></tr>
+<tr><td><code>hq</code></td><td>не задано</td><td>Слой ledger и inbox для штаба проекта; включается <code>longrun init --hq</code>, а не через config.</td></tr>
+</table>
+<div class="callout">Проще всего не запоминать ключи, а сказать агенту "настрой longrun": <code>longrun onboard</code> печатает ему бриф с текущими значениями и смыслом каждого ключа, он спросит вас по одному и применит ответы. Минимальный набор: окно автокомпакции 300k (ввести <code>/autocompact 300k</code> самому), <code>budget_on false --global</code>, если оркестратор пока не нужен, <code>stuck_tool_min 60</code>, если у вас долгие сборки. Остальное трогать, когда дайджест или смотритель начнут мешать.</div>
+<div class="next"><a href="#l10">Дальше: шпаргалка</a></div>
+</section>
+
+<!-- ================= 10 ================= -->
+<section class="lesson" id="l10">
+<div class="kicker">Часть 10</div>
+<h2>Шпаргалка и границы</h2>
+<div class="cheat">
+<pre><code># установка
+./install.sh            # скилл, 11 хуков, CLI, MCP-сервер longrun
+longrun watch install   # launchd-агент, раз в 5 минут
+longrun init [--hq]     # в папке проекта
+longrun link &lt;проект&gt;   # из каждого worktree
+longrun where           # какой проект, какая сессия</code></pre>
+<pre><code># заметки
+longrun add [--shared] -t TAG "..."
+longrun rm s3 n12 | replace n12 "..."
+longrun notes | prune [--auto] [--shared]
+longrun log "веха"
+longrun recall слово</code></pre>
+<pre><code># сессии
+longrun status
+longrun send [--list] [--resume] КТО "текст"
+longrun watch add --to КТО --then "..." -- pr-merged ID
+longrun watch ls | test -- CHECK | sessions</code></pre>
+<pre><code># оркестратор
+longrun orchestrate start --goal "..."
+longrun board | board add|assign|take|done|block T7
+longrun fact "..." --task T7 --source review | fact ack F1
+longrun halt "почему" | resume
+longrun interrupt КТО --match TEXT [--yes]
+longrun budget | budget set pace 20
+longrun ask "вопрос" --options "Да,Нет"</code></pre>
+<pre><code># настройки
+longrun onboard [done]
+longrun config
+longrun config set KEY VALUE [--global]
+longrun config unset KEY [--global]</code></pre>
+</div>
+<h3>Что гарантирует механика, а что зависит от модели</h3>
+<table>
+<tr><th>Гарантирует механика</th><th>Зависит от модели и инструкции</th></tr>
+<tr><td>архив каждого резюме компакции, журнал падений, снимок HANDOFF, возврат заметок в контекст, доставка сообщений, дельта общих заметок, отказ инструментов при halt, проверки watch</td><td>что заметка будет написана и написана по делу, что перед повторным исследованием будет <code>recall</code>, что сообщение от коллеги не будет принято за слово человека</td></tr>
+</table>
+<h3>Границы</h3>
+<ul>
+<li>Дайджест не больше 9000 байт. Вытесняются по порядку: список сессий, watch, хвост журнала, HANDOFF, ledger. Заметки не вытесняются никогда, отсюда бюджеты 5000 + 3000.</li>
+<li>Resume в приложении связывается по <code>priorCliSessionIds</code>; <code>/clear</code> в CLI по эвристике "та же папка, конец с причиной clear не позднее трех минут назад".</li>
+<li>Формат сокета и транскриптов не задокументирован: при смене версии Claude Code первым сломается <code>send</code> в работающую сессию, очередь через inbox продолжит работать.</li>
+<li>Под launchd у python может не быть доступа к <code>~/Documents</code> (TCC). Проверки от этого не зависят; сообщение тогда ложится в каталог сессии под <code>~/.claude</code>.</li>
+<li>Сабагенты дайджест не получают. <code>/rewind</code> заметки не откатывает.</li>
+</ul>
+<p>Подробности: <code>README.md</code>, <code>docs/REFERENCE.md</code>, <code>docs/ORCHESTRATOR.md</code> в репозитории, и <code>longrun help</code>.</p>
+</section>
+
+</main>
+</div>
+<script src="../app.js"></script>
+<script src="../data.js"></script>
+<script src="../data2.js"></script>
+<script src="../data3.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, LR = window.LR;
+  /* lesson 2 figure: directories -> project <-> sessions */
+  (function () {
+    const fig = document.getElementById('fig-entities');
+    const box = LR.el('div', { class: 'player diagram', id: 'fig-ent', style: 'padding:10px' });
+    fig.appendChild(box);
+    const nodes = [
+      { id: 'R', kind: 'global', x: 10, y: 20, w: 170, h: 46, title: 'каталог shop/', sub: ['тут лежит .longrun/'] },
+      { id: 'W1', kind: 'global', x: 10, y: 90, w: 170, h: 46, title: 'worktree feature-1/', sub: ['longrun link ../shop'] },
+      { id: 'W2', kind: 'global', x: 10, y: 160, w: 170, h: 46, title: 'worktree feature-2/', sub: ['longrun link ../shop'] },
+      { id: 'P', kind: 'project', x: 240, y: 80, w: 150, h: 70, title: 'ПРОЕКТ shop', sub: ['NOTES.md общие', 'inbox/, board.json'] },
+      { id: 'S1', kind: 'session', x: 450, y: 20, w: 150, h: 46, title: 'Сессия "штаб"', sub: ['свои notes, journal'] },
+      { id: 'S2', kind: 'session', x: 450, y: 90, w: 150, h: 46, title: 'Сессия "PR 42"', sub: ['свои notes, journal'] },
+      { id: 'S3', kind: 'session', x: 450, y: 160, w: 150, h: 46, title: 'Сессия "скидки"', sub: ['свои notes, journal'] },
+    ];
+    const edges = [{ id: 'a', from: 'R', to: 'P' }, { id: 'b', from: 'W1', to: 'P' }, { id: 'c', from: 'W2', to: 'P' }, { id: 'd', from: 'S1', to: 'P', off: 4 }, { id: 'e', from: 'P', to: 'S1', off: 4 }, { id: 'f', from: 'S2', to: 'P', off: 4 }, { id: 'g', from: 'P', to: 'S2', off: 4 }, { id: 'h', from: 'S3', to: 'P', off: 4 }, { id: 'i', from: 'P', to: 'S3', off: 4 }];
+    const d = new LR.Diagram(box, nodes, edges, [610, 230]);
+    d.highlight(['P'], [], false);
+    fig.appendChild(LR.el('figcaption', { text: 'Каталоги только указывают на проект. Сессии читают общее и пишут туда; свое у каждой отдельно.' }));
+  })();
+  /* lesson 3 tree: everything */
+  (function () {
+    const st = {}; [C.PROJ, C.OWN, C.GLOB].forEach(r => r.files.forEach(f => st[f.path] = 'keep'));
+    LR.renderTree(document.getElementById('tree-all'), [C.PROJ, C.OWN, C.GLOB], st, document.getElementById('tree-all-info'));
+  })();
+  /* lesson 4 hooks */
+  new LR.HookLoop(document.getElementById('hookloop'), document.getElementById('hookinfo'), [
+    { name: 'SessionStart', what: 'Находит проект по каталогу (вверх до .longrun/, иначе реестр), связывает CLI id с ключом сессии (в том числе после resume под новым id), печатает дайджест: SHARED, OWN, SESSIONS, watch, доска, сообщения. Экспортирует LONGRUN_SESSION и LONGRUN_DIR в Bash сессии. Раз в час запускает уборку.' },
+    { name: 'UserPromptSubmit', what: 'Каждый ход: доставляет сообщения из inbox, печатает дельту общих заметок (+ ~ -) и изменения доски, считает ходы, предупреждает о контексте за 50k до окна.' },
+    { name: 'PreToolUse', what: 'Проверяет halt: при стопе отвечает deny с причиной, и модель ее видит. Отмечает в meta.json, какой инструмент начался и когда (для флага "tool `ya make` 38m"). Тулы mcp__longrun__* под halt не попадают.' },
+    { name: 'PostToolUse', what: 'Считает вызовы и правки, закрывает запись о идущем инструменте. После 40 вызовов или 8 ходов без заметки, и только если были правки или падения, один раз напоминает записать.' },
+    { name: 'PostToolUseFailure', what: 'Упавшая команда Bash одной строкой FAIL в журнал сессии. Три подряд дают флаг "fail x3" в SESSIONS.' },
+    { name: 'PermissionRequest', what: 'Сессия ждет разрешения на инструмент: отметка в meta.json, из нее флаг "waiting permission 12m".' },
+    { name: 'Notification', what: 'Уведомления Claude Code (idle, нужен ввод, диалог): отметка ожидания в meta.json.' },
+    { name: 'Stop', what: 'Модель закончила ответ: последний ответ в meta.json (его видно в status и SESSIONS), конец хода для телеметрии.' },
+    { name: 'PreCompact', what: 'Перед компакцией: снимок в archive/precompact/ с последними просьбами человека, правлеными файлами и недавними FAIL. Из него собирается блок HANDOFF (передача самому себе: что человек просил последним и что правили) в следующем дайджесте.' },
+    { name: 'PostCompact', what: 'Резюме компакции дословно в archive/compact/. Дальше идет SessionStart с source=compact, который снова печатает дайджест.' },
+    { name: 'SessionEnd', what: 'Помечает сессию законченной с причиной (clear, logout, other). По причине clear следующая сессия в той же папке в течение трех минут продолжает этот же каталог.' },
+  ]);
+  /* lesson 5 quiz */
+  new LR.Quiz(document.getElementById('quiz'), [
+    { stmt: '"<code>pytest -x</code> виснет: ждет настоящий Redis, лечится <code>REDIS_URL=fake://</code>"', ans: 'own', why: 'Тупик с причиной: тег dead, свои заметки. В общие, если другая сессия может наступить на то же.' },
+    { stmt: '"PR 42 = ветка cart-total"', ans: 'shared', why: 'Идентичность без срока давности: pin, общие. Именно этого не хватает сессии, которая скажет "PR еще не создан".' },
+    { stmt: '"Тесты зеленые, PR открыт"', ans: 'log', why: 'Веха, хронология: longrun log. Заметки не для прогресса.' },
+    { stmt: '"Функция total() лежит в cart/models.py:42"', ans: 'no', why: 'Одна команда grep вернет это за секунду. Не писать.' },
+    { stmt: '"Пользователь просил не трогать UI скидок до следующей недели"', ans: 'own', why: 'Рамки задачи от человека: ctx, свои. Общие, если это касается и других сессий.' },
+    { stmt: '"Ключ Stripe для песочницы берется из 1password, тот что в env устарел"', ans: 'shared', why: 'Факт об окружении, который стоил усилий и нужен всем: fact, общие.' },
+  ]);
+  /* players */
+  new LR.Player(document.getElementById('p1'), C.s1);
+  new LR.Player(document.getElementById('p2'), C.s2);
+  new LR.Player(document.getElementById('p3'), C.s3);
+  new LR.Player(document.getElementById('p4'), C.s4);
+  LR.Nav();
+})();
+</script>
+</body>
+</html>

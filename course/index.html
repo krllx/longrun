@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>longrun: a mini course</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+  <div class="brand">longrun <small>a mini course, 11 parts, about 15 minutes</small></div>
+  <div class="lang"><a href="ru/">Русский</a></div>
+  <ol>
+    <li><a href="#l0"><span class="num">0</span>Quick start</a></li>
+    <li><a href="#l1"><span class="num">1</span>Why</a></li>
+    <li><a href="#l2"><span class="num">2</span>Three entities</a></li>
+    <li><a href="#l3"><span class="num">3</span>Files on disk</a></li>
+    <li><a href="#l4"><span class="num">4</span>Hooks: where the mechanics live</a></li>
+    <li><a href="#l5"><span class="num">5</span>Notes: what to write</a></li>
+    <li><a href="#l6"><span class="num">6</span>Scenario: one session</a></li>
+    <li><a href="#l7"><span class="num">7</span>Scenario: two sessions, hand-over, waiting</a></li>
+    <li><a href="#l8"><span class="num">8</span>Scenario: the orchestrator</a></li>
+    <li><a href="#l9"><span class="num">9</span>Settings</a></li>
+    <li><a href="#l10"><span class="num">10</span>Cheat sheet and limits</a></li>
+  </ol>
+  <div class="progress"><i></i></div>
+</nav>
+<main>
+
+<h1>longrun</h1>
+<p class="lead">Shared project memory and per-session memory for Claude Code. The course shows what the skill is made of, how the parts connect and what happens on disk, step by step, on a toy project <code>shop</code>. Command output is shown the way longrun prints it. If you do not need the internals, part 0 is enough.</p>
+
+<section class="lesson" id="l0">
+<div class="kicker">Part 0</div>
+<h2>Quick start: install and just work</h2>
+<p>The skill assumes the human works in sessions as usual, while notes, digests and message delivery are handled by the hooks and by the model following its instructions. Below is everything you do by hand.</p>
+<ol>
+<li><b>Install once.</b> In the skill repository:
+<pre><code>./install.sh            # the skill, 11 hooks in ~/.claude/settings.json, the CLI ~/.local/bin/longrun, the longrun MCP server
+longrun watch install   # a launchd agent: checks and the watcher every 5 minutes</code></pre></li>
+<li><b>Make the folder a project.</b> A project for longrun is the folder you open in Claude Code. Not necessarily a repository root: it can be a folder with several repositories, a subdirectory of a monorepo or an empty headquarters folder. Run <code>longrun init</code> there once: in a terminal or right in the Claude Code session, the agent runs it for you if asked. A <code>.longrun/</code> directory appears; when the folder is inside a repository, add it to the ignore file (or <code>longrun init --external</code>, which puts the directory under <code>~/.claude/longrun/</code>). From every worktree of the same project: <code>longrun link &lt;path to the project&gt;</code>. Check: <code>longrun where</code>.</li>
+<li><b>Tune it.</b> In the session tell the agent: "set up longrun" (or <code>/longrun onboard</code>). It runs <code>longrun onboard</code>, tells you briefly what the skill does and asks about the main settings: the autocompact window, the 5-hour window budget, the stuck thresholds, note sizes. It applies the answers itself with <code>longrun config set</code>. One exception: a hook cannot set the autocompact window, so the agent asks you to type <code>/autocompact 300k</code> (or the value you chose) in Claude Code. 50 thousand tokens before that threshold a hook asks the session to write its notes before compaction. The keys in detail (see part 9 below).</li>
+<li><b>Work.</b> Nothing to call. At start the session gets a digest (shared notes, own notes, who else is working), after compaction everything comes back by itself, other sessions' changes arrive on the next turn. The agent writes notes about dead ends and decisions on its own. You can ask in words: "write it down", "what have we tried", "session status", "hand it to the other session", "what is left", "tell me when the PR merges".</li>
+<li><b>Several sessions and a common goal.</b> In one of them: "take the orchestrator role, the goal is ...". It creates a task board and hands out work; the other sessions receive tasks as turns, nothing to learn. "Stop everyone" and "go on" are also words, in the orchestrator session (see part 8 below).</li>
+</ol>
+<div class="callout ok">Diagnostics in one command: <code>longrun where</code> (which project and session), <code>longrun status</code> (what each session does), <code>longrun watch status</code> (is launchd alive), <code>longrun config</code> (effective settings).</div>
+<div class="next"><a href="#l1">Next: why it is built this way</a></div>
+</section>
+
+<section class="lesson" id="l1">
+<div class="kicker">Part 1</div>
+<h2>Why</h2>
+<p>The model's context is finite. On a long run compaction always happens: automatically when the window is full, or by hand through <code>/compact</code>. Claude Code tells the hooks before and after (PreCompact, PostCompact), and longrun catches both moments. But compaction still loses: the history is squeezed into a summary, and the next compaction squeezes the summary.</p>
+<div class="stripe">
+  <div class="s bad"><b>Disease 1: compaction</b>The first thing the summary drops is "what we tried and why it failed". Half an hour later the agent proposes the fix it already reverted.</div>
+  <div class="s bad"><b>Disease 2: several sessions</b>Each lives in its own window. One opened a PR, the other does not know and says "the PR is not created yet". A dead end walked by one is walked again by the other.</div>
+  <div class="s good"><b>Cure 1</b>A note on disk does not degrade. The hooks bring the notes back into the context after every compaction, <code>/clear</code> and resume, and archive the compaction summaries verbatim.</div>
+  <div class="s good"><b>Cure 2</b>One <code>.longrun/</code> directory per project: shared notes every session sees, a list of sessions with their status, messages between them.</div>
+</div>
+<p>The picture below is about disease 1. <b>Top row</b>: what the model holds in its context, left to right in time: first the full history, after compaction only the summary, and the agent reading that summary. <b>Bottom row</b>: the file on disk where the agent wrote one note at the very beginning. Dotted arrows: the note enters the context at start and again after compaction.</p>
+<figure>
+<svg viewBox="0 0 700 175" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, sans-serif" font-size="12">
+  <text x="10" y="18" fill="var(--muted)">The model context over time</text>
+  <rect x="10" y="30" width="326" height="26" rx="6" fill="var(--session-soft)" stroke="var(--session)"/>
+  <text x="20" y="47" fill="var(--fg)">1. history: tried X, it failed, reverted, took Y...</text>
+  <path d="M338,43 L352,43" stroke="var(--muted)" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="356" y="30" width="150" height="26" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="366" y="47" fill="var(--fg)">2. summary: "did Y"</text>
+  <path d="M508,43 L522,43" stroke="var(--muted)" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="526" y="30" width="164" height="26" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="536" y="47" fill="var(--fg)">3. agent: "let's try X!"</text>
+  <text x="10" y="92" fill="var(--muted)">The session's notes file on disk (longrun)</text>
+  <rect x="10" y="102" width="680" height="30" rx="6" fill="var(--project-soft)" stroke="var(--project)"/>
+  <text x="20" y="121" fill="var(--fg)" font-family="ui-monospace, Menlo, monospace" font-size="11">[s1] dead: X fails: it needs a real Redis, use REDIS_URL=fake://</text>
+  <text x="10" y="160" fill="var(--muted)" font-size="11">one note: [s1] its number (s = own, n = shared), dead = the "dead end" tag, then the fact itself in one line</text>
+  <path d="M120,100 L120,60" stroke="var(--project)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a1)"/>
+  <path d="M580,100 L580,60" stroke="var(--project)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a1)"/>
+  <defs><marker id="a1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker></defs>
+</svg>
+<figcaption>The summary loses the reasons. A line on disk costs 26 tokens and comes back after every compaction, so at step 3 the agent sees that X was already tried.</figcaption>
+</figure>
+<h3>What the skill is made of</h3>
+<div class="grid2">
+  <div class="card"><h4>Mechanics: hooks, CLI, launchd</h4><p>Eleven Claude Code hooks (see part 4 below), the <code>longrun</code> command and a launchd agent. The mechanics work without the model:</p>
+  <ul>
+  <li>print the digest at session start and after every compaction;</li>
+  <li>archive every compaction summary verbatim;</li>
+  <li>write failed commands into the journal;</li>
+  <li>take a HANDOFF snapshot before compaction: the user's last requests and the edited files, so that the session continues from the same place afterwards;</li>
+  <li>deliver messages between sessions;</li>
+  <li>run deferred checks with no model: a PR merged, a URL answers, a file appeared;</li>
+  <li>watch the sessions for the orchestrator, the session that drives the project to a goal (see part 8 below).</li>
+  </ul></div>
+  <div class="card"><h4>The model's instructions: SKILL.md</h4><p>What the model does because it was asked to: writes a one-line note when it hits a dead end, makes a decision or learns a fact about the environment; calls <code>recall</code> when something is missing from the context; hands work to the session that has more context. What to write (see part 5 below).</p></div>
+</div>
+<div class="next"><a href="#l2">Next: three entities</a></div>
+</section>
+
+<section class="lesson" id="l2">
+<div class="kicker">Part 2</div>
+<h2>Three entities, nothing else</h2>
+<div class="grid3">
+  <div class="card project"><h4>Project</h4><p>The shared memory of a group of sessions: the <code>.longrun/</code> directory that <code>longrun init</code> creates in the project folder (or outside the tree with <code>--external</code>). Inside:</p>
+  <ul>
+  <li>shared notes <code>[n1]</code>, <code>[n2]</code>: one line = one fact, seen by every session;</li>
+  <li>the inbox: messages for sessions that are not running now;</li>
+  <li>the orchestrator's task board;</li>
+  <li>the archive of compaction summaries and snapshots.</li>
+  </ul><p>More (see part 3 below).</p></div>
+  <div class="card session"><h4>Session</h4><p>One Claude Code conversation, in the app one row in the sidebar. Its own:</p>
+  <ul>
+  <li>own notes <code>[s1]</code>: the same, but seen only by this session;</li>
+  <li>a journal: the timeline, milestones, failures, compactions;</li>
+  <li>meta: counters and the last status.</li>
+  </ul><p>They live under <code>~/.claude/longrun/</code>, not in the repository.</p></div>
+  <div class="card dir"><h4>Directory</h4><p>The folder where the session started: the root, a worktree, a subdirectory. Stores nothing. Only says which project the session belongs to.</p></div>
+</div>
+<figure id="fig-entities"></figure>
+<p>The word "project" means only the <code>.longrun/</code> directory: not a project in a monorepo and not the Claude Code transcripts folder. A worktree is attached to a project with <code>longrun link</code>; it has no notes of its own. A session belongs to one project. On resume the app gives the session a new CLI id; longrun follows the <code>priorCliSessionIds</code> chain, and the own notes continue.</p>
+<div class="next"><a href="#l3">Next: files</a></div>
+</section>
+
+<section class="lesson" id="l3">
+<div class="kicker">Part 3</div>
+<h2>Files on disk</h2>
+<p>Every file came from a specific problem:</p>
+<ul>
+<li><b>notes.md of a session</b>: disease 1. This session's dead ends and decisions that must survive compaction.</li>
+<li><b>NOTES.md of the project</b>: disease 2. Facts any session needs: a PR number, a decision, a quirk of the environment.</li>
+<li><b>journal.md</b>: a timeline without tokens. Milestones from the agent, and the mechanics append start, end, failed commands, compactions. It shows what a session did without reading the transcript.</li>
+<li><b>archive/compact/</b> and <b>archive/precompact/</b>: every compaction summary verbatim and the snapshot before it (HANDOFF). The first is found by <code>recall</code>, the second comes back in the digest after compaction.</li>
+<li><b>inbox/</b>: a message for a session that is not running now waits for its next turn.</li>
+<li><b>meta.json</b>: counters, the last answer, the running tool. The SESSIONS rows and the flags for the orchestrator are built from it.</li>
+<li><b>board.json</b>, <b>watch/</b>, <b>halt.json</b>, <b>budget.json</b>: the orchestrator's board, deferred checks, stop for everyone, budget samples. Parts 7 and 8.</li>
+</ul>
+<p>Everything shared lives in the project. Everything own lives outside the repository tree and outside synced folders, because it is rewritten on every tool call. Click a file.</p>
+<div class="files"><div class="tree" id="tree-all"></div><div class="fileinfo" id="tree-all-info"><span style="color:var(--muted)">Who writes it, when it is created, what is inside.</span></div></div>
+<table>
+<tr><th>File</th><th>Who writes</th><th>When it is removed</th></tr>
+<tr><td><code>NOTES.md</code> of the project</td><td>the agent: <code>add --shared</code>, <code>rm</code>, <code>replace</code>, <code>prune</code></td><td>entries older than 14 days go to the archive (except <code>pin</code>); <code>rm</code> moves the line to <code>archive/notes.md</code></td></tr>
+<tr><td><code>notes.md</code> of a session</td><td>the agent: <code>add</code>, <code>rm</code>, <code>replace</code>, <code>prune</code></td><td>with a session silent for 7 days (into <code>archive/sessions/</code>)</td></tr>
+<tr><td><code>journal.md</code></td><td>hooks and <code>longrun log</code></td><td>the tail beyond 200 lines goes to the archive</td></tr>
+<tr><td><code>meta.json</code></td><td>hooks on every event</td><td>with the session</td></tr>
+<tr><td><code>archive/compact/*.md</code></td><td>the PostCompact hook</td><td>older than 30 days or more than 40 of them</td></tr>
+<tr><td><code>inbox/*.md</code></td><td><code>send</code>, <code>watch</code>, <code>board</code>, <code>ask</code></td><td>on delivery into <code>.archive/</code>, from there after 30 days</td></tr>
+<tr><td><code>watch/w*.json</code></td><td><code>watch add</code>, the launchd tick</td><td>a week after it fired</td></tr>
+</table>
+<div class="next"><a href="#l4">Next: hooks</a></div>
+</section>
+
+<section class="lesson" id="l4">
+<div class="kicker">Part 4</div>
+<h2>Hooks: where the mechanics live</h2>
+<p>Claude Code calls an external command on every session event. longrun installs eleven such commands, all of them one python script. A hook is a separate process per event, so after an install the new code works in every session at once. Click a hook in the loop.</p>
+<div class="hooks"><div id="hookloop"></div><div class="hookinfo" id="hookinfo"><h4>The loop of one session</h4><div>Start, then turns: the human's request, tool calls, the answer. When the context is full, compaction and SessionStart again. Hooks on every node.</div></div></div>
+<div class="callout ok">The only things that reach the model's context from the hooks: the digest on SessionStart, the shared-notes delta and messages on UserPromptSubmit, a rare reminder to write a note, a context warning and a refusal under halt. Everything else is written to files silently.</div>
+<div class="next"><a href="#l5">Next: what to write</a></div>
+</section>
+
+<section class="lesson" id="l5">
+<div class="kicker">Part 5</div>
+<h2>Notes: what to write and where</h2>
+<p>One line, in English, up to 400 characters (the same fact in another language costs about 1.5x more tokens, and the budgets are hard). One test: <b>would one command, Read or grep get this back?</b> If yes, do not write it.</p>
+<table>
+<tr><th>Tag</th><th>What</th><th>Where, usually</th></tr>
+<tr><td><span class="tag">dead</span></td><td>an approach that failed, and why</td><td>own; shared if another session could walk into it</td></tr>
+<tr><td><span class="tag">decision</span></td><td>a choice and its reason</td><td>shared if it concerns others</td></tr>
+<tr><td><span class="tag">fact</span></td><td>a fact about the environment that cost effort</td><td>shared</td></tr>
+<tr><td><span class="tag">ctx</span></td><td>task framing from the human</td><td>own</td></tr>
+<tr><td><span class="tag">pin</span></td><td>a fact with no expiry: PR number, branch, host</td><td>shared</td></tr>
+<tr><td><span class="tag">todo</span></td><td>a short follow-up the agent owes</td><td>own</td></tr>
+</table>
+<p>Milestones (pushed, PR opened, tests green) go to the journal through <code>longrun log</code>. What outlives the task (who the user is, how they work) goes to Claude Code's auto memory, not here.</p>
+<h3>Check yourself: where does this go?</h3>
+<div class="quiz" id="quiz"></div>
+<div class="next"><a href="#l6">Next: the first scenario</a></div>
+</section>
+
+<section class="lesson" id="l6">
+<div class="kicker">Part 6, a scenario</div>
+<h2>One session survives compaction</h2>
+<p>Project <code>shop</code>, session A. The "Next" and "Back" buttons or the arrow keys. Left: who talks to whom at this step; right: the command and what it prints; below: what changed on disk.</p>
+<div class="legend"><span class="human"><i></i>human, dialog</span><span class="session"><i></i>session</span><span class="project"><i></i>project .longrun</span><span class="own"><i></i>own of a session</span><span class="launchd"><i></i>launchd</span><span class="global"><i></i>global</span></div>
+<div id="p1"></div>
+<div class="callout">What to remember: dead ends and decisions are written right away, milestones go to the journal, after compaction everything comes back by itself, a lost detail is found by <code>recall</code>.</div>
+<div class="next"><a href="#l7">Next: two sessions</a></div>
+</section>
+
+<section class="lesson" id="l7">
+<div class="kicker">Part 7, two scenarios</div>
+<h2>Two sessions: shared memory</h2>
+<p>Session B opens in the same folder.</p>
+<div id="p2"></div>
+<h2 style="margin-top:32px">Hand work over and wait for an event</h2>
+<p>A message to another session arrives there as a user turn. Waiting for an event costs zero tokens: launchd runs the check.</p>
+<div id="p3"></div>
+<div class="callout warn">A <code>cmd</code> check runs under launchd: absolute paths only, no Touch ID, ssh or aliases. First <code>longrun watch test -- cmd '...'</code>.</div>
+<div class="next"><a href="#l8">Next: the orchestrator</a></div>
+</section>
+
+<section class="lesson" id="l8">
+<div class="kicker">Part 8, a scenario</div>
+<h2>The orchestrator: one session drives the project</h2>
+<p>A layer on top of notes and messages. One session holds the goal and the board, the others learn three commands: <code>board take</code>, <code>board done</code>, <code>board block</code>. Everything the orchestrator needs lives in state files; it does not read transcripts.</p>
+<div id="p4"></div>
+<div class="grid2">
+  <div class="card"><h4>Who may do what</h4><p><b>The watcher and the orchestrator</b> only propose. <b>Killing a process</b> (<code>interrupt --yes</code>), <b>stopping everyone</b> (<code>halt</code>) and <b>lifting the stop</b> (<code>resume</code>) happen only on the human's word in this conversation, never on another session's request.</p></div>
+  <div class="card"><h4>Dialog or board</h4><p>The dialog in front of every window is for what cannot wait: a confirmation, an access, an action only the human can take. Questions about the goal and priorities go to the board through <code>board block</code>; the orchestrator sorts them out.</p></div>
+</div>
+<div class="next"><a href="#l9">Next: settings</a></div>
+</section>
+
+<section class="lesson" id="l9">
+<div class="kicker">Part 9</div>
+<h2>Settings</h2>
+<p>Two levels: the global file <code>~/.claude/longrun/config.json</code> and the project file <code>.longrun/config.json</code>; the project value overrides the global one. No need to edit JSON by hand:</p>
+<pre><code>longrun config                                  # effective values and where each comes from: default / global / project
+longrun config set stuck_tool_min 60 --global   # for every project
+longrun config set notes_max_bytes 8000         # for this project
+longrun config unset notes_max_bytes            # back to the default</code></pre>
+<p>There are about forty keys (the full list is in <code>docs/REFERENCE.md</code>, section 6). Right after the install these are worth a look:</p>
+<table>
+<tr><th>Key</th><th>Default</th><th>When and how to change</th></tr>
+<tr><td><code>notes_max_bytes</code>, <code>session_notes_max_bytes</code></td><td>5000, 3000</td><td>Budgets of shared and own notes. They are read at every start, so bigger is not better. A project with four or more sessions where the digest keeps asking for PRUNE: 8000 and 4000.</td></tr>
+<tr><td><code>notes_max_age_days</code></td><td>14</td><td>Older entries go to the archive (except <code>pin</code>). A project with rare sessions: 30.</td></tr>
+<tr><td><code>nudge_tools</code>, <code>nudge_turns</code></td><td>40, 8</td><td>After how many calls or turns without a note to remind (and only if there were edits or failures). Annoying: 80 and 16.</td></tr>
+<tr><td><code>ctx_warn_before</code></td><td>50000</td><td>How many tokens before the auto-compact window to ask for notes. Works together with <code>/autocompact 300k</code> in Claude Code; 50k is enough.</td></tr>
+<tr><td><code>stuck_tool_min</code>, <code>stuck_turn_min</code>, <code>stuck_wait_min</code></td><td>30, 60, 10</td><td>The watcher's thresholds for the orchestrator: a tool, a turn, waiting for a permission (minutes). 40-minute builds are normal for you: <code>stuck_tool_min</code> 60.</td></tr>
+<tr><td><code>budget_on</code>, <code>budget_pace_pct_per_hour</code>, <code>budget_factor</code></td><td>true, 20, 1.5</td><td>The 5-hour window rule: the plan in percent per hour and by how much it may be exceeded before a stop. One session, no orchestrator: <code>budget_on false --global</code>. Want to spend the window in three hours: pace 33.</td></tr>
+<tr><td><code>ask_wait_sec</code>, <code>ask_expire_min</code></td><td>90, 360</td><td>How many seconds the dialog waits for an inline answer; after how many minutes it closes by itself. Usually leave as is.</td></tr>
+<tr><td><code>watch_ttl_days</code></td><td>7</td><td>The default lifetime of a check (global only). Waiting for a release for weeks: 30, or <code>--for 30d</code> on that check.</td></tr>
+<tr><td><code>autocompact_window</code></td><td>0</td><td>Where Claude Code compacts, as set with <code>/autocompact N</code>; accepts <code>300k</code>, <code>1M</code>. 0 = follow Claude Code. A hook cannot run <code>/autocompact</code>, so this is the intent: <code>onboard</code> compares it with the Claude Code setting and asks you to type the command. Recommended for 1M-window models: 300k.</td></tr>
+<tr><td><code>pr_tool</code></td><td>auto</td><td>How pr-merged checks ask for the PR status: <code>gh</code> (GitHub CLI) or <code>arc</code> (Arcadia). <code>auto</code> looks at the folder the watch was registered from.</td></tr>
+<tr><td><code>hq</code></td><td>unset</td><td>The ledger and inbox layer for a project headquarters; turned on with <code>longrun init --hq</code>, not through config.</td></tr>
+</table>
+<div class="callout">The easiest way is not to memorise keys but to tell the agent "set up longrun": <code>longrun onboard</code> prints it a brief with the current value and meaning of every key, it asks you one at a time and applies the answers. The minimal set: the autocompact window 300k (type <code>/autocompact 300k</code> yourself), <code>budget_on false --global</code> if you do not need the orchestrator yet, <code>stuck_tool_min 60</code> if your builds are long. Touch the rest when the digest or the watcher starts getting in the way.</div>
+<div class="next"><a href="#l10">Next: the cheat sheet</a></div>
+</section>
+
+<section class="lesson" id="l10">
+<div class="kicker">Part 10</div>
+<h2>Cheat sheet and limits</h2>
+<div class="cheat">
+<pre><code># install
+./install.sh            # the skill, 11 hooks, the CLI, the longrun MCP server
+longrun watch install   # the launchd agent, every 5 minutes
+longrun init [--hq]     # in the project folder
+longrun link &lt;project&gt;  # from every worktree
+longrun where           # which project, which session</code></pre>
+<pre><code># notes
+longrun add [--shared] -t TAG "..."
+longrun rm s3 n12 | replace n12 "..."
+longrun notes | prune [--auto] [--shared]
+longrun log "milestone"
+longrun recall term</code></pre>
+<pre><code># sessions
+longrun status
+longrun send [--list] [--resume] WHO "text"
+longrun watch add --to WHO --then "..." -- pr-merged ID
+longrun watch ls | test -- CHECK | sessions</code></pre>
+<pre><code># orchestrator
+longrun orchestrate start --goal "..."
+longrun board | board add|assign|take|done|block T7
+longrun fact "..." --task T7 --source review | fact ack F1
+longrun halt "why" | resume
+longrun interrupt WHO --match TEXT [--yes]
+longrun budget | budget set pace 20
+longrun ask "question" --options "Yes,No"</code></pre>
+<pre><code># settings
+longrun onboard [done]
+longrun config
+longrun config set KEY VALUE [--global]
+longrun config unset KEY [--global]</code></pre>
+</div>
+<h3>What the mechanics guarantee and what depends on the model</h3>
+<table>
+<tr><th>Guaranteed by the mechanics</th><th>Depends on the model and its instructions</th></tr>
+<tr><td>the archive of every compaction summary, the journal of failures, the HANDOFF snapshot, notes returning into the context, message delivery, the shared-notes delta, tool refusal under halt, watch checks</td><td>that a note is written and written to the point, that <code>recall</code> runs before re-exploring, that a message from a peer is not taken for the human's word</td></tr>
+</table>
+<h3>Limits</h3>
+<ul>
+<li>The digest is at most 9000 bytes. Evicted in order: the session list, watches, the journal tail, HANDOFF, the ledger. Notes are never evicted, hence the 5000 + 3000 budgets.</li>
+<li>Resume in the app is linked through <code>priorCliSessionIds</code>; <code>/clear</code> in the CLI through a heuristic: "same folder, an end with reason clear no more than three minutes ago".</li>
+<li>The socket and transcript formats are undocumented: on a Claude Code version change <code>send</code> into a running session breaks first, the inbox queue keeps working.</li>
+<li>Under launchd python may have no access to <code>~/Documents</code> (macOS TCC). Checks do not depend on it; a message is then placed into the session directory under <code>~/.claude</code>.</li>
+<li>Subagents do not get the digest. <code>/rewind</code> does not roll notes back.</li>
+</ul>
+<p>Details: <code>README.md</code>, <code>docs/REFERENCE.md</code>, <code>docs/ORCHESTRATOR.md</code> in the repository, and <code>longrun help</code>.</p>
+</section>
+
+</main>
+</div>
+<script>
+window.LR_I18N = { step: 'Step', of: 'of', prev: 'Back', next: 'Next',
+  fileHint: 'Click a file to learn what is inside and who writes it. + created at this step, ~ changed, (read) read.',
+  quiz: ['Own notes', 'Shared', 'Journal', 'Do not write'],
+  loop: ['session start', 'a turn: the human\'s request', 'a tool call', 'the session ended', 'the model\'s answer', 'compaction', 'after compaction SessionStart again'],
+  diagHead: 'Who talks to whom at this step', termHead: 'The agent calls the skill\'s commands at the right moments: the command and what it prints' };
+</script>
+<script src="app.js"></script>
+<script src="data.js"></script>
+<script src="data2.js"></script>
+<script src="data3.js"></script>
+<script src="en.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, LR = window.LR;
+  (function () {
+    const fig = document.getElementById('fig-entities');
+    const box = LR.el('div', { class: 'player diagram', id: 'fig-ent', style: 'padding:10px' });
+    fig.appendChild(box);
+    const nodes = [
+      { id: 'R', kind: 'global', x: 10, y: 20, w: 170, h: 46, title: 'directory shop/', sub: ['.longrun/ lives here'] },
+      { id: 'W1', kind: 'global', x: 10, y: 90, w: 170, h: 46, title: 'worktree feature-1/', sub: ['longrun link ../shop'] },
+      { id: 'W2', kind: 'global', x: 10, y: 160, w: 170, h: 46, title: 'worktree feature-2/', sub: ['longrun link ../shop'] },
+      { id: 'P', kind: 'project', x: 240, y: 80, w: 150, h: 70, title: 'PROJECT shop', sub: ['NOTES.md shared', 'inbox/, board.json'] },
+      { id: 'S1', kind: 'session', x: 450, y: 20, w: 150, h: 46, title: 'Session "HQ"', sub: ['own notes, journal'] },
+      { id: 'S2', kind: 'session', x: 450, y: 90, w: 150, h: 46, title: 'Session "PR 42"', sub: ['own notes, journal'] },
+      { id: 'S3', kind: 'session', x: 450, y: 160, w: 150, h: 46, title: 'Session "discounts"', sub: ['own notes, journal'] },
+    ];
+    const edges = [{ id: 'a', from: 'R', to: 'P' }, { id: 'b', from: 'W1', to: 'P' }, { id: 'c', from: 'W2', to: 'P' }, { id: 'd', from: 'S1', to: 'P', off: 4 }, { id: 'e', from: 'P', to: 'S1', off: 4 }, { id: 'f', from: 'S2', to: 'P', off: 4 }, { id: 'g', from: 'P', to: 'S2', off: 4 }, { id: 'h', from: 'S3', to: 'P', off: 4 }, { id: 'i', from: 'P', to: 'S3', off: 4 }];
+    const d = new LR.Diagram(box, nodes, edges, [610, 230]);
+    d.highlight(['P'], [], false);
+    fig.appendChild(LR.el('figcaption', { text: 'Directories only point at the project. Sessions read the shared part and write into it; each has its own part separately.' }));
+  })();
+  (function () {
+    const st = {}; [C.PROJ, C.OWN, C.GLOB].forEach(r => r.files.forEach(f => st[f.path] = 'keep'));
+    LR.renderTree(document.getElementById('tree-all'), [C.PROJ, C.OWN, C.GLOB], st, document.getElementById('tree-all-info'));
+  })();
+  new LR.HookLoop(document.getElementById('hookloop'), document.getElementById('hookinfo'), [
+    { name: 'SessionStart', what: 'Finds the project by directory (up to .longrun/, else the registry), links the CLI id to the session key (also after a resume under a new id), prints the digest: SHARED, OWN, SESSIONS, watches, the board, messages. Exports LONGRUN_SESSION and LONGRUN_DIR into the session\'s Bash. Runs the cleanup once an hour.' },
+    { name: 'UserPromptSubmit', what: 'Every turn: delivers messages from the inbox, prints the shared-notes delta (+ ~ -) and board changes, counts turns, warns about the context 50k before the window.' },
+    { name: 'PreToolUse', what: 'Checks the halt: under a stop it answers deny with the reason, and the model sees it. Records in meta.json which tool started and when (for the "tool `ya make` 38m" flag). The mcp__longrun__* tools are exempt from halt.' },
+    { name: 'PostToolUse', what: 'Counts calls and edits, closes the record of the running tool. After 40 calls or 8 turns without a note, and only if there were edits or failures, reminds once to write one.' },
+    { name: 'PostToolUseFailure', what: 'A failed Bash command as one FAIL line in the session journal. Three in a row give the "fail x3" flag in SESSIONS.' },
+    { name: 'PermissionRequest', what: 'The session waits for a tool permission: a mark in meta.json, from it the "waiting permission 12m" flag.' },
+    { name: 'Notification', what: 'Claude Code notifications (idle, input needed, a dialog): a waiting mark in meta.json.' },
+    { name: 'Stop', what: 'The model finished its answer: the last answer into meta.json (visible in status and SESSIONS), the end of the turn for telemetry.' },
+    { name: 'PreCompact', what: 'Before compaction: a snapshot into archive/precompact/ with the user\'s last requests, the edited files and recent FAILs. The HANDOFF block (a hand-over to yourself: what the human asked last and what was edited) of the next digest is built from it.' },
+    { name: 'PostCompact', what: 'The compaction summary verbatim into archive/compact/. Then SessionStart with source=compact follows and prints the digest again.' },
+    { name: 'SessionEnd', what: 'Marks the session ended with a reason (clear, logout, other). After a clear, the next session in the same folder within three minutes continues the same directory.' },
+  ]);
+  new LR.Quiz(document.getElementById('quiz'), [
+    { stmt: '"<code>pytest -x</code> hangs: it waits for a real Redis, fixed by <code>REDIS_URL=fake://</code>"', ans: 'own', why: 'A dead end with its reason: the dead tag, own notes. Shared if another session could hit the same.' },
+    { stmt: '"PR 42 = branch cart-total"', ans: 'shared', why: 'An identity with no expiry: pin, shared. Exactly what the session that says "the PR is not created yet" is missing.' },
+    { stmt: '"Tests green, PR opened"', ans: 'log', why: 'A milestone, the timeline: longrun log. Notes are not for progress.' },
+    { stmt: '"The total() function is in cart/models.py:42"', ans: 'no', why: 'One grep returns this in a second. Do not write it.' },
+    { stmt: '"The user asked not to touch the discounts UI until next week"', ans: 'own', why: 'Task framing from the human: ctx, own. Shared if it concerns the other sessions too.' },
+    { stmt: '"The Stripe key for the sandbox comes from 1password, the one in env is stale"', ans: 'shared', why: 'A fact about the environment that cost effort and everyone needs: fact, shared.' },
+  ]);
+  new LR.Player(document.getElementById('p1'), C.s1);
+  new LR.Player(document.getElementById('p2'), C.s2);
+  new LR.Player(document.getElementById('p3'), C.s3);
+  new LR.Player(document.getElementById('p4'), C.s4);
+  LR.Nav();
+})();
+</script>
+</body>
+</html>

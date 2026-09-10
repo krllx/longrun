@@ -1,0 +1,11 @@
+# longrun's own project memory and local Claude Code config
+.longrun/
+.claude/
+
+# local working material, not part of the published skill
+research/docs/
+REVIEW-BRIEF.md
+
+.DS_Store
+__pycache__/
+*.pyc

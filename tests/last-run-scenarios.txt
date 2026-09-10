@@ -1,0 +1,40 @@
+== S1: a new session orients itself in the project (shared picture + who is doing what)
+  ok   S1.1 the new session in another worktree sees the project's shared notes (PR map, decisions)
+  ok   S1.2 shared entries name their author session
+  ok   S1.3 it sees which other sessions exist and what each did last
+  ok   S1.4 it does NOT get the other session's own notes pushed into its context
+  ok   S1.5 its own notes start empty
+  ok   S1.6 but it can pull a detail from another session's own notes on demand
+== S2: own notes survive compaction and stay own
+  ok   S2.1 after compaction the session gets its own notes and its journal back
+  ok   S2.2 and the shared picture
+  ok   S2.3 the compaction summary is archived under the project, named by the session
+  ok   S2.4 another session's compaction digest still excludes A's own notes
+== S3: shared changes reach running sessions on their next turn; own writes are not echoed back
+  ok   S3.1 B's next turn shows the entry A just added, as a delta, not the whole file
+  ok   S3.2 nothing changed -> nothing injected
+  ok   S3.3 B's own shared write is not reported back to B
+  ok   S3.4 ...but A hears about it on A's next turn
+  ok   S3.5 a rewrite shows as ~ and a removal as removed
+== S4: two sessions started in the same directory keep separate own notes
+  ok   S4.1 each has its own notes file
+  ok   S4.2 and the shared file is one
+  ok   S4.3 status lists both by key with their own-note counts
+== S5: the desktop app resumes a session under a NEW CLI id: notes and journal continue
+  ok   S5.1 the new CLI id continues the old session dir (priorCliSessionIds)
+  ok   S5.2 its digest carries the old own notes and journal, labelled as continued
+  ok   S5.3 the digest head names the session as the sidebar does
+  ok   S5.4 before the app wrote its metadata the new id looks fresh
+  ok   S5.5 the first turn after the app caught up rebinds and shows the own notes once
+  ok   S5.6 ...and only once
+== S6: /clear ends one CLI id and starts another in the same process: the session continues
+  ok   S6.1 SessionStart(clear) right after SessionEnd(clear) in the same cwd continues that session
+== S7: a fork inherits the parent's own notes
+  ok   S7.1 the fork starts with a copy of the parent's own notes, in its own dir
+  ok   S7.2 from then on the two diverge
+== S8: work is handed to the session that has the context for it
+  ok   S8.1 a message to a stopped session arrives as its next turn, with the sender named
+  ok   S8.2 a running session gets it on its socket right away, as a user turn
+  ok   S8.3 a watch registered by name fires into that session with the --then text
+
+PASS=30 FAIL=0  (tmp: /tmp/longrun-scen.wEJ4Ik)

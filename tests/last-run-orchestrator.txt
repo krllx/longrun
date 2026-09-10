@@ -1,0 +1,76 @@
+== orchestrator lock: one per project, mirrored outside the project
+  ok   start prints the role
+  ok   lock in the project and its mirror
+  ok   a second session is refused with the holder's name (exit 2)
+  ok   --force takes over
+  ok   status names the orchestrator
+== board: add / assign / take / done / block / dependencies
+  ok   tasks T1..T3 on the board, T3 assigned to C
+  ok   assignment queued in C's inbox
+  ok   B's next turn shows YOUR TASK T1 with the take command
+  ok   a task waiting on another is refused (exit 2)
+  ok   take -> doing with owner
+  ok   taking someone else's doing task is refused
+  ok   block -> message to the orchestrator's inbox
+  ok   done -> state done with outcome, T2 unblocked
+  ok   board listing: goal, counts
+  ok   the orchestrator's turn carries the DONE message and the board changes
+  ok   nothing repeats on the next turn
+  ok   a session's own board change is not echoed back to it
+== facts: record, reach the orchestrator, ack
+  ok   fact F1 recorded and sent to the orchestrator
+  ok   bad source refused
+  ok   orchestrator digest: role, FACTS unhandled, role text
+  ok   worker digest: ORCHESTRATOR line, BOARD, no FACTS block
+  ok   ack marks handled with the decision
+== halt / resume through PreToolUse
+  ok   halt: PreToolUse denies with the reason
+  ok   halt: every tool, not only Bash
+  ok   halt: the longrun CLI itself is exempt
+  ok   halt: the turn injection says so
+  ok   halt: the digest says so
+  ok   resume: tools run again (nothing printed)
+== telemetry: running tools, turn age, waiting, ctx from the transcript
+  ok   PreToolUse records the running tool
+  ok   a longrun CLI call is not recorded
+  ok   PostToolUse clears it by tool_use_id
+  ok   PermissionRequest marks waiting
+  ok   Notification(agent_needs_input) marks waiting for input
+  ok   PostToolUse clears waiting
+  ok   UserPromptSubmit stamps turn_started
+  ok   Stop samples ctx: 262k of the 300k window from the user settings
+  ok   Stop clears turn_started and running
+  ok   PostToolUse warns near the window (once) and tells the orchestrator
+  ok   the warning does not repeat every call
+  ok   status and the sessions block show flags
+  ok   env window wins over the setting
+  ok   model windows: 200k for 4.6, 1M for Sonnet 5
+== watcher: stuck report once per episode, to the orchestrator
+  ok   tick: tool age and turn age reported
+  ok   second tick: nothing new
+  ok   flags clear when the condition does
+  ok   three identical FAILs in a row are reported as a loop
+== interrupt: dry run, then kill with --yes (a child of this test shell stands in for the session)
+  ok   dry run lists the process and refuses to kill without --yes
+tests/orchestrator.sh: line 125: 58484 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
+  ok   --yes kills it and tells the session why
+  ok   the interruption is in the target's journal
+== orchestrate stop
+  ok   only the holder (or --force) stops
+  ok   stop clears the lock and its mirror
+  ok   digest without an orchestrator still shows the board
+== budget: the 5-hour pace rule (endpoint replaced by a fixture)
+  ok   12 minutes into the window: quiet period, no halt
+  ok   20% after 1.5h (expected 30%): no halt, ratio shown
+  ok   50% after 1.5h (x1.67): BUDGET STOP printed, halt.json kind=budget
+  ok   report file and a wake for the orchestrator (inbox here: no socket in tests)
+  ok   tools are refused with the usage reason
+  ok   budget status shows the stop
+  ok   resume lifts the halt and snoozes the rule until the window resets
+  ok   snoozed: a worse sample does not halt again
+  ok   budget off: samples but never halts
+  ok   pace 25/factor 2: 60% after 2h (limit 100%) is fine
+  ok   a missing source is an error, not a halt
+  ok   the watcher tick samples too
+
+PASS=64 FAIL=0  (tmp: /tmp/longrun-orch.zRxc4y)

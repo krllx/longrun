@@ -1,0 +1,135 @@
+{
+  "_comment": "11 hook entries installed into ~/.claude/settings.json by install.sh. LONGRUN_BIN is replaced with the absolute path of scripts/longrun. Entries are recognised on uninstall by that path.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook SessionStart",
+            "timeout": 20,
+            "statusMessage": "longrun: loading notes"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook PreToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell|Agent|Task|Workflow|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook PostToolUseFailure",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook PermissionRequest",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|idle_prompt|agent_needs_input|elicitation_dialog|elicitation_url_dialog",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook Notification",
+            "timeout": 5,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook PreCompact",
+            "timeout": 60,
+            "statusMessage": "longrun: pre-compaction snapshot"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook PostCompact",
+            "timeout": 30,
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook Stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook SessionEnd",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
