@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://krllx.github.io/longrun/course/ja/"><img src="assets/course-banner.ja.svg" alt="コース：longrunの中身はどう動いているのか - 11の短い章、約15分" width="820"></a>
+  <a href="https://krllx.github.io/longrun/course/ja/"><img src="assets/course-banner.ja.svg" alt="コース：longrunの中身はどう動いているのか。11の短い章、約15分" width="820"></a>
 </p>
 
 ---
@@ -53,9 +53,9 @@ curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bas
 
 - `~/.claude/settings.json`：11個のhookエントリと、エージェントが`longrun`を呼べるようにする2つの権限ルール。先にファイルを`~/.claude/backups/`へコピーし、longrunのものではないhookには手を触れません。
 - `~/.claude/skills/longrun/`と、シンボリックリンク`~/.local/bin/longrun`。
-- user scopeのMCPサーバー`longrun`（`claude mcp add`）。`ask`と`notify`のツールはここから来ます。
+- ユーザースコープのMCPサーバー`longrun`（`claude mcp add`）。`ask`と`notify`のツールはここから来ます。
 - **バックグラウンドのタイマー**、5分ごと：macOSではlaunchd agent、Linuxではsystemd user timerかcronの1行。登録したウォッチを確認し、セッションの様子を見ます。数回のシェルチェックだけで、モデルもtokenも使わず、登録した条件のどれかが成立したときだけセッションを起こします。`--no-timer`で省けます。
-- **デスクトップ通知**、質問に「はい」と答えた場合：macOSでは`terminal-notifier`がなければ`brew install terminal-notifier`、`~/.claude/longrun/notifier/`以下に送信用のbundle、そしてmacOSに権限を尋ねさせるためのテスト通知が1つ。Linuxでは`notify-send`があるかを確認するだけです。`--notify`と`--no-notify`は、この質問にあらかじめ答えておくためのものです。
+- **デスクトップ通知**、質問に「はい」と答えた場合：macOSでは`terminal-notifier`がなければ`brew install terminal-notifier`、`~/.claude/longrun/notifier/`以下に送信用のバンドル、そしてmacOSに権限を尋ねさせるためのテスト通知が1つ。Linuxでは`notify-send`があるかを確認するだけです。`--notify`と`--no-notify`は、この質問にあらかじめ答えておくためのものです。
 
 macOSまたはLinux、Claude Code、python3 3.9以上が必要です。cloneから入れる場合も同じ[`install.sh`](install.sh)です。
 
@@ -75,7 +75,7 @@ cd ~/my-project && longrun init && claude "set up longrun"
 <summary><b>デスクトップ通知</b>：何のためにあり、インストーラーは何を尋ねるのか</summary>
 
 - **なぜ**：全停止、発火したウォッチ、終わったターンは、通知がなくてもセッションに届きます。バナーは、別のウィンドウを見ているときにそれへ気づくための手段です。longrunが通知に依存することはありません。
-- **macOS**：Homebrew経由の`terminal-notifier`（OS標準の手段ではバナーが描かれません）と、権限の確認が1回。インストール時に断ったなら、あとから`longrun notify setup`で入れられます。
+- **macOS**：Homebrew経由の`terminal-notifier`（OS標準の手段ではバナーが表示されません）と、権限の確認が1回。インストール時に断ったなら、あとから`longrun notify setup`で入れられます。
 - **Linux**：`notify-send` (`libnotify`)。たいていのデスクトップ環境にはすでに入っています。
 
 `longrun notify --test`は、通知が実際に画面へ届くかを確かめます。見ておく価値のある設定が2つ。`notify_turn_end unfocused`（Claudeのウィンドウが前面にないときにセッションがターンを終えるとバナーを出す）と、絶対に見逃したくない1つのセッションのための`longrun important on|next`です。エージェントが呼ぶ`notify`ツールは、インストーラーが登録する`longrun` MCPサーバーから来ます。macOS特有の癖も含めた全体像は[docs/REFERENCE.md](docs/REFERENCE.md)にあります。
@@ -92,9 +92,9 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 | longrunがない場合 | longrunがある場合 |
 |---|---|
-| compactionが履歴を要約に押し込め、真っ先に消えるのが理由です。30分後、エージェントは自分がすでに差し戻した修正をまた提案します。 | **ディスク上のメモ**。行き止まり・決定・事実を1行ずつ。共有メモは全セッションが見え、自分のメモはcompaction、`/clear`、resumeのたびに戻ってきます。 |
+| compactionは履歴を要約に押し込めます。真っ先に消えるのは「何を試して、なぜ駄目だったか」です。30分後、エージェントは自分がすでに差し戻した修正をまた提案します。 | **ディスク上のメモ**。行き止まり・決定・事実を1行ずつ。共有メモは全セッションから見え、自分のメモはcompaction、`/clear`、resumeのたびに戻ってきます。 |
 | 2つ目のセッションは1つ目の存在を知りません。片方がPRを作ったのに、もう片方は「PRはまだ作られていない」と言います。 | **メッセージとタスク**。セッションがメッセージを送るかタスクを渡すと、相手のセッションにはユーザーのターンとして届きます。 |
-| 「PRがマージされたら教えて」は、tokenを燃やすポーリングループになるか、寝過ごすsleepになります。 | **ウォッチ**。launchdが5分ごとにモデルなしで条件を確かめ、成立したらセッションを起こします。確実で、反応が速く、ただです。 |
+| 「PRがマージされたら教えて」は、tokenを燃やすポーリングループになるか、寝過ごすsleepになります。 | **ウォッチ**。launchdが5分ごとにモデルなしで条件を確かめ、成立したらセッションを起こします。確実で、反応が速く、コストはゼロです。 |
 | 1つのプロジェクトに5つのセッション。何が終わり、何が詰まり、次が何かを知っているのは人間だけです。 | **オーケストレーター**。1つのセッションがボードを持ち、タスクを配り、停滞している仲間を見つけ、どうしても必要なときだけダイアログで人間に尋ねます。 |
 
 pythonファイル1つ、依存なし。
@@ -106,7 +106,7 @@ pythonファイル1つ、依存なし。
 
 ### 1. ディスク上の共有ドキュメント
 
-プロジェクトごとに1つの`.longrun/`が、全セッションの見えるメモを持ちます。各セッションは自分のメモも、リポジトリのツリーの外に持ちます。hookはcompaction、`/clear`、resumeのたびに両方を戻し、毎ターン他のセッションが何を変えたかを表示します。
+プロジェクトごとに1つの`.longrun/`が、全セッションから見えるメモを持ちます。各セッションは自分のメモも、リポジトリのツリーの外に持ちます。hookはcompaction、`/clear`、resumeのたびに両方を戻し、毎ターン他のセッションが何を変えたかを表示します。
 
 ```bash
 longrun add --shared -t pin "PR 42 = branch feature/checkout"     # for every session
@@ -116,7 +116,7 @@ longrun recall 429                                                  # search eve
 
 ### 2. コンテキストを持っているセッションへの委譲
 
-他のセッションへのメッセージは、そこではユーザーのターンとして届きます。動いているセッションはsocket経由ですぐに受け取ります。止まっているセッションは、次のターンでプロジェクトの受信箱から受け取ります。`--resume`を付けたときだけその場で起こされ、これはバックグラウンドの`claude -p`実行なのでtokenを使います。セッションの名前は画面で見えるとおり、サイドバーのタイトルです。
+他のセッションへのメッセージは、そこではユーザーのターンとして届きます。動いているセッションはsocket経由ですぐに受け取ります。止まっているセッションは、次のターンでプロジェクトの受信箱から受け取ります。`--resume`を付けたときだけその場で起こされ、これはバックグラウンドの`claude -p`実行なのでtokenを使います。セッションの名前は、サイドバーに表示されているタイトルです。
 
 ```bash
 longrun send "PR 43: payments" "PR 42 merged, rebase onto main"
@@ -144,7 +144,7 @@ longrun board take T7; longrun board done T7 "PR 42 merged"    # in a worker
 longrun ask "Merge PR 42?" --options "Yes,No"                  # a dialog, answered inline
 ```
 
-レバーは人間が握ったままです。詰まったプロセスを止める(`longrun interrupt`)、全セッションを止める(`longrun halt`)、その停止を解く。監視役とオーケストレーターは提案するだけです。既定ではオフで、自分で有効にして初めて働くものもあります。5時間の使用量予算(`longrun budget on`)は、ウィンドウの消費が計画より先行したときにすべてを止め、どうするかを尋ねます。
+レバーは人間が握ったままです。詰まったプロセスを強制終了する(`longrun interrupt`)、全停止をかける(`longrun halt`)、その停止を解く。監視役とオーケストレーターは提案するだけです。既定ではオフで、自分で有効にして初めて働くものもあります。5時間の使用量予算(`longrun budget on`)は、ウィンドウの消費が計画より先行したときにすべてを止め、どうするかを尋ねます。
 
 ## 仕組み
 
