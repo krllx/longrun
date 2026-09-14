@@ -9,18 +9,22 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 BACKUPS="$CLAUDE_DIR/backups"
 BIN_DIR="${LONGRUN_BIN_DIR:-$HOME/.local/bin}"
 MODE="install"
-NOTIFY=1
+NOTIFY="ask"
 TIMER=1
 for a in "$@"; do
   case "$a" in
     --uninstall) MODE="uninstall" ;;
     --purge) MODE="purge" ;;
+    --notify) NOTIFY=1 ;;
     --no-notify) NOTIFY=0 ;;
     --no-timer) TIMER=0 ;;
-    -h|--help) echo "usage: install.sh [--uninstall | --purge] [--no-notify] [--no-timer]
-  --no-notify  do not set up desktop notifications (on macOS that skips installing terminal-notifier)
+    -h|--help) echo "usage: install.sh [--uninstall | --purge] [--notify | --no-notify] [--no-timer]
+  --notify     set up desktop notifications without asking
+  --no-notify  do not set them up (on macOS that skips installing terminal-notifier)
   --no-timer   do not install the 5-minute timer (watches then wait until 'longrun watch install')
   --purge      also removes ~/.claude/longrun data and the skill dir
+
+Without either notify flag the installer asks, and skips the step when nothing can answer.
 
 Run it from a checkout, or without one:
   curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
@@ -73,21 +77,50 @@ if [ "$MODE" = "install" ]; then
   else
     echo "mcp:    'claude' is not on PATH; register the server by hand: claude mcp add --scope user longrun -- $BIN_DIR/longrun mcp"
   fi
-  # 1b. desktop notifications. Optional in the sense that longrun never depends on them - a halt, a budget
-  # stop and a fired watch reach the session through its socket or inbox either way - but they are set up
-  # here so the user does not have to know any of what follows. Neither OS can draw one unaided: macOS has
-  # no working built-in route at all (an osascript notification is posted on behalf of Script Editor, which
-  # holds no permission, so it is filed and never drawn, silently), and Linux needs libnotify.
+  # 1b. desktop notifications. Asked for, not assumed: they install software on macOS and ask the system for
+  # a permission, and longrun never depends on them - a halt, a budget stop and a fired watch reach the
+  # session through its socket or inbox either way. Neither OS can draw one unaided: macOS has no working
+  # built-in route at all (an osascript notification is posted on behalf of Script Editor, which holds no
+  # permission, so it is filed and never drawn, silently), and Linux needs libnotify.
+  if [ "$NOTIFY" = "ask" ]; then
+    echo ""
+    echo "Desktop notifications. A halt, a session that finished its turn and a watch that came true reach"
+    echo "the session either way; a notification is how you see one while looking at another window."
+    if [ "$(uname)" = "Darwin" ]; then
+      echo "On macOS this installs terminal-notifier through Homebrew and asks the system once for permission."
+    else
+      echo "On Linux this only uses notify-send (libnotify), which most desktops already have."
+    fi
+    # the script itself may be arriving on stdin (curl | bash), so the answer is read from the terminal;
+    # opening it is the test - /dev/tty exists and looks readable even where there is no controlling one
+    if { exec 3</dev/tty; } 2>/dev/null; then
+      printf "Set them up now? [Y/n] "
+      ANS=""
+      if read -r ANS <&3; then         # Enter means yes; end of input is not an answer, so it means no
+        case "$ANS" in [Nn]*) NOTIFY=0 ;; *) NOTIFY=1 ;; esac
+      else
+        NOTIFY=0
+        printf "\n(no answer read from the terminal)"
+      fi
+      exec 3<&-
+      echo ""
+    else
+      NOTIFY=0
+      echo "Nothing here can answer (no terminal), so: skipped. 'longrun notify setup' turns them on later."
+      echo ""
+    fi
+  fi
   if [ "$NOTIFY" = "0" ]; then
-    echo "notify: skipped (--no-notify)"
+    echo "notify: skipped - 'longrun notify setup' (macOS) or a libnotify package (Linux) turns them on later"
   elif [ "$(uname)" = "Darwin" ]; then
     if ! command -v terminal-notifier >/dev/null 2>&1; then
       if command -v brew >/dev/null 2>&1; then
         echo "notify: installing terminal-notifier (Homebrew) - macOS cannot draw a notification without it"
         brew install terminal-notifier >/dev/null 2>&1 || echo "notify: brew install failed; run it by hand, then re-run this installer"
       else
-        echo "notify: skipped - Homebrew is the macOS prerequisite for desktop notifications."
-        echo "        Install it from https://brew.sh, then re-run ./install.sh. Everything else works without it."
+        echo "notify: skipped - Homebrew is what installs terminal-notifier, and macOS draws no notification"
+        echo "        without it. Install Homebrew from https://brew.sh, then run this installer again (or"
+        echo "        just 'longrun notify setup'). Everything else works as it is."
       fi
     fi
     if command -v terminal-notifier >/dev/null 2>&1; then

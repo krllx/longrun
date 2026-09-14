@@ -158,8 +158,9 @@ for the next wake-up.
 
 ## 6. The 5-hour window budget
 
-Policy: plan `pace` percent per hour (default 20 = the whole window in 5 hours), tolerance
-`factor` (1.5). On every tick the watcher compares `used%` with `hours_elapsed * pace`;
+Off by default (`budget_on: false`; `longrun budget on` turns it on, and `orchestrate start`
+offers it when several sessions start sharing one window). Policy: plan `pace` percent per hour
+(default 20 = the whole window in 5 hours), tolerance `factor` (1.5). On every tick the watcher compares `used%` with `hours_elapsed * pace`;
 exceeding it by `factor` times after the first 30 minutes of the window -> `halt` + dialog + report.
 Spending is counted per account, not per project, so this is a global watcher rule, not a
 property of the orchestrator.

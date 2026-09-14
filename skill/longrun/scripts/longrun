@@ -98,7 +98,7 @@ DEFAULTS = {
     "stuck_wait_min": 10,           # waiting for a permission answer longer than this, too
     "stuck_fail_streak": 3,         # the same command failing this many times in a row, too
     "wake_on_stuck": True,          # a stuck report starts a turn in the orchestrator (else: its inbox)
-    "budget_on": True,              # the watcher samples the 5-hour usage window and halts everything on a pace breach
+    "budget_on": False,             # off until asked for: on, the watcher samples the 5-hour usage window and halts everything on a pace breach
     "budget_pace_pct_per_hour": 20, # the plan: 20%/h = the whole window in 5 hours
     "budget_factor": 1.5,           # breach = used >= factor * expected (expected = pace * hours into the window)
     "budget_quiet_min": 30,         # no verdict in the first minutes of a window (too little data)
@@ -1846,6 +1846,9 @@ def cmd_orchestrate(store, args):
         journal(store, me, "* orchestrator start%s" % ((": " + clip(goal, 120)) if goal else ""))
         touch_session_note(store)
         print("orchestrator: %s [%s]%s" % (myname, skey[:8], (" (goal: %s)" % clip(goal, 100)) if goal else ""))
+        if not budget_cfg().get("budget_on", False):
+            print("budget rule: off. Several sessions share one 5-hour window now; `longrun budget on` makes the watcher halt\n"
+                  "everyone and ask the user when it runs ahead of plan (`longrun budget` shows the pace). Offer it to the user.")
         print(ORCH_ROLE)
         return 0
     if sub == "stop":
@@ -2143,7 +2146,7 @@ def budget_scan(force=False, quiet=True):
     on a breach halt everything, report to the orchestrators and to the desktop. -> the state record."""
     cfg = budget_cfg()
     b = load_budget()
-    if not cfg.get("budget_on", True) and not force:
+    if not cfg.get("budget_on", False) and not force:
         return b
     t = time.time()
     if not force and t - float(b.get("sampled_at_epoch") or 0) < float(cfg["budget_check_every"]):
@@ -2168,7 +2171,7 @@ def budget_scan(force=False, quiet=True):
     b["history"] = hist[-80:]
     snoozed = float(b.get("snoozed_until") or 0) > t
     halted = bool(load_halt().get("reason"))
-    if v["breach"] and not snoozed and not halted and cfg.get("budget_on", True):
+    if v["breach"] and not snoozed and not halted and cfg.get("budget_on", False):
         report = budget_report(sample, v, cfg)
         h = {"reason": "usage pace: 5h window %.0f%% used after %dh%02dm, expected <= %.0f%% (%s%%/h x %s)" % (
             f["utilization"], v["elapsed_min"] // 60, v["elapsed_min"] % 60, v["limit"], cfg["budget_pace_pct_per_hour"], cfg["budget_factor"]),
@@ -2230,7 +2233,7 @@ def cmd_budget(store, args):
         die("usage: longrun budget [status | check | on | off | set pace|factor|quiet|every <value>]", 2)
     b = load_budget()
     print("budget rule: %s; plan %s%%/h, breach at x%s, quiet first %s min, sample every %ss (global config %s)" % (
-        "on" if cfg.get("budget_on", True) else "off", cfg["budget_pace_pct_per_hour"], cfg["budget_factor"], cfg["budget_quiet_min"], cfg["budget_check_every"], GLOBAL_CONFIG))
+        "on" if cfg.get("budget_on", False) else "off", cfg["budget_pace_pct_per_hour"], cfg["budget_factor"], cfg["budget_quiet_min"], cfg["budget_check_every"], GLOBAL_CONFIG))
     if b.get("error"):
         print("last sample %s FAILED: %s" % (b.get("sampled_at"), b["error"]))
     elif b.get("sampled_at"):
@@ -4169,6 +4172,23 @@ def cmd_notify(args):
     print(NOTIFY_FIX_MAC if kind == "osascript" else
           "Check System Settings -> Notifications for that program, and that no Focus mode is on.")
     return 1
+
+
+def notify_turn_on_hint():
+    """What to run to get notifications drawn on this machine, "" when they already are. Onboarding offers
+    this: the installer asks about notifications, so a machine that said no once should hear the offer again."""
+    kind = notifier_kind()
+    if kind == "terminal-notifier":
+        return "" if os.path.isdir(NOTIFIER_APP) else "`longrun notify setup` (the sender bundle is not built yet)"
+    if kind == "notify-send":
+        return ""
+    if IS_MAC:
+        if shutil.which("brew"):
+            return "`brew install terminal-notifier`, then `longrun notify setup`"
+        return "Homebrew first (https://brew.sh), then `brew install terminal-notifier` and `longrun notify setup`"
+    if not has_display():
+        return ""   # a server or an ssh session: there is no screen to draw on, do not offer
+    return "install libnotify (`apt install libnotify-bin`, `dnf install libnotify`)"
 
 
 def notify_state_line():
@@ -6296,8 +6316,8 @@ ONBOARD_SETTINGS = [
     ("autocompact_window", "global", "where Claude Code compacts. Recommended 300k on 1M-context models: the digest fits, compactions "
                                      "stay rare, the warning comes 50k before. After the answer: `longrun config set autocompact_window "
                                      "300k --global`, then ask the user to type `/autocompact 300k` in Claude Code (a hook cannot do that)"),
-    ("budget_on", "global", "the watcher halts every session when the 5-hour usage runs ahead of plan (20%/h, stop at 1.5x). "
-                            "One session and no orchestrator -> false"),
+    ("budget_on", "global", "off by default. On, the watcher halts every session when the 5-hour usage runs ahead of plan "
+                            "(20%/h, stop at 1.5x) and asks the user. Several sessions sharing the window, or an orchestrator -> true"),
     ("stuck_tool_min", "global", "a tool call running longer than this (minutes) is flagged to the orchestrator. Long builds -> 60"),
     ("notes_max_bytes", "project", "hard cap of the shared notes, read at every start. Four or more sessions -> 8000"),
     ("session_notes_max_bytes", "project", "hard cap of a session's own notes. Long tasks -> 4000"),
@@ -6363,6 +6383,19 @@ def cmd_onboard(args):
         "  notify:    %s" % notify_state_line(),
         "  autocompact: %s" % ac,
         "  onboarded: %s" % (g.get("onboarded_at") or "never"),
+        "",
+        "NOTIFICATIONS (one or two sentences, then the offer below if there is one)",
+        "  - why they exist: a halt, a budget stop, a fired watch and a finished turn reach the session itself "
+        "either way; the banner is how the user notices one while looking at another window. The installer asks "
+        "about them, so this machine may simply have said no",
+    ]
+    hint = notify_turn_on_hint()
+    if hint:
+        lines.append("  - they are NOT working here. Offer to turn them on, and do it if the user agrees: %s" % hint)
+    else:
+        lines.append("  - working here (%s). `longrun notify --test` is the check, "
+                     "`notify_turn_end` below is the setting worth a word" % notifier_kind())
+    lines += [
         "",
         "SETTINGS TO DECIDE (current value; scope; meaning)",
     ]
@@ -6453,7 +6486,7 @@ HQ LAYER (optional: `longrun init --hq`)
 SETTINGS
   onboard [done]              the first-conversation brief: what longrun does, the nuances, this machine's state, the settings to decide
   config                      effective settings and where each comes from (default / global / project)
-  config set KEY VALUE [--global] | unset KEY [--global]   e.g. `config set notes_max_bytes 8000`, `config set budget_on false --global`
+  config set KEY VALUE [--global] | unset KEY [--global]   e.g. `config set notes_max_bytes 8000`, `config set budget_on true --global`
   notify "text" [--title T] | notify --test   a desktop notification; --test says whether the screen really showed it
   notify setup [--icon FILE]  build the bundle they are sent from, so they carry our icon and name (macOS)
 
