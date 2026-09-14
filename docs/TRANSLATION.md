@@ -270,6 +270,32 @@ register drift between chunks, and that drift is the hardest thing to fix afterw
 Passes A and B are separate agents on purpose. An agent that has just read the English
 will read the translation through it and stop noticing that it sounds like English.
 
+### Bold and italic break in a script that does not use spaces
+
+This one hit zh-CN and ja independently, both times only after the page was live.
+CommonMark refuses to close an emphasis run when the closing `**` or `*` is preceded by
+punctuation and followed by something that is neither whitespace nor punctuation. The
+English pages are safe because a space follows every bold label. A page written in Han or
+kana is not: `**笔记在磁盘上。**每条死胡同` never closes, and the reader sees the asterisks
+as literal text.
+
+Keep the trailing punctuation outside the emphasis - the rendered line looks the same:
+
+```
+**笔记在磁盘上。**每条…     ->  **笔记在磁盘上**。每条…
+*"记一下"*或者*"PR 合了"*   ->  two separate spans, or 或者 gets italicised with them
+```
+
+Do not eyeball this. Render both the English and the translated file through GitHub's own
+renderer and diff the text output - every difference should be an asterisk disappearing:
+
+```bash
+gh api -X POST /markdown -f mode=gfm -f text="$(cat README.ja.md)" > /tmp/out.html
+```
+
+Korean puts a space after its sentence punctuation, so it is mostly safe - but it is
+cheaper to run the check than to assume.
+
 ## 9. Review checklist
 
 The tells, per language. If a PR has none of these, it is probably fine.
@@ -286,4 +312,4 @@ Latin - 的 three times in one clause - 您 - any Traditional character or Taiwa
 
 **All languages** - a command or flag that differs from the English page - a number that
 differs (test counts, sizes, minutes) - a heading anchor that no longer matches a link -
-terminal output translated.
+terminal output translated - a visible `**` or `*` on the rendered page (see section 8).
