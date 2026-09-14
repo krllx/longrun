@@ -27,7 +27,7 @@ English | [Русский](README.ru.md)
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-282_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-326_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -53,6 +53,34 @@ Then, in a Claude Code session in that folder:
 From there, nothing to call. You can talk in words: *"write that down"*, *"what have we tried"*, *"session status"*, *"hand it to the other session"*, *"tell me when the PR merges"*.
 
 > **How it works inside, with examples:** [krllx.github.io/longrun/course](https://krllx.github.io/longrun/course/). Eleven short parts with step-by-step scenarios, about 15 minutes.
+
+<details>
+<summary><b>Desktop notifications</b> - <code>./install.sh</code> sets them up; what it does and how to opt out</summary>
+
+longrun never depends on them: a halt, a budget stop and a watch that came true reach the session itself through its socket or inbox, and the whole test suite runs with notifications off. They are an extra way to notice those while you are looking elsewhere, so the installer turns them on rather than making you read about it first. `./install.sh --no-notify` skips the whole thing.
+
+What it does, by system:
+
+- **macOS**: `brew install terminal-notifier` if it is missing (Homebrew is the prerequisite; without it the installer says so and moves on), then builds `~/.claude/longrun/notifier/longrun.app` and sends one test notification. macOS may ask once whether to allow notifications from "longrun" - allow it. There is no built-in route to replace this: `osascript -e 'display notification'` posts on behalf of Script Editor, which holds no notification permission, so the system files the notification, draws nothing and exits 0. Verified on macOS 15: 25 of 25 filed, 0 drawn, and Script Editor gains no permission even after being launched. The copy exists because the icon and the sender name come only from the bundle that posted the notification - this one carries the Claude icon and the name `longrun`.
+- **Linux**: `notify-send` (`libnotify-bin` on Debian/Ubuntu, `libnotify` on Fedora), which most desktops already have. The installer only reports whether it is there.
+
+`longrun notify --test` is the check either way: it sends a probe, reads back whether the system really drew it, and prints what a click on it opens (the session it is about).
+
+One macOS quirk this makes up for: Claude Code's own "the session finished a turn" notification is sent silent and passive, so macOS files it without a banner. `longrun config set notify_turn_end unfocused --global` adds the loud version, only while the Claude window is not in front.
+
+One session you must not miss - `longrun important`. `unfocused` still says nothing while you are typing in a *different* Claude session, which is exactly when a long-running one finishes and waits for you. Flag it and its turn ends always notify, whatever `notify_turn_end` says and whichever window is in front:
+
+```bash
+longrun important on      # every turn end, until you drop the flag
+longrun important next    # the next turn end only, then it clears itself
+longrun important 3       # the next three
+longrun important off     # drop it
+longrun important --to "PR 42: checkout drawer" next   # flag another session by its sidebar title
+```
+
+The flag lives with the session, so it survives compaction, `/clear` and a resume; `longrun status` shows it and `longrun important` with no argument lists every flagged session of the project.
+
+</details>
 
 ## Why
 
@@ -137,7 +165,7 @@ sequenceDiagram
 
 **Every turn.** Messages from the inbox are delivered. Changes other sessions made to the shared notes appear as a diff: `+` added, `~` rewritten, `-` removed.
 
-**Compaction.** Before it, a snapshot of the last requests, edited files and recent failures. After it, the summary is archived verbatim. The next start prints the digest plus a HANDOFF block, so the session continues from the same place. Resume and `/clear` continue the same notes; a fork gets a copy.
+**Compaction.** Before it, a snapshot of the last requests, edited files and recent failures - plus the instructions for the summariser itself: keep the dead ends with their reasons, keep exact strings, drop what one Read brings back. Claude Code builds the same summary prompt for an automatic compaction as for `/compact <text>`, so this is the same steering, done for you and without the timing. After it, the summary is archived verbatim. The next start prints the digest plus a HANDOFF block, so the session continues from the same place. Resume and `/clear` continue the same notes; a fork gets a copy.
 
 **Cleanup.** Once an hour: old entries to the archive (except `pin`), journals trimmed, silent sessions archived. `add` refuses when a budget is full and names what to drop. Nothing is evicted silently.
 
@@ -195,13 +223,13 @@ Full flags, file formats and verified facts: [docs/REFERENCE.md](docs/REFERENCE.
 ## Development
 
 ```bash
-bash tests/run.sh            # 158 regression checks, no API calls
+bash tests/run.sh            # 202 regression checks, no API calls
 bash tests/scenarios.sh      # 30 scenarios, one per goal
 bash tests/orchestrator.sh   # 64: the orchestrator layer
 bash tests/ask.sh            # 30: the dialog and the MCP server
 ```
 
-The installer copies files into `~/.claude/skills/longrun/`; nothing is loaded from the checkout. New hooks and CLI work in every running session at once, because a hook is a separate process per event. Requires macOS or Linux, Claude Code and python3 (3.9+), with no dependencies.
+The installer copies files into `~/.claude/skills/longrun/`; nothing is loaded from the checkout. New hooks and CLI work in every running session at once, because a hook is a separate process per event. Requires macOS or Linux, Claude Code and python3 (3.9+), with no dependencies. One optional prerequisite, only if you want desktop notifications: Homebrew on macOS (the installer uses it to add terminal-notifier), libnotify on Linux.
 
 ## License
 

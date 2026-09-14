@@ -9,11 +9,15 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 BACKUPS="$CLAUDE_DIR/backups"
 BIN_DIR="${LONGRUN_BIN_DIR:-$HOME/.local/bin}"
 MODE="install"
+NOTIFY=1
 for a in "$@"; do
   case "$a" in
     --uninstall) MODE="uninstall" ;;
     --purge) MODE="purge" ;;
-    -h|--help) echo "usage: install.sh [--uninstall | --purge]   (purge also removes ~/.claude/longrun data and the skill dir)"; exit 0 ;;
+    --no-notify) NOTIFY=0 ;;
+    -h|--help) echo "usage: install.sh [--uninstall | --purge] [--no-notify]
+  --no-notify  do not set up desktop notifications (on macOS that skips installing terminal-notifier)
+  --purge      also removes ~/.claude/longrun data and the skill dir"; exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac
 done
@@ -46,6 +50,36 @@ if [ "$MODE" = "install" ]; then
     fi
   else
     echo "mcp:    'claude' is not on PATH; register the server by hand: claude mcp add --scope user longrun -- $BIN_DIR/longrun mcp"
+  fi
+  # 1b. desktop notifications. Optional in the sense that longrun never depends on them - a halt, a budget
+  # stop and a fired watch reach the session through its socket or inbox either way - but they are set up
+  # here so the user does not have to know any of what follows. Neither OS can draw one unaided: macOS has
+  # no working built-in route at all (an osascript notification is posted on behalf of Script Editor, which
+  # holds no permission, so it is filed and never drawn, silently), and Linux needs libnotify.
+  if [ "$NOTIFY" = "0" ]; then
+    echo "notify: skipped (--no-notify)"
+  elif [ "$(uname)" = "Darwin" ]; then
+    if ! command -v terminal-notifier >/dev/null 2>&1; then
+      if command -v brew >/dev/null 2>&1; then
+        echo "notify: installing terminal-notifier (Homebrew) - macOS cannot draw a notification without it"
+        brew install terminal-notifier >/dev/null 2>&1 || echo "notify: brew install failed; run it by hand, then re-run this installer"
+      else
+        echo "notify: skipped - Homebrew is the macOS prerequisite for desktop notifications."
+        echo "        Install it from https://brew.sh, then re-run ./install.sh. Everything else works without it."
+      fi
+    fi
+    if command -v terminal-notifier >/dev/null 2>&1; then
+      # the icon and the sender name of a macOS banner come only from the bundle that posted it, so we post
+      # from our own copy; building it ends with a test notification, which is also what grants the permission
+      echo "notify: setting up the sender bundle. macOS may ask once whether to allow notifications from"
+      echo "        \"longrun\" - allow it, and a test notification appears when it works."
+      "$BIN_DIR/longrun" notify setup 2>&1 | sed "s/^/        /"
+    fi
+  elif command -v notify-send >/dev/null 2>&1; then
+    echo "notify: notify-send found; check it with 'longrun notify --test'"
+  else
+    echo "notify: no notify-send (libnotify) - halts, budget stops and fired watches still reach the sessions"
+    echo "        themselves; 'apt install libnotify-bin' (or 'dnf install libnotify') to also see them on screen."
   fi
 fi
 

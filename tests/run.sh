@@ -113,8 +113,23 @@ rows=[{"type":"user","sessionId":sid,"message":{"role":"user","content":"Make th
 open(p,"w").write("\n".join(json.dumps(r) for r in rows)+"\n")
 PY
 hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/svc/internal/handlers/post_v_1_screen.go\"},\"tool_response\":{}}" >/dev/null
-hook PreCompact "{$COMMON,\"hook_event_name\":\"PreCompact\",\"trigger\":\"manual\",\"custom_instructions\":\"keep the EPMA decision\"}"
+"$LR" compact-hint --set "keep the exact 403 body verbatim" >/dev/null
+PC="{$COMMON,\"hook_event_name\":\"PreCompact\",\"trigger\":\"auto\",\"custom_instructions\":\"\"}"
+HINT="$(hook PreCompact "$PC")"
+check "PreCompact prints the summariser instructions on stdout (this is what Claude Code appends to the compaction prompt)" "echo \"\$HINT\" | grep -q 'did not work, each with the reason it failed' && echo \"\$HINT\" | grep -q 'post_v_1_screen.go' && echo \"\$HINT\" | grep -q 'keep the exact 403 body verbatim'"
+check "the hint names the notes that come back by themselves, and is plain text (JSON stdout would be read as a decision object)" "echo \"\$HINT\" | grep -q 'longrun notes .*s1' && ! echo \"\$HINT\" | head -1 | grep -q '^[[{]'"
+check "the hint stays inside compact_hint_max_bytes" "test \$(printf '%s' \"\$HINT\" | wc -c) -le 1200"
+PREVIEW="$("$LR" compact-hint 2>/dev/null)"
+check "the compact-hint command previews exactly what the hook sends" "test \"\$PREVIEW\" = \"\$HINT\""
+"$LR" compact-hint --clear >/dev/null
+check "compact-hint --clear drops the session line" "! $LR compact-hint 2>/dev/null | grep -q 'keep the exact 403 body verbatim'"
+"$LR" config set compact_hint false >/dev/null
+OFFHINT="$(hook PreCompact "$PC")"
+check "compact_hint false -> the hook prints nothing and the compaction runs unsteered" "test -z \"\$OFFHINT\""
+"$LR" config unset compact_hint >/dev/null
+hook PreCompact "{$COMMON,\"hook_event_name\":\"PreCompact\",\"trigger\":\"manual\",\"custom_instructions\":\"keep the EPMA decision\"}" >/dev/null
 SNAP="$(ls $LOCAL/archive/precompact/11111111-*.md | head -1)"; check "PreCompact snapshot has user msgs + edited files + FAIL" "grep -q 'Make the /screen handler' '$SNAP' && grep -q 'post_v_1_screen.go' '$SNAP' && grep -q 'go test' '$SNAP'"
+check "the hint is journalled with its size, so it is visible after the fact" "grep -q 'compaction auto .*hint [0-9]* B' '$SD/journal.md'"
 hook PostCompact "{$COMMON,\"hook_event_name\":\"PostCompact\",\"trigger\":\"manual\",\"compact_summary\":\"Summary: we chose personal v4 because V3 API is forbidden (403). Pending: reviewers for PR B.\"}"
 ARCH="$(ls $LOCAL/archive/compact/11111111-*.md | head -1)"; check "PostCompact archives the summary verbatim under the project archive, named by session" "grep -q 'V3 API is forbidden' '$ARCH'"
 OUT="$(hook SessionStart "{$COMMON,\"hook_event_name\":\"SessionStart\",\"source\":\"compact\",\"model\":\"claude-fable-5-1\"}")"
@@ -437,6 +452,11 @@ unset CLAUDE_ENV_FILE
 echo "== inert outside a project"
 cd "$T"; O="$(printf '{"session_id":"x","cwd":"%s","hook_event_name":"SessionStart","source":"startup"}' "$T" | "$LR" hook SessionStart)"; check "hook inert when no longrun project" "test -z \"\$O\""
 "$LR" add --shared x 2>/dev/null; check "cli refuses without a project (exit 3)" "test $? -eq 3"
+# The skill body interpolates `!`longrun where`` and `!`longrun digest``; Claude Code throws the whole prompt
+# away when one of them exits non-zero, and the turn goes silent. They must say "not set up" and exit 0.
+O="$("$LR" digest --source skill 2>&1)"; check "digest outside a project: exit 0, digest-shaped, names init/link/onboard" "test \$? -eq 0 && echo \"\$O\" | grep -q '^<longrun v.* project=none source=skill>' && echo \"\$O\" | grep -q '</longrun>' && echo \"\$O\" | grep -q 'longrun init --external' && echo \"\$O\" | grep -q 'longrun link'"
+"$LR" where >/dev/null 2>&1; check "where outside a project still exits 1, so a script can branch on it" "test \$? -eq 1"
+check "the skill body never lets those two fail the prompt" "grep -q '^!\`longrun where .*|| true\`' '$HERE/../skill/longrun/SKILL.md' && grep -q '^!\`longrun digest .*|| true\`' '$HERE/../skill/longrun/SKILL.md'"
 echo "== config command"
 cd "$HUB"
 "$LR" config set notes_max_bytes 6000 >/dev/null; check "config set writes the project config.json" "grep -q '\"notes_max_bytes\": 6000' '$LOCAL/config.json'"
@@ -488,6 +508,103 @@ check "a machine with no dialog says why (headless, or nothing installed)" \
   "DISPLAY= WAYLAND_DISPLAY= lrpy 'print(m.dialog_missing_reason())' | grep -qE 'osascript|DISPLAY|zenity'"
 check "with no dialog program the ask fails with a reason instead of hanging" \
   "LONGRUN_NO_UI= lrpy 'm.dialog_tool=lambda: \"\"; d=m.dialog_show(\"q?\", [\"a\",\"b\"]); print(d[\"state\"], d[\"error\"])' | grep -q '^failed .'"
+
+echo "== notifications (terminal-notifier over osascript: macOS files an osascript notification and draws nothing)"
+HAVE(){ echo "m.shutil.which=lambda p, *a, **k: '/usr/bin/'+p if p in ($1) else None"; }
+check "auto prefers terminal-notifier whenever it is installed" \
+  "test \"\$(lrpy \"\$(HAVE \"'terminal-notifier','osascript','notify-send'\")
+print(m.notifier_kind())\")\" = terminal-notifier"
+check "without it auto falls back to the OS default: osascript on macOS, notify-send on a Linux desktop" \
+  "test \"\$(DISPLAY=:0 lrpy \"\$(HAVE \"'osascript','notify-send'\")
+print(m.notifier_kind())\")\" = \"\$(test \"\$(uname)\" = Darwin && echo osascript || echo notify-send)\""
+check "a headless box with nothing installed resolves to none, not to a command that will fail" \
+  "test \"\$(DISPLAY= WAYLAND_DISPLAY= lrpy \"\$(HAVE '')
+print(m.notifier_kind())\")\" = none"
+check "the notifier config key pins the program and refuses an unknown one (exit 2)" \
+  "$LR config set notifier osascript --global >/dev/null && test \"\$(lrpy 'print(m.notifier_kind())')\" = osascript && $LR config set notifier growl --global 2>/dev/null; test \$? -eq 2"
+"$LR" config set notifier none --global >/dev/null
+LONGRUN_NO_UI= "$LR" notify --test >/tmp/lr-nt 2>&1; check "notify --test with notifier=none exits 1 and names the config key, not a missing binary" \
+  "test \$? -eq 1 && grep -q 'set to none' /tmp/lr-nt"
+"$LR" config unset notifier --global >/dev/null
+check "each notifier gets its own argv, and only terminal-notifier is asked for a sound" \
+  "lrpy 'print(m.notify_cmd(\"terminal-notifier\",\"T\",\"X\"))' | grep -q -- '-sound' && lrpy 'print(m.notify_cmd(\"osascript\",\"T\",\"X\"))' | grep -q 'display notification' && lrpy 'print(m.notify_cmd(\"notify-send\",\"T\",\"X\"))' | grep -q -- '-a.*longrun'"
+"$LR" notify "must never reach a screen from a test" >/tmp/lr-nu 2>&1; check "LONGRUN_NO_UI sends nothing and says that is why (exit 1)" \
+  "test \$? -eq 1 && grep -q 'LONGRUN_NO_UI' /tmp/lr-nu"
+check "notify_user reports the program it used, so a caller can log how it notified" \
+  "test \"\$(LONGRUN_NO_UI= lrpy \"\$(HAVE \"'terminal-notifier','true'\")
+m.notify_cmd=lambda k,t,x,link='': ['true']
+print(m.notify_user('T','X'))\")\" = terminal-notifier"
+check "the presented flag is unreadable without the macOS database, and that is not a failure" \
+  "test \"\$(lrpy 'print(m.notify_presented(\"nothing\", wait=0))')\" = None"
+check "no macOS database means no records, not a crash" \
+  "test \"\$(lrpy 'print(m.notify_records())')\" = '[]'"
+check "a click target is built only from a real app session id (local_<uuid>), never from a CLI id" \
+  "lrpy 'print(m.session_deep_link(\"local_e5afcd96-5166-44c7-80ab-eddda0ea171b\"))' | grep -q '^claude://code/continue?session=local_e5afcd96-5166-44c7-80ab-eddda0ea171b&source=desktop_action\$' && test \"\$(lrpy 'print([m.session_deep_link(x) for x in (\"\", \"4b21e5e6-0f9b-4be9-a4ff-6f78f4261890\", \"local_a b\")])')\" = \"['', '', '']\""
+check "a missing notifier is never an error: notify_user returns a string for every kind and raises nothing" \
+  "test \"\$(LONGRUN_NO_UI= lrpy \"
+m.shutil.which=lambda p, *a, **k: None
+print([m.notify_user('T','X') for _ in range(1)] == [''], m.notifier_kind())\")\" = \"True none\""
+check "notifications go through our own sender bundle as soon as it exists, and fall back to PATH when it does not" \
+  "test \"\$(lrpy 'print(m.notifier_bin())')\" = terminal-notifier && test \"\$(lrpy \"
+import os
+os.makedirs(os.path.join(m.NOTIFIER_APP,'Contents','MacOS'), exist_ok=True)
+b=os.path.join(m.NOTIFIER_APP,'Contents','MacOS','terminal-notifier')
+open(b,'w').close(); os.chmod(b, 0o755)
+print(m.notifier_bin() == b, m.notify_cmd('terminal-notifier','T','X')[0] == b)\")\" = 'True True'"
+check "the bundle keeps terminal-notifier's own id prefix, so the copy is recognisably a copy" \
+  "lrpy 'print(m.NOTIFIER_ID)' | grep -q '^fr.julienxx.oss.terminal-notifier\\.'"
+check "notify setup refuses politely off macOS instead of building a broken bundle" \
+  "test \"\$(lrpy 'm.IS_MAC=False; rc,msg=m.notifier_setup(); print(rc)')\" = 3"
+check "notify setup with a missing icon file is an argument error, and nothing is built" \
+  "test \"\$(lrpy 'rc,msg=m.notifier_setup(\"/nope/none.icns\"); print(rc)')\" = 2"
+check "notify_turn_end is off by default, and refuses anything but off/unfocused/always (exit 2)" \
+  "test \"\$(lrpy 'print(m.DEFAULTS[\"notify_turn_end\"])')\" = off && $LR config set notify_turn_end sometimes --global 2>/dev/null; test \$? -eq 2"
+check "unfocused notifies only while the Claude app is not the one in front" \
+  "test \"\$(lrpy \"
+m.frontmost_bundle=lambda: 'com.anthropic.claudefordesktop'
+s=type('S',(),{'cfg':{'notify_turn_end':'unfocused'}})()
+print(m.should_notify_turn_end(s))
+m.frontmost_bundle=lambda: 'ru.yandex.desktop.yandex-browser'
+print(m.should_notify_turn_end(s))\")\" = \"\$(printf 'False\\nTrue')\""
+check "always ignores the front app, off never fires, and an unknown value is treated as off" \
+  "test \"\$(lrpy \"
+m.frontmost_bundle=lambda: 'com.anthropic.claudefordesktop'
+print([m.should_notify_turn_end(type('S',(),{'cfg':{'notify_turn_end':v}})()) for v in ('always','off','','nonsense')])\")\" = '[True, False, False, False]'"
+check "the front app is read without Automation permission (lsappinfo), and never crashes when it cannot be told" \
+  "lrpy 'import inspect; print(inspect.getsource(m.frontmost_bundle))' | grep -q 'lsappinfo' && ! lrpy 'import inspect; print(inspect.getsource(m.frontmost_bundle))' | grep -q 'osascript' && lrpy 'm.IS_MAC=False; print(repr(m.frontmost_bundle()))' | grep -q \"^''\$\""
+check "only terminal-notifier carries the click target; the other two drop it instead of failing" \
+  "lrpy 'print(m.notify_cmd(\"terminal-notifier\",\"T\",\"X\",\"claude://x\"))' | grep -q -- \"-open', 'claude://x\" && ! lrpy 'print(m.notify_cmd(\"osascript\",\"T\",\"X\",\"claude://x\"))' | grep -q 'claude://x' && ! lrpy 'print(m.notify_cmd(\"notify-send\",\"T\",\"X\",\"claude://x\"))' | grep -q 'claude://x'"
+echo "== important sessions (the turn end the user must not miss)"
+IMP="$T/flagged"; mkdir -p "$IMP"; ( cd "$IMP" && "$LR" init >/dev/null )
+IMPSID=aaaaaaaa-2222-4333-8444-555555555555
+IMPJ="\"session_id\":\"$IMPSID\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$IMP\""
+IMPSTOP(){ hook Stop "{$IMPJ,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"ready for you\"}" >/dev/null; }
+cd "$IMP"; export LONGRUN_SESSION=$IMPSID
+hook SessionStart "{$IMPJ,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+IMPD="$("$LR" where | sed -n 's/^sessions: //p')/aaaaaaaa"
+check "a session is not important by default, and says which setting turn ends follow instead" \
+  "$LR important | grep -q 'not important - turn ends follow notify_turn_end (off)'"
+"$LR" important next >/dev/null; check "important next arms exactly one turn end" "grep -q '\"left\": 1' '$IMPD/meta.json' && $LR important | grep -q 'important (1 turn left)'"
+check "the flag is in the digest head, so it survives a compaction" "$LR digest --source compact | head -1 | grep -q 'important (1 turn left): every turn end here raises'"
+check "status carries it as a session flag" "$LR status --all | grep -q 'important (1 turn left)'"
+IMPSTOP; check "one turn end spends the counter and clears the flag" "! grep -q '\"important\"' '$IMPD/meta.json' && $LR important | grep -q 'not important'"
+check "the journal records that the turn end was notified (here: that this box has no notifier)" "tail -1 '$IMPD/journal.md' | grep -q 'turn-end notification.*important, the last one'"
+"$LR" important 3 >/dev/null; IMPSTOP; check "important N counts down one turn end at a time" "$LR important | grep -q 'important (2 turns left)'"
+"$LR" important on >/dev/null; IMPSTOP; IMPSTOP; check "important on outlives any number of turn ends" "$LR important | grep -q ': important - it raises'"
+check "another session can be flagged by name, and is listed as important from anywhere in the project" \
+  "$LR important next --to $IMPSID | grep -q 'important (1 turn left)'"
+"$LR" important off >/dev/null; IMPSTOP; check "important off is the only thing that drops it" "$LR important | grep -q 'not important' && ! grep -q '\"important\"' '$IMPD/meta.json'"
+"$LR" important sometimes >/dev/null 2>&1; check "an unknown argument is refused (exit 2), not silently taken as on" "test \$? -eq 2"
+check "the flag beats both gates: notify_turn_end off and the Claude app in front" \
+  "test \"\$(lrpy \"
+m.frontmost_bundle=lambda: 'com.anthropic.claudefordesktop'
+s=type('S',(),dict(cfg=dict(notify_turn_end='off')))()
+print(m.should_notify_turn_end(s), m.consume_important(dict(important=dict(mode='always'))) != '')\")\" = 'False True'"
+check "consume_important spends a counted flag and never goes below zero" \
+  "test \"\$(lrpy \"
+mm=dict(important=dict(mode='count', left=2))
+print([bool(m.consume_important(mm)) for _ in range(3)], 'important' in mm)\")\" = '[True, True, False] False'"
+cd "$HUB"; export LONGRUN_SESSION=$SID
 check "the token comes from Claude Code's own credentials file when there is no keychain item" \
   "mkdir -p '$CLAUDE_CONFIG_DIR' && printf '{\"claudeAiOauth\":{\"accessToken\":\"sk-test-not-a-real-token\"}}' > '$CLAUDE_CONFIG_DIR/.credentials.json' && test \"\$(lrpy 'tok,err=m.keychain_token(); print(bool(tok), err)')\" = 'True '"
 rm -f "$CLAUDE_CONFIG_DIR/.credentials.json"
