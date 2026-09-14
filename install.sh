@@ -10,18 +10,40 @@ BACKUPS="$CLAUDE_DIR/backups"
 BIN_DIR="${LONGRUN_BIN_DIR:-$HOME/.local/bin}"
 MODE="install"
 NOTIFY=1
+TIMER=1
 for a in "$@"; do
   case "$a" in
     --uninstall) MODE="uninstall" ;;
     --purge) MODE="purge" ;;
     --no-notify) NOTIFY=0 ;;
-    -h|--help) echo "usage: install.sh [--uninstall | --purge] [--no-notify]
+    --no-timer) TIMER=0 ;;
+    -h|--help) echo "usage: install.sh [--uninstall | --purge] [--no-notify] [--no-timer]
   --no-notify  do not set up desktop notifications (on macOS that skips installing terminal-notifier)
-  --purge      also removes ~/.claude/longrun data and the skill dir"; exit 0 ;;
+  --no-timer   do not install the 5-minute timer (watches then wait until 'longrun watch install')
+  --purge      also removes ~/.claude/longrun data and the skill dir
+
+Run it from a checkout, or without one:
+  curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+The sources then come from the same repository as a tarball (LONGRUN_REPO, LONGRUN_REF override it)."; exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac
 done
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
+
+# 0. sources. Piped through a shell there is no checkout around us, so fetch one; uninstalling needs no sources.
+if [ "$MODE" = "install" ] && [ ! -f "$HERE/skill/longrun/SKILL.md" ]; then
+  REPO="${LONGRUN_REPO:-krllx/longrun}"
+  REF="${LONGRUN_REF:-main}"
+  command -v curl >/dev/null || { echo "curl is required to fetch the sources (or clone the repo and run ./install.sh)" >&2; exit 1; }
+  command -v tar >/dev/null || { echo "tar is required to fetch the sources (or clone the repo and run ./install.sh)" >&2; exit 1; }
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  echo "source: $REPO@$REF (no checkout here, fetching the tarball)"
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xzf - -C "$TMP" \
+    || { echo "download failed: https://codeload.github.com/$REPO/tar.gz/$REF" >&2; exit 1; }
+  HERE="$(echo "$TMP"/*)"
+  [ -f "$HERE/skill/longrun/SKILL.md" ] || { echo "the tarball has no skill/longrun/SKILL.md" >&2; exit 1; }
+fi
 mkdir -p "$BACKUPS" "$SKILLS_DIR" "$BIN_DIR"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 if [ -f "$SETTINGS" ]; then
@@ -81,6 +103,23 @@ if [ "$MODE" = "install" ]; then
     echo "notify: no notify-send (libnotify) - halts, budget stops and fired watches still reach the sessions"
     echo "        themselves; 'apt install libnotify-bin' (or 'dnf install libnotify') to also see them on screen."
   fi
+  # 1c. the timer that runs the tick every 5 minutes: the watches this machine is waiting on, and the watcher
+  # that looks at the other sessions. Installed here so nothing has to be remembered; `--no-timer` skips it,
+  # and the first `longrun watch add` installs it anyway.
+  if [ "$TIMER" = "0" ]; then
+    echo "timer:  skipped (--no-timer); 'longrun watch install' whenever you want it"
+  elif TIMER_OUT="$("$BIN_DIR/longrun" watch install 2>&1)"; then
+    echo "timer:  $(printf '%s' "$TIMER_OUT" | head -n1)"
+  else
+    printf '%s\n' "$TIMER_OUT" | sed 's/^/timer:  /'
+    echo "timer:  not installed - everything else works; watches will not be checked until it is"
+  fi
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *) echo "PATH:   $BIN_DIR is not on your PATH - add it (e.g. 'export PATH=\"\$HOME/.local/bin:\$PATH\"' in"
+       echo "        ~/.zshrc or ~/.bashrc), otherwise the 'longrun' command below is not found. The hooks are"
+       echo "        unaffected: they call the script by its absolute path." ;;
+  esac
 fi
 
 # 2. merge/remove hook entries in settings.json (identified by the script path)
@@ -128,6 +167,10 @@ print("hooks:  removed %d old longrun entries, added %d" % (removed, added))
 PY
 
 if [ "$MODE" != "install" ]; then
+  # the timer goes first: it runs the script we are about to delete
+  if [ -x "$BIN_DIR/longrun" ]; then
+    "$BIN_DIR/longrun" watch uninstall >/dev/null 2>&1 && echo "timer:  removed" || true
+  fi
   command -v claude >/dev/null 2>&1 && claude mcp remove --scope user longrun >/dev/null 2>&1 && echo "mcp:    server 'longrun' unregistered"
   rm -f "$BIN_DIR/longrun"
   rm -rf "$DEST"
@@ -138,6 +181,9 @@ if [ "$MODE" != "install" ]; then
   else
     echo "data kept: $CLAUDE_DIR/longrun and any project .longrun/ dirs (use --purge to delete the global part)"
   fi
+fi
+if [ "$MODE" = "install" ]; then
+  echo "next:   cd <the folder you open in Claude Code> && longrun init   (then say \"set up longrun\" in a session)"
 fi
 echo "done. Already-running sessions pick the hooks up without a restart (verified on 2.1.260), but their"
 echo "SessionStart digest only appears at the next SessionStart: after a compaction, /clear, resume, or in a new session."

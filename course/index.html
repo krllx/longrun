@@ -45,9 +45,9 @@
 <h2>Quick start: install and just work</h2>
 <p>The skill assumes the human works in sessions as usual, while notes, digests and message delivery are handled by the hooks and by the model following its instructions. Below is everything you do by hand.</p>
 <ol>
-<li><b>Install once.</b> In the skill repository:
-<pre><code>./install.sh            # the skill, 11 hooks in ~/.claude/settings.json, the CLI ~/.local/bin/longrun, the longrun MCP server
-longrun watch install   # the timer: checks and the watcher every 5 minutes</code></pre></li>
+<li><b>Install once.</b> One line, no checkout needed - the installer fetches the sources itself:
+<pre><code>curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash</code></pre>
+It puts in the skill, 11 hooks in <code>~/.claude/settings.json</code>, the CLI <code>~/.local/bin/longrun</code>, the <code>longrun</code> MCP server, the timer that runs the checks and the watcher every five minutes, and the notifications of the next step. From a clone it is the same <code>./install.sh</code>; <code>--uninstall</code> reverses it.</li>
 <li><b>Notifications, if you want them.</b> <code>./install.sh</code> sets them up itself, so this step is only here to say what it did. longrun never depends on them - a halt, a budget stop and a fired watch reach the session through its socket or inbox either way - so <code>./install.sh --no-notify</code> skips it entirely. On macOS the installer runs <code>brew install terminal-notifier</code> when it is missing (Homebrew is the prerequisite; without it it says so and moves on), builds <code>~/.claude/longrun/notifier/longrun.app</code> and sends one test notification; macOS may ask once whether to allow notifications from "longrun" - allow it. There is no built-in route to replace this: <code>osascript -e 'display notification'</code> posts on behalf of Script Editor, which holds no notification permission, so the system files it, draws nothing and exits 0 (25 of 25 that way on macOS 15; Script Editor gains no permission even after being launched). The copy exists because the icon and the sender name come only from the posting bundle - this one carries the Claude icon and the name <code>longrun</code>. On Linux it is <code>notify-send</code> (<code>libnotify</code>), which most desktops already have. Check either way with <code>longrun notify --test</code>: it sends a probe, reads back whether the system really drew it, and prints which session a click opens. One session you must not miss - <code>longrun important on</code> (or <code>next</code>, or a number): its turn ends then always notify, whatever <code>notify_turn_end</code> is set to and whichever window is in front, which is what the focus check cannot do for you while you are typing in another Claude session.</li>
 <li><b>Make the folder a project.</b> A project for longrun is the folder you open in Claude Code. Not necessarily a repository root: it can be a folder with several repositories, a subdirectory of a monorepo or an empty headquarters folder. Run <code>longrun init</code> there once: in a terminal or right in the Claude Code session, the agent runs it for you if asked. A <code>.longrun/</code> directory appears; when the folder is inside a repository, add it to the ignore file (or <code>longrun init --external</code>, which puts the directory under <code>~/.claude/longrun/</code>). From every worktree of the same project: <code>longrun link &lt;path to the project&gt;</code>. Check: <code>longrun where</code>.</li>
 <li><b>Tune it.</b> In the session tell the agent: "set up longrun" (or <code>/longrun onboard</code>). It runs <code>longrun onboard</code>, tells you briefly what the skill does and asks about the main settings: the autocompact window, the 5-hour window budget, the stuck thresholds, note sizes. It applies the answers itself with <code>longrun config set</code>. One exception: a hook cannot set the autocompact window, so the agent asks you to type <code>/autocompact 300k</code> (or the value you chose) in Claude Code. 50 thousand tokens before that threshold a hook asks the session to write its notes before compaction. The keys in detail (see part 9 below).</li>
@@ -258,8 +258,9 @@ longrun config unset notes_max_bytes            # back to the default</code></pr
 <h2>Cheat sheet and limits</h2>
 <div class="cheat">
 <pre><code># install
-./install.sh            # the skill, 11 hooks, the CLI, the longrun MCP server
-longrun watch install   # the timer, every 5 minutes
+curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+                        # skill, 11 hooks, CLI, MCP server, the 5-minute timer, notifications
+longrun watch install   # the timer alone (the installer already did it)
 longrun notify setup    # optional, macOS: the bundle notifications are sent from
 longrun notify --test   # optional: does one reach the screen
 longrun init [--hq]     # in the project folder

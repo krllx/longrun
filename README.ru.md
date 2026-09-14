@@ -40,11 +40,22 @@
 ## Быстрый старт
 
 ```bash
-git clone https://github.com/<you>/longrun-skill && cd longrun-skill
-./install.sh            # скилл, 11 хуков, CLI ~/.local/bin/longrun, MCP-сервер
-longrun watch install   # таймер: watch и watcher раз в 5 минут
-cd ~/projects/shop && longrun init   # в папке, которую открываешь в Claude Code
+curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+cd ~/projects/my-project && longrun init   # папка, которую открываешь в Claude Code
 ```
+
+Из клона - тот же [`./install.sh`](install.sh).
+
+> [!NOTE]
+> **Что установщик меняет на машине**, чтобы ничего не оказалось неожиданностью, - и `./install.sh --uninstall` снимает все это обратно:
+>
+> - `~/.claude/settings.json` - 11 хуков и два правила в permissions, которые разрешают агенту звать `longrun`. Файл сначала копируется в `~/.claude/backups/`, чужие хуки не трогаются.
+> - `~/.claude/skills/longrun/` и симлинк `~/.local/bin/longrun`.
+> - MCP-сервер `longrun` в user scope (`claude mcp add`) - из него берутся тулы `ask` и `notify`.
+> - **фоновый таймер** раз в пять минут: агент launchd на macOS, systemd user timer или строка в cron на Linux. Он проверяет заведенные watch и смотрит на сессии - это несколько shell-проверок, без модели и без токенов, а сессию будит только когда ваше условие сбылось. `--no-timer` пропускает.
+> - **уведомления на рабочем столе**: на macOS `brew install terminal-notifier`, если его нет, бандл-отправитель в `~/.claude/longrun/notifier/` и одно тестовое уведомление - macOS один раз спросит разрешение. На Linux только проверяется наличие `notify-send`. `--no-notify` пропускает.
+>
+> Все остается на машине: заметки - обычные файлы в проекте и в `~/.claude/longrun/`, в сеть скрипт ходит только за этими исходниками и за тем самым `brew install`. Хочется сначала прочитать скрипт: `curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh -o install.sh`, прочитать, потом `bash install.sh`.
 
 Дальше в сессии Claude Code в этой папке:
 
