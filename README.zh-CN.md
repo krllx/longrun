@@ -1,4 +1,4 @@
-[English](README.md) | [Русский](README.ru.md) | 简体中文
+[English](README.md) | [Русский](README.ru.md) | 简体中文 | [日本語](README.ja.md)
 
 <p align="center">
   <img src="assets/hero.jpg" alt="longrun：熬过 compaction 的记忆" width="820">

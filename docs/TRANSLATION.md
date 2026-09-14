@@ -110,13 +110,14 @@ These are translated, and translated the same way every time.
 | dialog (the ask popup) | ダイアログ | 대화 상자 | 对话框 |
 | prune | 整理 | 정리 | 清理 |
 | stuck (session) | 停滞 | 정체 | 卡住 |
-| summary (what compaction leaves) | - | - | 总结 |
-| digest vs summary | - | - | 摘要 vs 总结 - never both 摘要 |
-| dead end | - | - | 死胡同 |
-| watcher (the one watching sessions) | - | - | 监视器 |
-| delta (of the shared notes) | - | - | 差异 |
-| polling | - | - | 轮询 |
-| cheat sheet | - | - | 速查表 |
+| summary (what compaction leaves) | 要約 | - | 总结 |
+| digest vs summary | ダイジェスト vs 要約 - never both 要約 | - | 摘要 vs 总结 - never both 摘要 |
+| dead end | 行き止まり | - | 死胡同 |
+| watcher (the one watching sessions) | 監視役 | - | 监视器 |
+| delta (of the shared notes) | 差分 | - | 差异 |
+| polling | ポーリング | - | 轮询 |
+| cheat sheet | チートシート | - | 速查表 |
+| agent | エージェント | - | agent (kept Latin) |
 
 A `-` means no translator has needed that term in that language yet. Fill the cell in when
 you do, in the PR that needs it - do not leave the row out because one column is empty.

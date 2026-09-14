@@ -27,6 +27,7 @@
     { code: 'en', name: 'English', dir: '' },
     { code: 'ru', name: 'Русский', dir: 'ru' },
     { code: 'zh-CN', name: '简体中文', dir: 'zh-CN' },
+    { code: 'ja', name: '日本語', dir: 'ja' },
   ];
   function LangBar() {
     const box = document.querySelector('nav.side .lang');
