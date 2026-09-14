@@ -134,7 +134,10 @@ LONGRUN_SESSION=$A "$LR" orchestrate stop >/dev/null; check "stop clears the loc
 D="$(LONGRUN_SESSION=$C "$LR" digest)"; check "digest without an orchestrator still shows the board" "echo \"\$D\" | grep -q 'ORCHESTRATOR: none' && echo \"\$D\" | grep -q 'BOARD ('"
 
 echo "== budget: the 5-hour pace rule (endpoint replaced by a fixture)"
-LONGRUN_SESSION=$A "$LR" orchestrate start --force >/dev/null 2>&1
+check "the rule is off by default" "'$LR' budget | grep -q 'budget rule: off'"
+LONGRUN_SESSION=$A "$LR" orchestrate start --force >/tmp/lo-out 2>&1
+check "orchestrate start with the rule off says so and names the switch" "grep -q 'budget rule: off' /tmp/lo-out && grep -q 'longrun budget on' /tmp/lo-out"
+"$LR" budget on >/dev/null; check "budget on flips the global key" "grep -q '\"budget_on\": true' '$CLAUDE_CONFIG_DIR/longrun/config.json'"
 FX="$T/usage.json"; export LONGRUN_BUDGET_FIXTURE="$FX"
 fixture(){ python3 - "$FX" "$1" "$2" <<'PY'
 import json,sys,datetime

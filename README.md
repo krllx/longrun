@@ -23,11 +23,11 @@ English | [Русский](README.ru.md)
 </p>
 
 <p align="center">
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-skill_%2B_11_hooks-d97757">
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-skill-d97757">
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-326_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-329_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -41,61 +41,52 @@ English | [Русский](README.ru.md)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
-cd ~/projects/my-project && longrun init   # the folder you open in Claude Code
 ```
 
-From a clone it is the same [`./install.sh`](install.sh).
+macOS or Linux, Claude Code, python3 3.9+; nothing else. Prefer a checkout? Clone and run the same [`install.sh`](install.sh).
 
 > [!NOTE]
-> **What the installer changes on this machine**, so none of it is a surprise - and `./install.sh --uninstall` takes every line of it back:
->
-> - `~/.claude/settings.json` - 11 hook entries and two permission rules that let the agent call `longrun`. The file is copied to `~/.claude/backups/` first, and hooks that are not ours are left untouched.
-> - `~/.claude/skills/longrun/` and the symlink `~/.local/bin/longrun`.
-> - the MCP server `longrun` in user scope (`claude mcp add`), which is where the `ask` and `notify` tools come from.
-> - **a background timer**, every five minutes: a launchd agent on macOS, a systemd user timer or a cron line on Linux. It checks the watches you registered and looks at the sessions - a few shell checks, no model and no tokens, and it wakes a session only when one of your conditions comes true. `--no-timer` skips it.
-> - **desktop notifications**: on macOS `brew install terminal-notifier` when it is missing, a sender bundle under `~/.claude/longrun/notifier/`, and one test notification - macOS asks once whether to allow them. On Linux it only checks for `notify-send`. `--no-notify` skips it.
->
-> Everything stays on the machine: the notes are plain files under the project and `~/.claude/longrun/`, and the installer goes online only for these sources and that one `brew install`. Prefer to read the script before running it: `curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh -o install.sh`, read, then `bash install.sh`.
+> The installer adds the skill with its `longrun` command for the terminal, hooks in `~/.claude/settings.json`, and a five-minute timer in the background. It asks before setting up desktop notifications. `install.sh --uninstall` takes it all back.
 
-Then, in a Claude Code session in that folder:
+<details>
+<summary>What exactly it changes on this machine</summary>
 
+- `~/.claude/settings.json` - 11 hook entries and two permission rules that let the agent call `longrun`. The file is copied to `~/.claude/backups/` first, and hooks that are not ours are left untouched.
+- `~/.claude/skills/longrun/` and the symlink `~/.local/bin/longrun`.
+- the MCP server `longrun` in user scope (`claude mcp add`), which is where the `ask` and `notify` tools come from.
+- **a background timer**, every five minutes: a launchd agent on macOS, a systemd user timer or a cron line on Linux. It checks the watches you registered and looks at the sessions - a few shell checks, no model and no tokens, and it wakes a session only when one of your conditions comes true. `--no-timer` skips it.
+- **desktop notifications**, if you say yes to the question: on macOS `brew install terminal-notifier` when it is missing, a sender bundle under `~/.claude/longrun/notifier/`, and one test notification that makes macOS ask for permission. On Linux it only checks for `notify-send`. `--notify` and `--no-notify` answer the question in advance.
+
+</details>
+
+Then open a project in Claude Code and say **"set up longrun"**: the agent makes the folder a project and walks you through the settings, one at a time. The same from the terminal:
+
+```bash
+cd ~/my-project && longrun init && claude "set up longrun"
 ```
-/longrun onboard
-```
 
-(or just say **"set up longrun"**). The agent explains the skill, asks about the main settings one at a time and applies them. The one thing a hook cannot set is the autocompact window: it asks you to type `/autocompact 300k`.
+Projects and sessions that are already open count too: `longrun init` in the folder, or "set up longrun" in that session, brings them in without a restart - the hooks are live at once, the notes digest arrives at the session's next start.
 
 From there, nothing to call. You can talk in words: *"write that down"*, *"what have we tried"*, *"session status"*, *"hand it to the other session"*, *"tell me when the PR merges"*.
 
 > **How it works inside, with examples:** [the course](https://krllx.github.io/longrun/course/) - eleven short parts, about 15 minutes.
 
 <details>
-<summary><b>Desktop notifications</b> - <code>./install.sh</code> sets them up; what it does and how to opt out</summary>
+<summary><b>Desktop notifications</b> - what they are for, and what the installer asks about</summary>
 
-longrun never depends on them: a halt, a budget stop and a watch that came true reach the session itself through its socket or inbox, and the whole test suite runs with notifications off. They are an extra way to notice those while you are looking elsewhere, so the installer turns them on rather than making you read about it first. `./install.sh --no-notify` skips the whole thing.
+- **Why:** a halt, a fired watch and a finished turn reach the session either way; a banner is how *you* notice one while looking at another window. longrun never depends on them.
+- **macOS:** `terminal-notifier` via Homebrew (nothing built in draws a banner) and one permission prompt. Said no at install time? `longrun notify setup` later.
+- **Linux:** `notify-send` (`libnotify`), which most desktops already have.
 
-What it does, by system:
-
-- **macOS**: `brew install terminal-notifier` if it is missing (Homebrew is the prerequisite; without it the installer says so and moves on), then builds `~/.claude/longrun/notifier/longrun.app` and sends one test notification. macOS may ask once whether to allow notifications from "longrun" - allow it. There is no built-in route to replace this: `osascript -e 'display notification'` posts on behalf of Script Editor, which holds no notification permission, so the system files the notification, draws nothing and exits 0. Verified on macOS 15: 25 of 25 filed, 0 drawn, and Script Editor gains no permission even after being launched. The copy exists because the icon and the sender name come only from the bundle that posted the notification - this one carries the Claude icon and the name `longrun`.
-- **Linux**: `notify-send` (`libnotify-bin` on Debian/Ubuntu, `libnotify` on Fedora), which most desktops already have. The installer only reports whether it is there.
-
-`longrun notify --test` is the check either way: it sends a probe, reads back whether the system really drew it, and prints what a click on it opens (the session it is about).
-
-One macOS quirk this makes up for: Claude Code's own "the session finished a turn" notification is sent silent and passive, so macOS files it without a banner. `longrun config set notify_turn_end unfocused --global` adds the loud version, only while the Claude window is not in front.
-
-One session you must not miss - `longrun important`. `unfocused` still says nothing while you are typing in a *different* Claude session, which is exactly when a long-running one finishes and waits for you. Flag it and its turn ends always notify, whatever `notify_turn_end` says and whichever window is in front:
-
-```bash
-longrun important on      # every turn end, until you drop the flag
-longrun important next    # the next turn end only, then it clears itself
-longrun important 3       # the next three
-longrun important off     # drop it
-longrun important --to "PR 42: checkout drawer" next   # flag another session by its sidebar title
-```
-
-The flag lives with the session, so it survives compaction, `/clear` and a resume; `longrun status` shows it and `longrun important` with no argument lists every flagged session of the project.
+`longrun notify --test` checks that one really reaches the screen. Two settings worth a look: `notify_turn_end unfocused` (a banner when a session finishes a turn while the Claude window is not in front) and `longrun important on|next` for the one session you must not miss. The `notify` tool the agent calls comes from the `longrun` MCP server the installer registers. The full story, macOS quirks included: [docs/REFERENCE.md](docs/REFERENCE.md).
 
 </details>
+
+## In short
+
+**By itself, from the first session:** the agent keeps notes on disk - dead ends, decisions, facts - and the hooks bring them back after every compaction, `/clear` and resume; the summariser is told what to keep; every turn shows what other sessions of the project changed.
+
+**When you ask, or the agent sees the need:** "tell me when the PR merges" (a watch that spends no tokens waiting), messages and tasks between sessions, a notification when the session you care about finishes, one session driving the others to a goal.
 
 ## Why
 
@@ -106,9 +97,12 @@ The flag lives with the session, so it survives compaction, `/clear` and a resum
 | "Tell me when the PR merges" turns into a polling loop that burns tokens, or into a sleep that oversleeps. | **Watches.** launchd checks the condition every five minutes without a model and wakes the session when it holds. Reliable, reactive, free. |
 | Five sessions on one project, and the human is the only one who knows what is done, stuck and next. | **An orchestrator.** One session keeps the board, hands out tasks, spots stuck peers, and asks the human through a dialog only when it must. |
 
-One python script with no dependencies: the CLI, the 11 hooks and the MCP server are the same file.
+One python file, no dependencies.
 
 ## Four ways sessions coordinate
+
+> [!NOTE]
+> The commands below are what the agents run for themselves - the skill tells them when to write a note, when to send a message, when to set a watch. Nothing here is a command set to memorise: you say *"write that down"* or *"tell me when the PR merges"*, or nothing at all. They are shown because you can run any of them by hand when you want to.
 
 ### 1. Shared documents on disk
 
@@ -122,7 +116,7 @@ longrun recall 429                                                  # search eve
 
 ### 2. Delegation to the session that has the context
 
-A message to another session arrives as a user turn. A running session gets it right away through its socket. A stopped one gets it from the project inbox on its next turn, or `--resume` wakes it headless. Sessions are named the way you see them: the sidebar title.
+A message to another session arrives as a user turn. A running session gets it right away through its socket. A stopped one gets it from the project inbox on its next turn; only when you pass `--resume` is it woken right away, as a `claude -p` run in the background, which spends tokens. Sessions are named the way you see them: the sidebar title.
 
 ```bash
 longrun send "PR 43: payments" "PR 42 merged, rebase onto main"
@@ -138,7 +132,7 @@ longrun watch add --to "PR 43: payments" --then "rebase onto main" -- pr-merged 
 longrun watch add --then "check the deploy" -- at 10:00
 ```
 
-Checks: `pr-merged` (GitHub via `gh`, Arcadia via `arc`), `pr-status`, `at`, `file`, `http`, `cmd`.
+Checks: `pr-merged` (GitHub via `gh`), `pr-status`, `at`, `file`, `http`, `cmd`.
 
 ### 4. Selective autonomy: one session drives the others
 
@@ -150,28 +144,26 @@ longrun board take T7; longrun board done T7 "PR 42 merged"    # in a worker
 longrun ask "Merge PR 42?" --options "Yes,No"                  # a dialog, answered inline
 ```
 
-The human keeps the levers: killing a stuck process (`longrun interrupt`), stopping every session (`longrun halt`), lifting the stop. The watcher and the orchestrator only propose. A 5-hour usage budget halts everything on a breach and asks you what to do.
+The human keeps the levers: killing a stuck process (`longrun interrupt`), stopping every session (`longrun halt`), lifting the stop. The watcher and the orchestrator only propose. Optional and off until you turn it on: a 5-hour usage budget (`longrun budget on`) that halts everything when the window runs ahead of plan and asks you what to do.
 
 ## How it works
 
 ```mermaid
 sequenceDiagram
-    participant CC as Claude Code
-    participant H as longrun hooks
-    participant P as project (.longrun/)
-    participant S as session (~/.claude/longrun/sessions)
-    CC->>H: SessionStart
-    H->>P: reads NOTES, inbox, board
-    H->>S: reads notes and journal, writes meta
-    H-->>CC: digest: SHARED + OWN + SESSIONS
-    CC->>S: longrun add -t dead "..." (the agent)
-    CC->>P: longrun add --shared -t pin "..." (the agent)
-    CC->>H: UserPromptSubmit
-    H-->>CC: what changed in SHARED since the last turn, messages
-    CC->>H: PreCompact / PostCompact
-    H->>P: snapshot and the summary into archive/
-    CC->>H: SessionStart(compact)
-    H-->>CC: digest + HANDOFF + journal tail
+    participant S as Claude Code session
+    participant L as longrun (hooks)
+    participant D as notes on disk
+    S->>L: session starts
+    L->>D: read the project's shared notes and this session's own
+    L-->>S: digest: what is known, who else is working, what is waiting
+    Note over S: the agent works, writes a line per dead end or decision
+    S->>D: longrun add ...
+    S->>L: every turn
+    L-->>S: what other sessions changed, messages for you
+    S->>L: compaction is coming
+    L->>D: snapshot - and tell the summariser what to keep
+    S->>L: session starts again (after compaction, /clear, resume)
+    L-->>S: the same digest, plus where you left off
 ```
 
 **Start.** The hook finds the project by directory and prints the digest: shared notes, own notes, the other sessions (alive or not, what each did last), pending watches, undelivered messages.
@@ -240,11 +232,11 @@ Full flags, file formats and verified facts: [docs/REFERENCE.md](docs/REFERENCE.
 ```bash
 bash tests/run.sh            # 202 regression checks, no API calls
 bash tests/scenarios.sh      # 30 scenarios, one per goal
-bash tests/orchestrator.sh   # 64: the orchestrator layer
+bash tests/orchestrator.sh   # 67: the orchestrator layer
 bash tests/ask.sh            # 30: the dialog and the MCP server
 ```
 
-The installer copies files into `~/.claude/skills/longrun/`; nothing is loaded from the checkout. New hooks and CLI work in every running session at once, because a hook is a separate process per event. Requires macOS or Linux, Claude Code and python3 (3.9+), with no dependencies. One optional prerequisite, only if you want desktop notifications: Homebrew on macOS (the installer uses it to add terminal-notifier), libnotify on Linux.
+The installer copies files into `~/.claude/skills/longrun/`; nothing is loaded from the checkout. A running session picks an update up without a restart, because a hook is a separate process per event.
 
 ## License
 
