@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1640 260" width="1640" height="260" role="img" aria-label="课程：longrun 内部是怎么运转的" font-family="-apple-system, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Segoe UI', Helvetica, Arial, sans-serif">
+  <rect x="1" y="1" width="1638" height="258" rx="26" fill="#141414" stroke="#33322f" stroke-width="2"/>
+  <rect x="56" y="66" width="6" height="128" rx="3" fill="#d97757"/>
+  <text x="96" y="86" font-size="24" font-weight="600" letter-spacing="4" fill="#d97757">课程</text>
+  <text x="94" y="152" font-size="58" font-weight="700" letter-spacing="-1" fill="#f2f0eb">longrun 内部是怎么运转的</text>
+  <text x="96" y="200" font-size="28" fill="#9a9a94">11 个短章节，每个都有分步场景，约 15 分钟</text>
+  <rect x="1266" y="94" width="310" height="72" rx="36" fill="#d97757"/>
+  <text x="1421" y="139" font-size="28" font-weight="600" fill="#141414" text-anchor="middle">打开课程</text>
+</svg>

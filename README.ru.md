@@ -1,4 +1,4 @@
-[English](README.md) | Русский
+[English](README.md) | Русский | [简体中文](README.zh-CN.md)
 
 <p align="center">
   <img src="assets/hero.jpg" alt="longrun: память, которая переживает компакцию" width="820">

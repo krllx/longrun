@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>longrun：迷你课程</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..700&family=Geist+Mono:wght@300..600&family=Inter:wght@300..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="layout">
+<nav class="side">
+  <div class="brand">longrun <small>迷你课程，11 个章节，约 15 分钟</small></div>
+  <div class="lang"><a href="../">English</a></div>
+  <ol>
+    <li><a href="#l0"><span class="num">0</span>快速开始</a></li>
+    <li><a href="#l1"><span class="num">1</span>为什么</a></li>
+    <li><a href="#l2"><span class="num">2</span>三个实体</a></li>
+    <li><a href="#l3"><span class="num">3</span>磁盘上的文件</a></li>
+    <li><a href="#l4"><span class="num">4</span>hook：机械层在哪儿</a></li>
+    <li><a href="#l5"><span class="num">5</span>笔记：该写什么</a></li>
+    <li><a href="#l6"><span class="num">6</span>场景：一个会话</a></li>
+    <li><a href="#l7"><span class="num">7</span>场景：两个会话、交接、等待</a></li>
+    <li><a href="#l8"><span class="num">8</span>场景：编排器</a></li>
+    <li><a href="#l9"><span class="num">9</span>设置</a></li>
+    <li><a href="#l10"><span class="num">10</span>速查表和边界</a></li>
+  </ol>
+  <div class="progress"><i></i></div>
+</nav>
+<main>
+
+<h1>longrun</h1>
+<p style="color:var(--muted);font-size:0.92rem;margin-bottom:10px">英文版是源文本，可能比这一页更新。欢迎纠错，见仓库里的 <code>docs/TRANSLATION.md</code>。</p>
+<p class="lead">给 Claude Code 会话的记忆与协作。这个 skill 让会话用四种方式协作：把共享文档放在磁盘上；把消息和任务交给手里有上下文的那个会话；用事件监听在事件发生时叫醒会话；让一个会话带着其余会话走向目标。课程在一个玩具项目 <code>shop</code> 上一步一步演示每一种是怎么工作的。如果你不关心内部机制，看完第 0 章就够了。</p>
+<div class="grid2">
+  <div class="card project"><h4>1. 磁盘上的共享文档</h4><p>每个项目一个 <code>.longrun/</code>，里面是所有会话都看得到的笔记，另外每个会话还有自己的笔记。每次 compaction（对话历史被自动摘要）、<code>/clear</code> 和 resume 之后，hook 把两者都带回来，并在每一轮显示其他会话改了什么。见第 <a href="#l3">3</a>、<a href="#l5">5</a>、<a href="#l6">6</a> 章。</p></div>
+  <div class="card session"><h4>2. 交接：消息和任务</h4><p>发给另一个会话的消息或任务，在那边是一轮用户输入：它在运行就走 socket，它停了就在下一轮走收件箱。会话的名字就是你在侧边栏看到的样子。见第 <a href="#l7">7</a> 章。</p></div>
+  <div class="card dir"><h4>3. 响应式：不会睡过头的等待</h4><p>事件监听就是一段确定性的检查，由定时器每五分钟跑一次，全程不调用模型。条件成立时，会话带着你给的那段文字醒来。没有轮询循环，等待不花 token，也没有睡过头的 sleep。见第 <a href="#l7">7</a> 章。</p></div>
+  <div class="card"><h4>4. 有选择的自治：编排器</h4><p>一个会话维护任务板，带着已经打开的那些会话走向目标：派任务、解阻塞、发现卡住的同伴，只在必要时才通过对话框问人。开关（全部停止、打断、解除停止）始终握在人手里。见第 <a href="#l8">8</a> 章。</p></div>
+</div>
+
+<section class="lesson" id="l0">
+<div class="kicker">第 0 章</div>
+<h2>快速开始：装好，然后照常干活</h2>
+<p>这个 skill 假定人还是照常在会话里干活，而笔记、摘要和消息投递由 hook 以及照着指示走的模型负责。下面是你需要亲手做的全部事情。</p>
+<ol>
+<li><b>装一次就好。</b>一行命令，不需要 checkout，安装脚本自己去取源码：
+<pre><code>curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash</code></pre>
+它装上 skill、<code>~/.claude/settings.json</code> 里的 11 个 hook、CLI <code>~/.local/bin/longrun</code>、<code>longrun</code> MCP 服务器，以及一个定时器，每五分钟跑一次检查和监视器。它只问你一件事：桌面通知，也就是下一步。从 clone 出来的仓库装也是同一个 <code>install.sh</code>；<code>--uninstall</code> 撤销一切。</li>
+<li><b>通知，想要就装。</b><code>install.sh</code> 会问要不要配置通知，装不装就取决于你在那儿的回答。longrun 从不依赖通知：全部停止、预算停止和触发的事件监听，本来就会经由 socket 或收件箱到达会话，所以拒绝了也不会有别的影响（<code>--no-notify</code> 提前替你回答，<code>longrun notify setup</code> 以后再打开）。在 macOS 上，缺少 <code>terminal-notifier</code> 时安装脚本会执行 <code>brew install terminal-notifier</code>（前提是有 Homebrew；没有就直说一声然后跳过），构建 <code>~/.claude/longrun/notifier/longrun.app</code> 并发一条测试通知；macOS 可能会问一次是否允许来自 "longrun" 的通知，允许它。系统里没有别的路子能替代这一套：<code>osascript -e 'display notification'</code> 是以 Script Editor 的身份发出的，而它没有通知权限，于是系统把通知归档、什么都不画，还返回 0（在 macOS 15 上 25 次全是如此；就算先打开过 Script Editor 也拿不到权限）。之所以要复制一个 bundle，是因为图标和发送者名字只能来自发送它的那个 bundle，而这一个带着 Claude 的图标和 <code>longrun</code> 这个名字。在 Linux 上用的是 <code>notify-send</code> (<code>libnotify</code>)，大多数桌面环境已经有了。两种系统都可以用 <code>longrun notify --test</code> 检查：它发一条探针，再回头读一次，确认系统真的把它画了出来，并打印点一下会打开哪个会话。有一个会话你绝对不能错过：<code>longrun important on</code>（或者 <code>next</code>，或者一个数字）让它每轮结束时一定发通知，不管 <code>notify_turn_end</code> 设成了什么，也不管当前前台是哪个窗口；你在另一个 Claude 会话里打字时，Claude 窗口就在前台，靠焦点判断的那条规则不会发通知。</li>
+<li><b>把文件夹变成项目。</b>对 longrun 来说，项目就是你在 Claude Code 里打开的那个文件夹。不一定是仓库根目录：可以是装着好几个仓库的文件夹、monorepo 的一个子目录，或者一个空的指挥部文件夹。在那里跑一次 <code>longrun init</code>：在终端里跑，或者直接在 Claude Code 会话里说一声，agent 会替你跑。一个 <code>.longrun/</code> 目录会出现；如果这个文件夹在仓库里，把它加进 ignore 文件（或者用 <code>longrun init --external</code>，它把目录放到 <code>~/.claude/longrun/</code> 下）。同一个项目的每个 worktree 里：<code>longrun link &lt;project&gt;</code>。检查一下：<code>longrun where</code>。</li>
+<li><b>调一调。</b>在会话里对 agent 说："set up longrun"（或者 <code>/longrun onboard</code>）。它会跑 <code>longrun onboard</code>，简短讲一下这个 skill 做什么，然后问你几个主要设置：autocompact 窗口、5 小时窗口的预算、卡住的阈值、笔记大小。它自己用 <code>longrun config set</code> 把答案落下去。只有一个例外：hook 设不了 autocompact 窗口，所以 agent 会让你在 Claude Code 里手敲 <code>/autocompact 300k</code>（或者你选的那个值）。在离这个阈值还有 5 万 token 时，一个 hook 会请会话在 compaction 之前先把笔记写了。各个 key 的细节见下面第 9 章。</li>
+<li><b>干活。</b>什么都不用调用。会话启动时拿到摘要（共享笔记、自有笔记、还有谁在干活），compaction 之后一切自己回来，其他会话的改动在下一轮送到。agent 自己会把死胡同和决定写成笔记。你可以用大白话说：“记一下”、“我们都试过什么”、“会话状态”、“把这个交给另一个会话”、“还剩什么”、“PR 合了告诉我”。</li>
+<li><b>多个会话，一个共同目标。</b>在其中一个里说：“接过编排器的角色，目标是……”。它会建一块任务板并派活；其他会话把任务当作一轮收下，什么都不用学。“让所有人停下”和“继续”同样是大白话，在编排器会话里说，见下面第 8 章。</li>
+</ol>
+<div class="callout ok">一条命令做诊断：<code>longrun where</code>（在哪个项目、哪个会话）、<code>longrun status</code>（每个会话在做什么）、<code>longrun watch status</code>（定时器还活着吗）、<code>longrun notify --test</code>（通知到得了屏幕吗）、<code>longrun config</code>（生效的设置）。</div>
+<div class="next"><a href="#l1">下一章：为什么要这么设计</a></div>
+</section>
+
+<section class="lesson" id="l1">
+<div class="kicker">第 1 章</div>
+<h2>为什么</h2>
+<p>模型的上下文是有限的。跑得久了，compaction 一定会发生：窗口满了自动触发，或者手动 <code>/compact</code>。Claude Code 在它之前和之后都会通知 hook（PreCompact、PostCompact），longrun 把这两个时刻都接住了。但 compaction 该丢的还是会丢：历史被压成一段总结，下一次 compaction 再把这段总结压一遍。</p>
+<div class="stripe">
+  <div class="s bad"><b>问题 1：compaction</b>总结最先丢掉的就是“我们试过什么、为什么没成”。半小时后 agent 又提出了它自己已经回退掉的那个改法。</div>
+  <div class="s bad"><b>问题 2：多个会话</b>各自活在自己的窗口里。一个已经开了 PR，另一个不知道，还在说“PR 还没建”。一个撞过的死胡同，另一个再撞一次。</div>
+  <div class="s bad"><b>问题 3：等待</b>“PR 合了告诉我”要么变成轮询循环，每次醒来都烧 token，要么变成睡过头、错过事件的 sleep。</div>
+  <div class="s bad"><b>问题 4：多个会话，一个目标</b>五个会话在一个项目上，只有人自己知道什么做完了、什么卡住了、下一步是什么。每一次交接都要经过人。</div>
+  <div class="s good"><b>解法 1：磁盘上的文档</b>磁盘上的笔记不会退化。每次 compaction、<code>/clear</code> 和 resume 之后 hook 把笔记带回来，并把 compaction 的总结原样归档。</div>
+  <div class="s good"><b>解法 2：消息和任务</b>每个项目一个 <code>.longrun/</code>：所有会话都看得到的共享笔记、带状态的会话列表，以及作为一轮用户输入送达的消息和任务。</div>
+  <div class="s good"><b>解法 3：事件监听</b>定时器每五分钟检查一次条件，不调用模型，条件成立就唤醒会话。可靠、及时、还不花钱。</div>
+  <div class="s good"><b>解法 4：编排器</b>一个会话维护任务板、派发任务、发现卡住的同伴，只在必要时才通过对话框问人。</div>
+</div>
+<p>下面这张图说的是问题 1。<b>上面一行</b>：模型上下文里装着什么，从左到右是时间顺序：先是完整历史，compaction 之后只剩总结，然后是读着这段总结的 agent。<b>下面一行</b>：磁盘上的文件，agent 一开始就在里面写了一条笔记。虚线箭头：笔记在启动时进入上下文，compaction 之后再进入一次。</p>
+<figure>
+<svg viewBox="0 0 700 175" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Segoe UI, sans-serif" font-size="12">
+  <text x="10" y="18" fill="var(--muted)">模型上下文随时间的变化</text>
+  <rect x="10" y="30" width="326" height="26" rx="6" fill="var(--session-soft)" stroke="var(--session)"/>
+  <text x="20" y="47" fill="var(--fg)">1. 历史：试过 X，没成，回退了，改用 Y……</text>
+  <path d="M338,43 L352,43" stroke="var(--muted)" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="356" y="30" width="150" height="26" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="366" y="47" fill="var(--fg)">2. 总结：“做了 Y”</text>
+  <path d="M508,43 L522,43" stroke="var(--muted)" stroke-width="2" marker-end="url(#a1)"/>
+  <rect x="526" y="30" width="164" height="26" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="536" y="47" fill="var(--fg)">3. agent：“来试试 X 吧！”</text>
+  <text x="10" y="92" fill="var(--muted)">会话在磁盘上的笔记文件 (longrun)</text>
+  <rect x="10" y="102" width="680" height="30" rx="6" fill="var(--project-soft)" stroke="var(--project)"/>
+  <text x="20" y="121" fill="var(--fg)" font-family="ui-monospace, Menlo, monospace" font-size="11">[s1] dead: X fails: it needs a real Redis, use REDIS_URL=fake://</text>
+  <text x="10" y="160" fill="var(--muted)" font-size="11">一条笔记：[s1] 是它的编号（s = 自有，n = 共享），dead 是“死胡同”标签，后面一行就是事实本身</text>
+  <path d="M120,100 L120,60" stroke="var(--project)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a1)"/>
+  <path d="M580,100 L580,60" stroke="var(--project)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#a1)"/>
+  <defs><marker id="a1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker></defs>
+</svg>
+<figcaption>总结会丢掉原因。磁盘上的一行只花 26 个 token，而且每次 compaction 之后都回来，所以在第 3 步 agent 看得到 X 已经试过了。</figcaption>
+</figure>
+<h3>这个 skill 由什么构成</h3>
+<div class="grid2">
+  <div class="card"><h4>机械层：hook、CLI、一个定时器</h4><p>11 个 Claude Code hook（见下面第 4 章）、<code>longrun</code> 命令，以及一个定时器（macOS 上是 launchd agent，Linux 上是 systemd user timer 或 cron）。机械层不用模型也照常工作：</p>
+  <ul>
+  <li>在会话启动时和每次 compaction 之后打印摘要；</li>
+  <li>把每一段 compaction 总结原样归档；</li>
+  <li>把失败的命令写进日志；</li>
+  <li>在 compaction 之前拍一张 HANDOFF 快照：用户最近的几个请求和编辑过的文件，好让会话之后接着原地继续；</li>
+  <li>在会话之间投递消息；</li>
+  <li>跑不调用模型的延迟检查：PR 合了、URL 有响应了、文件出现了；</li>
+  <li>替编排器盯着各个会话，编排器就是那个带着项目走向目标的会话（见下面第 8 章）。</li>
+  </ul></div>
+  <div class="card"><h4>给模型的指示：SKILL.md</h4><p>模型之所以这么做，是因为有人这么要求它：撞上死胡同、做出决定或弄清一条环境事实时写一行笔记；上下文里缺东西时调用 <code>recall</code>；把活交给上下文更足的那个会话。该写什么见下面第 5 章。</p></div>
+</div>
+<div class="next"><a href="#l2">下一章：三个实体</a></div>
+</section>
+
+<section class="lesson" id="l2">
+<div class="kicker">第 2 章</div>
+<h2>三个实体，没有别的</h2>
+<div class="grid3">
+  <div class="card project"><h4>项目</h4><p>一组会话的共享记忆：<code>longrun init</code> 在项目文件夹里建出来的 <code>.longrun/</code> 目录（加 <code>--external</code> 就建在目录树之外）。里面有：</p>
+  <ul>
+  <li>共享笔记 <code>[n1]</code>、<code>[n2]</code>：一行 = 一条事实，所有会话都看得到；</li>
+  <li>收件箱：给当前没在运行的会话的消息；</li>
+  <li>编排器的任务板；</li>
+  <li>compaction 总结和快照的归档。</li>
+  </ul><p>更多见下面第 3 章。</p></div>
+  <div class="card session"><h4>会话</h4><p>一次 Claude Code 对话，在应用里就是侧边栏的一行。它自己的：</p>
+  <ul>
+  <li>自有笔记 <code>[s1]</code>：一样的东西，但只有这个会话看得到；</li>
+  <li>日志：时间线、里程碑、失败、compaction；</li>
+  <li>meta：计数器和最后状态。</li>
+  </ul><p>它们放在 <code>~/.claude/longrun/</code> 下，不在仓库里。</p></div>
+  <div class="card dir"><h4>目录</h4><p>会话启动时所在的文件夹：根目录、worktree、子目录。什么都不存。只说明这个会话属于哪个项目。</p></div>
+</div>
+<figure id="fig-entities"></figure>
+<p>“项目”这个词只指 <code>.longrun/</code> 目录：不是 monorepo 里的项目，也不是 Claude Code 存 transcript 的文件夹。worktree 用 <code>longrun link</code> 挂到项目上；它自己没有笔记。一个会话属于一个项目。resume 时应用会给会话一个新的 CLI id；longrun 顺着 <code>priorCliSessionIds</code> 这条链走下去，自有笔记就接上了。</p>
+<div class="next"><a href="#l3">下一章：文件</a></div>
+</section>
+
+<section class="lesson" id="l3">
+<div class="kicker">第 3 章</div>
+<h2>磁盘上的文件</h2>
+<p>每个文件都来自一个具体的问题：</p>
+<ul>
+<li><b>会话的 notes.md</b>：问题 1。这个会话里必须熬过 compaction 的死胡同和决定。</li>
+<li><b>项目的 NOTES.md</b>：问题 2。任何会话都用得上的事实：PR 号、一个决定、环境的一个怪癖。</li>
+<li><b>journal.md</b>：不花 token 的时间线。agent 写的里程碑，再加上机械层追加的启动、结束、失败的命令、compaction。不读 transcript 也能看出一个会话干了什么。</li>
+<li><b>archive/compact/</b> 和 <b>archive/precompact/</b>：每一段 compaction 总结的原文，以及它之前的快照 (HANDOFF)。前者由 <code>recall</code> 找到，后者在 compaction 之后回到摘要里。</li>
+<li><b>inbox/</b>：给当前没在运行的会话的消息，在这儿等它的下一轮。</li>
+<li><b>meta.json</b>：计数器、最后一次回答、正在跑的工具。摘要里的 SESSIONS 行和给编排器的标记都是用它拼出来的。</li>
+<li><b>board.json</b>、<b>watch/</b>、<b>halt.json</b>、<b>budget.json</b>：编排器的任务板、延迟检查、对所有人的停止、预算采样。见第 7 和第 8 章。</li>
+</ul>
+<p>共享的东西都在项目里。自有的东西放在仓库目录树之外，也在同步文件夹之外，因为每次工具调用都要重写它们。点一下文件看看。</p>
+<div class="files"><div class="tree" id="tree-all"></div><div class="fileinfo" id="tree-all-info"><span style="color:var(--muted)">谁在写它、什么时候创建、里面是什么。</span></div></div>
+<table>
+<tr><th>文件</th><th>谁在写</th><th>什么时候被清掉</th></tr>
+<tr><td>项目的 <code>NOTES.md</code></td><td>agent：<code>add --shared</code>、<code>rm</code>、<code>replace</code>、<code>prune</code></td><td>超过 14 天的条目进归档（<code>pin</code> 除外）；<code>rm</code> 把那一行挪进 <code>archive/notes.md</code></td></tr>
+<tr><td>会话的 <code>notes.md</code></td><td>agent：<code>add</code>、<code>rm</code>、<code>replace</code>、<code>prune</code></td><td>会话沉默 7 天后（进 <code>archive/sessions/</code>）</td></tr>
+<tr><td><code>journal.md</code></td><td>hook 和 <code>longrun log</code></td><td>超过 200 行的尾巴进归档</td></tr>
+<tr><td><code>meta.json</code></td><td>每个事件上的 hook</td><td>随会话一起</td></tr>
+<tr><td><code>archive/compact/*.md</code></td><td>PostCompact hook</td><td>超过 30 天，或者多于 40 个</td></tr>
+<tr><td><code>inbox/*.md</code></td><td><code>send</code>、<code>watch</code>、<code>board</code>、<code>ask</code></td><td>送达时进 <code>.archive/</code>，在那儿再放 30 天</td></tr>
+<tr><td><code>watch/w*.json</code></td><td><code>watch add</code>、定时器的 tick</td><td>触发之后一周</td></tr>
+</table>
+<div class="next"><a href="#l4">下一章：hook</a></div>
+</section>
+
+<section class="lesson" id="l4">
+<div class="kicker">第 4 章</div>
+<h2>hook：机械层在哪儿</h2>
+<p>会话的每个事件，Claude Code 都会调用一个外部命令。longrun 装了 11 个这样的命令，它们全都是同一个 python 脚本。每个事件的 hook 都是一个单独的进程，所以装完之后新代码在所有会话里立刻生效。点一下循环里的某个 hook。</p>
+<div class="hooks"><div id="hookloop"></div><div class="hookinfo" id="hookinfo"><h4>一个会话的循环</h4><div>启动，然后是一轮又一轮：人的请求、工具调用、回答。上下文满了就 compaction，然后又是 SessionStart。每个节点上都有 hook。</div></div></div>
+<div class="callout ok">hook 里唯一会进到模型上下文的东西：SessionStart 上的摘要、UserPromptSubmit 上的共享笔记差异和消息、偶尔一次让写笔记的提醒、一条上下文警告，以及 halt 期间被拒绝的工具调用。其余一切都悄悄写进文件。</div>
+<div class="next"><a href="#l5">下一章：该写什么</a></div>
+</section>
+
+<section class="lesson" id="l5">
+<div class="kicker">第 5 章</div>
+<h2>笔记：该写什么、写到哪</h2>
+<p>一行，用英文，最多 400 个字符（同一条事实换一种语言大约要多花 1.5 倍 token，而预算是硬的）。只有一个判据：<b>一条命令、一次 Read 或一次 grep 能不能把它找回来？</b>能的话，就别写。</p>
+<table>
+<tr><th>标签</th><th>写什么</th><th>一般写到哪</th></tr>
+<tr><td><span class="tag">dead</span></td><td>失败的做法，以及为什么失败</td><td>自有；别的会话也可能一头撞上去就写共享</td></tr>
+<tr><td><span class="tag">decision</span></td><td>一个选择和它的理由</td><td>与别人有关就写共享</td></tr>
+<tr><td><span class="tag">fact</span></td><td>一条花了力气才弄清的环境事实</td><td>共享</td></tr>
+<tr><td><span class="tag">ctx</span></td><td>人给出的任务背景</td><td>自有</td></tr>
+<tr><td><span class="tag">pin</span></td><td>不会过期的事实：PR 号、分支、主机</td><td>共享</td></tr>
+<tr><td><span class="tag">todo</span></td><td>agent 欠下的一件小尾巴</td><td>自有</td></tr>
+</table>
+<p>里程碑（已推送、PR 已开、测试变绿）通过 <code>longrun log</code> 写进日志。比任务活得更久的东西（用户是谁、他怎么干活）写进 Claude Code 的自动记忆，不写这里。</p>
+<h3>自测一下：这条该写到哪？</h3>
+<div class="quiz" id="quiz"></div>
+<div class="next"><a href="#l6">下一章：第一个场景</a></div>
+</section>
+
+<section class="lesson" id="l6">
+<div class="kicker">第 6 章，一个场景</div>
+<h2>一个会话熬过 compaction</h2>
+<p>项目 <code>shop</code>，会话 A。用“下一步”和“上一步”按钮，或者方向键。左边：这一步谁在跟谁说话；右边：命令和它打印出来的东西；下面：磁盘上有什么变了。</p>
+<div class="legend"><span class="human"><i></i>人、对话框</span><span class="session"><i></i>会话</span><span class="project"><i></i>项目 .longrun</span><span class="own"><i></i>会话自有</span><span class="timer"><i></i>定时器</span><span class="global"><i></i>全局</span></div>
+<div id="p1"></div>
+<div class="callout">要记住的是：死胡同和决定当场就写，里程碑进日志，compaction 之后一切自己回来，丢掉的细节用 <code>recall</code> 找回来。</div>
+<div class="next"><a href="#l7">下一章：两个会话</a></div>
+</section>
+
+<section class="lesson" id="l7">
+<div class="kicker">第 7 章，两个场景</div>
+<h2>两个会话：共享记忆</h2>
+<p>会话 B 在同一个文件夹里打开。</p>
+<div id="p2"></div>
+<h2 style="margin-top:32px">把活交出去，然后等一个事件</h2>
+<p>发给另一个会话的消息，在那边是一轮用户输入。等事件不花 token：检查由定时器来跑。</p>
+<div id="p3"></div>
+<div class="callout warn"><code>cmd</code> 检查是从定时器里跑的，那里的环境几乎是空的：只能用绝对路径，没有 Touch ID、没有 ssh、也没有别名。先 <code>longrun watch test -- cmd '...'</code> 试一下。</div>
+<div class="next"><a href="#l8">下一章：编排器</a></div>
+</section>
+
+<section class="lesson" id="l8">
+<div class="kicker">第 8 章，一个场景</div>
+<h2>编排器：一个会话带着整个项目走</h2>
+<p>这是盖在笔记和消息之上的一层。一个会话拿着目标和任务板，其余会话只学三条命令：<code>board take</code>、<code>board done</code>、<code>board block</code>。编排器需要的一切都在状态文件里；它不读 transcript。</p>
+<div id="p4"></div>
+<div class="grid2">
+  <div class="card"><h4>谁能做什么</h4><p><b>监视器和编排器</b>只负责提议。<b>打断一个进程</b> (<code>interrupt --yes</code>)、<b>全部停止</b> (<code>halt</code>) 和<b>解除停止</b> (<code>resume</code>)只有人在这次对话里说了才会发生，绝不会因为另一个会话的请求而发生。</p></div>
+  <div class="card"><h4>对话框还是任务板</h4><p>盖在所有窗口之上的对话框，是留给等不了的事的：一次确认、一个权限、一件只有人能做的事。关于目标和优先级的问题通过 <code>board block</code> 走任务板；编排器会把它们理清楚。</p></div>
+</div>
+<div class="next"><a href="#l9">下一章：设置</a></div>
+</section>
+
+<section class="lesson" id="l9">
+<div class="kicker">第 9 章</div>
+<h2>设置</h2>
+<p>两级：全局文件 <code>~/.claude/longrun/config.json</code> 和项目文件 <code>.longrun/config.json</code>；项目里的值覆盖全局的值。不用手改 JSON：</p>
+<pre><code>longrun config                                  # effective values and where each comes from: default / global / project
+longrun config set stuck_tool_min 60 --global   # for every project
+longrun config set notes_max_bytes 8000         # for this project
+longrun config unset notes_max_bytes            # back to the default</code></pre>
+<p>key 大概有四十个（完整列表在 <code>docs/REFERENCE.md</code> 第 6 节）。刚装完之后，这几个值得看一眼：</p>
+<table>
+<tr><th>key</th><th>默认值</th><th>什么时候改、怎么改</th></tr>
+<tr><td><code>notes_max_bytes</code>、<code>session_notes_max_bytes</code></td><td>5000、3000</td><td>共享笔记和自有笔记的预算。它们每次启动都要读进上下文，所以不是越大越好。一个项目有四个以上会话，而且摘要老是喊 PRUNE：8000 和 4000。</td></tr>
+<tr><td><code>notes_max_age_days</code></td><td>14</td><td>更旧的条目进归档（<code>pin</code> 除外）。会话不常开的项目：30。</td></tr>
+<tr><td><code>nudge_tools</code>、<code>nudge_turns</code></td><td>40、8</td><td>多少次调用或多少轮没写笔记就提醒一次（而且只有在有过编辑或失败时才提醒）。嫌烦：80 和 16。</td></tr>
+<tr><td><code>ctx_warn_before</code></td><td>50000</td><td>离 autocompact 窗口还剩多少 token 时开口要笔记。要和 Claude Code 里的 <code>/autocompact 300k</code> 配合用；5 万就够了。</td></tr>
+<tr><td><code>stuck_tool_min</code>、<code>stuck_turn_min</code>、<code>stuck_wait_min</code></td><td>30、60、10</td><td>监视器报给编排器的阈值：一个工具、一轮、等一个权限（分钟）。你这边构建跑 40 分钟很正常：<code>stuck_tool_min</code> 设 60。</td></tr>
+<tr><td><code>budget_on</code>、<code>budget_pace_pct_per_hour</code>、<code>budget_factor</code></td><td>false、20、1.5</td><td>5 小时窗口的规则，默认关着：每小时的计划百分比，以及超出多少倍才停。几个会话共用一个窗口，或者有编排器在跑：<code>longrun budget on</code>。想三小时把窗口花完：pace 设 33。</td></tr>
+<tr><td><code>ask_wait_sec</code>、<code>ask_expire_min</code></td><td>90、360</td><td>对话框等多少秒才算拿不到即时回答；多少分钟之后自己关掉。一般保持原样。</td></tr>
+<tr><td><code>watch_ttl_days</code></td><td>7</td><td>一个检查的默认存活期（只有全局这一级）。要等一个发布等上几周：设 30，或者给那个检查加 <code>--for 30d</code>。</td></tr>
+<tr><td><code>autocompact_window</code></td><td>0</td><td>Claude Code 在哪儿做 compaction，也就是 <code>/autocompact N</code> 设的那个值；可以写 <code>300k</code>、<code>1M</code>。0 = 跟着 Claude Code 走。hook 跑不了 <code>/autocompact</code>，所以这里写的是意图：<code>onboard</code> 把它和 Claude Code 的设置比一比，然后让你去手敲那条命令。窗口 1M 的模型推荐：300k。</td></tr>
+<tr><td><code>pr_tool</code></td><td>auto</td><td>pr-merged 检查用什么去问 PR 状态：<code>gh</code> (GitHub CLI) 还是 <code>arc</code> (Arcadia)。<code>auto</code> 看的是注册这个事件监听时所在的文件夹。</td></tr>
+<tr><td><code>watch_timer</code></td><td>auto</td><td>谁来跑 watch 的 tick：<code>launchd</code> (macOS)、<code>systemd</code> (user timer)、<code>cron</code>、<code>none</code>。<code>auto</code> 挑这台机器上有的那个。</td></tr>
+<tr><td><code>hq</code></td><td>未设置</td><td>给项目指挥部用的台账和收件箱；用 <code>longrun init --hq</code> 打开，不走 config。</td></tr>
+</table>
+<div class="callout">最省事的办法不是背 key，而是对 agent 说一句 "set up longrun"：<code>longrun onboard</code> 会给它打印一份简报，列出每个 key 的当前值和含义，它再一个一个问你，并把答案落下去。最小配置是：autocompact 窗口 300k（<code>/autocompact 300k</code> 要你自己敲），几个会话共用一个窗口时 <code>longrun budget on</code>，构建很慢就 <code>stuck_tool_min 60</code>。其余的等摘要或监视器开始碍事了再动。</div>
+<div class="next"><a href="#l10">下一章：速查表</a></div>
+</section>
+
+<section class="lesson" id="l10">
+<div class="kicker">第 10 章</div>
+<h2>速查表和边界</h2>
+<div class="cheat">
+<pre><code># install
+curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+                        # skill, 11 hooks, CLI, MCP server, the 5-minute timer, notifications
+longrun watch install   # the timer alone (the installer already did it)
+longrun notify setup    # optional, macOS: the bundle notifications are sent from
+longrun notify --test   # optional: does one reach the screen
+longrun init [--hq]     # in the project folder
+longrun link &lt;project&gt;  # from every worktree
+longrun where           # which project, which session</code></pre>
+<pre><code># notes
+longrun add [--shared] -t TAG "..."
+longrun rm s3 n12 | replace n12 "..."
+longrun notes | prune [--auto] [--shared]
+longrun log "milestone"
+longrun recall term</code></pre>
+<pre><code># sessions
+longrun status
+longrun send [--list] [--resume] WHO "text"
+longrun important on|next|N|off [--to WHO]
+longrun watch add --to WHO --then "..." -- pr-merged ID
+longrun watch ls | test -- CHECK | sessions</code></pre>
+<pre><code># orchestrator
+longrun orchestrate start --goal "..."
+longrun board | board add|assign|take|done|block T7
+longrun fact "..." --task T7 --source review | fact ack F1
+longrun halt "why" | resume
+longrun interrupt WHO --match TEXT [--yes]
+longrun budget | budget set pace 20
+longrun ask "question" --options "Yes,No"</code></pre>
+<pre><code># settings
+longrun onboard [done]
+longrun config
+longrun config set KEY VALUE [--global]
+longrun config unset KEY [--global]</code></pre>
+</div>
+<h3>机械层保证什么，什么取决于模型</h3>
+<table>
+<tr><th>机械层保证的</th><th>取决于模型和它的指示的</th></tr>
+<tr><td>每一段 compaction 总结的归档、失败的日志、HANDOFF 快照、笔记回到上下文、消息投递、共享笔记的差异、halt 期间工具被拒绝、watch 检查</td><td>笔记写不写、写得在不在点上，重新查之前会不会先 <code>recall</code>，会不会把同伴发来的消息当成人给的指令</td></tr>
+</table>
+<h3>边界</h3>
+<ul>
+<li>摘要最多 9000 字节。按这个顺序被挤掉：会话列表、事件监听、日志尾巴、HANDOFF、台账。笔记永远不会被挤掉，所以才有 5000 + 3000 的预算。</li>
+<li>应用里的 resume 通过 <code>priorCliSessionIds</code> 串起来；CLI 里的 <code>/clear</code> 靠一条启发式规则：“同一个文件夹，三分钟内以 clear 为原因结束”。</li>
+<li>socket 和 transcript 的格式没有文档：Claude Code 换版本时，最先坏掉的就是往正在运行的会话 <code>send</code> 这条路，走收件箱的队列照常工作。</li>
+<li>在 macOS 的定时器下，python 可能没有 <code>~/Documents</code> 的访问权限 (TCC)。检查本身不依赖它；这时消息会落到 <code>~/.claude</code> 下的会话目录里。</li>
+<li>子 agent 拿不到摘要。<code>/rewind</code> 不会把笔记回退。</li>
+</ul>
+<p>细节见仓库里的 <code>README.md</code>、<code>docs/REFERENCE.md</code>、<code>docs/ORCHESTRATOR.md</code>，以及 <code>longrun help</code>。</p>
+</section>
+
+</main>
+</div>
+<script>
+window.LR_I18N = { step: '步骤', of: '/', prev: '上一步', next: '下一步',
+  fileHint: '点一下文件，看看里面是什么、谁在写它。+ 这一步创建，~ 有改动，(read) 被读取。',
+  quiz: ['自有笔记', '共享', '日志', '不要写'],
+  loop: ['会话启动', '一轮：人的请求', '一次工具调用', '会话结束了', '模型的回答', 'compaction', 'compaction 之后又一次 SessionStart'],
+  diagHead: '这一步谁在跟谁说话', termHead: 'agent 在该调用的时候调用 skill 的命令：命令和它打印出来的东西' };
+</script>
+<script src="../app.js"></script>
+<script src="../data.js"></script>
+<script src="../data2.js"></script>
+<script src="../data3.js"></script>
+<script src="../zh-CN.js"></script>
+<script>
+(function () {
+  const C = window.COURSE, LR = window.LR;
+  (function () {
+    const fig = document.getElementById('fig-entities');
+    const box = LR.el('div', { class: 'player diagram', id: 'fig-ent', style: 'padding:10px' });
+    fig.appendChild(box);
+    const nodes = [
+      { id: 'R', kind: 'global', x: 10, y: 20, w: 170, h: 46, title: '目录 shop/', sub: ['.longrun/ 就在这儿'] },
+      { id: 'W1', kind: 'global', x: 10, y: 90, w: 170, h: 46, title: 'worktree feature-1/', sub: ['longrun link ../shop'] },
+      { id: 'W2', kind: 'global', x: 10, y: 160, w: 170, h: 46, title: 'worktree feature-2/', sub: ['longrun link ../shop'] },
+      { id: 'P', kind: 'project', x: 240, y: 80, w: 150, h: 70, title: '项目 shop', sub: ['NOTES.md 共享', 'inbox/, board.json'] },
+      { id: 'S1', kind: 'session', x: 450, y: 20, w: 150, h: 46, title: '会话 "HQ"', sub: ['自有笔记、日志'] },
+      { id: 'S2', kind: 'session', x: 450, y: 90, w: 150, h: 46, title: '会话 "PR 42"', sub: ['自有笔记、日志'] },
+      { id: 'S3', kind: 'session', x: 450, y: 160, w: 150, h: 46, title: '会话 "discounts"', sub: ['自有笔记、日志'] },
+    ];
+    const edges = [{ id: 'a', from: 'R', to: 'P' }, { id: 'b', from: 'W1', to: 'P' }, { id: 'c', from: 'W2', to: 'P' }, { id: 'd', from: 'S1', to: 'P', off: 4 }, { id: 'e', from: 'P', to: 'S1', off: 4 }, { id: 'f', from: 'S2', to: 'P', off: 4 }, { id: 'g', from: 'P', to: 'S2', off: 4 }, { id: 'h', from: 'S3', to: 'P', off: 4 }, { id: 'i', from: 'P', to: 'S3', off: 4 }];
+    const d = new LR.Diagram(box, nodes, edges, [610, 230]);
+    d.highlight(['P'], [], false);
+    fig.appendChild(LR.el('figcaption', { text: '目录只是指向项目。会话读取共享的那部分，也往里写；自有的那部分各存各的。' }));
+  })();
+  (function () {
+    const st = {}; [C.PROJ, C.OWN, C.GLOB].forEach(r => r.files.forEach(f => st[f.path] = 'keep'));
+    LR.renderTree(document.getElementById('tree-all'), [C.PROJ, C.OWN, C.GLOB], st, document.getElementById('tree-all-info'));
+  })();
+  new LR.HookLoop(document.getElementById('hookloop'), document.getElementById('hookinfo'), [
+    { name: 'SessionStart', what: '按目录找到项目（向上找 .longrun/，找不到就查注册表），把 CLI id 关联到会话 key（resume 之后换了新 id 也一样），打印摘要：SHARED、OWN、SESSIONS、watch、任务板、消息。把 LONGRUN_SESSION 和 LONGRUN_DIR 导出到会话的 Bash 里。每小时跑一次清理。' },
+    { name: 'UserPromptSubmit', what: '每一轮：投递收件箱里的消息，打印共享笔记的差异 (+ ~ -) 和任务板的变化，统计轮次，在离窗口还有 5 万 token 时发出上下文警告。' },
+    { name: 'PreToolUse', what: '检查 halt：处于全部停止状态时，带上原因返回 deny，模型看得到。在 meta.json 里记下哪个工具什么时候开始跑（用来出 "tool `ya make` 38m" 这样的标记）。mcp__longrun__* 这几个工具不受 halt 影响。' },
+    { name: 'PostToolUse', what: '统计调用和编辑次数，把正在跑的工具的记录收尾。40 次调用或 8 轮没写笔记，而且确实有过编辑或失败时，提醒一次去写。' },
+    { name: 'PostToolUseFailure', what: '把失败的 Bash 命令作为一行 FAIL 写进会话日志。连着三次会在 SESSIONS 里出 "fail x3" 标记。' },
+    { name: 'PermissionRequest', what: '会话在等一个工具权限：在 meta.json 里做个标记，"waiting permission 12m" 这个标记就来自它。' },
+    { name: 'Notification', what: 'Claude Code 的通知（空闲、需要输入、一个对话框）：在 meta.json 里记一个等待标记。' },
+    { name: 'Stop', what: '模型答完了：把最后一次回答写进 meta.json（在 status 和 SESSIONS 里看得到），为遥测标记这一轮结束，并在会话被标成重要会话或者 notify_turn_end 要求时发一条桌面通知。' },
+    { name: 'PreCompact', what: 'compaction 之前：往 archive/precompact/ 存一张快照，里面有用户最近的几个请求、编辑过的文件和最近的 FAIL。下一份摘要里的 HANDOFF 区块（交接给自己：人最后要的是什么、改了哪些文件）就是用它拼出来的。' },
+    { name: 'PostCompact', what: '把 compaction 的总结原样写进 archive/compact/。紧接着是 source=compact 的 SessionStart，它会再打印一次摘要。' },
+    { name: 'SessionEnd', what: '给会话标上结束和原因（clear、logout、other）。clear 之后，同一个文件夹里三分钟内开的下一个会话会接着用同一个目录。' },
+  ]);
+  new LR.Quiz(document.getElementById('quiz'), [
+    { stmt: '“<code>pytest -x</code> 挂住了：它在等一个真的 Redis，用 <code>REDIS_URL=fake://</code> 解决”', ans: 'own', why: '一条带原因的死胡同：dead 标签，自有笔记。别的会话也可能撞上同一个，那就写共享。' },
+    { stmt: '“PR 42 = 分支 cart-total”', ans: 'shared', why: '不会过期的对应关系：pin，共享。那个说“PR 还没建”的会话缺的正是这个。' },
+    { stmt: '“测试绿了，PR 开了”', ans: 'log', why: '一个里程碑，属于时间线：longrun log。笔记不是用来记进展的。' },
+    { stmt: '“total() 函数在 cart/models.py:42”', ans: 'no', why: '一次 grep 一秒钟就能拿回来。别写。' },
+    { stmt: '“用户说在下周之前别动折扣的界面”', ans: 'own', why: '人给出的任务背景：ctx，自有。如果和其他会话也有关，就写共享。' },
+    { stmt: '“sandbox 用的 Stripe key 在 1password 里，env 里那个是旧的”', ans: 'shared', why: '一条花了力气才弄清、而且谁都用得上的环境事实：fact，共享。' },
+  ]);
+  new LR.Player(document.getElementById('p1'), C.s1);
+  new LR.Player(document.getElementById('p2'), C.s2);
+  new LR.Player(document.getElementById('p3'), C.s3);
+  new LR.Player(document.getElementById('p4'), C.s4);
+  LR.Nav();
+})();
+</script>
+</body>
+</html>
