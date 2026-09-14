@@ -31,6 +31,10 @@ English | [Русский](README.ru.md)
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
+<p align="center">
+  <a href="https://krllx.github.io/longrun/course/"><img src="assets/course-banner.svg" alt="The course: how longrun works inside - eleven short parts, about 15 minutes" width="820"></a>
+</p>
+
 ---
 
 ## Quick start
@@ -52,7 +56,7 @@ Then, in a Claude Code session in that folder:
 
 From there, nothing to call. You can talk in words: *"write that down"*, *"what have we tried"*, *"session status"*, *"hand it to the other session"*, *"tell me when the PR merges"*.
 
-> **How it works inside, with examples:** [krllx.github.io/longrun/course](https://krllx.github.io/longrun/course/). Eleven short parts with step-by-step scenarios, about 15 minutes.
+> **How it works inside, with examples:** [the course](https://krllx.github.io/longrun/course/) - eleven short parts, about 15 minutes.
 
 <details>
 <summary><b>Desktop notifications</b> - <code>./install.sh</code> sets them up; what it does and how to opt out</summary>
