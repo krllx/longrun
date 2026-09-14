@@ -51,6 +51,8 @@ Keep verbatim, in Latin script, spelled exactly as the CLI spells it:
 
 - `Claude Code`, `Claude`, `Anthropic`, `longrun`
 - `hook`, `skill`, `compaction`, `prompt`, `token`
+- `worktree`, `socket`, `transcript` - the reader meets them in `git`, in the CLI and in
+  Claude Code's own output, and every local rendering of them is also an ordinary word
 - every command and subcommand: `longrun add`, `longrun status`, `longrun watch add --then`
 - every note type: `dead`, `decision`, `fact`, `ctx`, `todo`, `pin`
 - every config key: `notify_turn_end`, `compact_hint_max_bytes`, `watch_timer`
@@ -108,6 +110,16 @@ These are translated, and translated the same way every time.
 | dialog (the ask popup) | ダイアログ | 대화 상자 | 对话框 |
 | prune | 整理 | 정리 | 清理 |
 | stuck (session) | 停滞 | 정체 | 卡住 |
+| summary (what compaction leaves) | - | - | 总结 |
+| digest vs summary | - | - | 摘要 vs 总结 - never both 摘要 |
+| dead end | - | - | 死胡同 |
+| watcher (the one watching sessions) | - | - | 监视器 |
+| delta (of the shared notes) | - | - | 差异 |
+| polling | - | - | 轮询 |
+| cheat sheet | - | - | 速查表 |
+
+A `-` means no translator has needed that term in that language yet. Fill the cell in when
+you do, in the PR that needs it - do not leave the row out because one column is empty.
 
 **Concept versus command.** `watch`, `board`, `fact` and `orchestrate` are both ideas
 and subcommands. In prose, use the glossary word; when naming the command, Latin and
