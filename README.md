@@ -43,8 +43,6 @@ English | [Русский](README.ru.md)
 curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
 ```
 
-macOS or Linux, Claude Code, python3 3.9+; nothing else. Prefer a checkout? Clone and run the same [`install.sh`](install.sh).
-
 > [!NOTE]
 > The installer adds the skill with its `longrun` command for the terminal, hooks in `~/.claude/settings.json`, and a five-minute timer in the background. It asks before setting up desktop notifications. `install.sh --uninstall` takes it all back.
 
@@ -57,17 +55,17 @@ macOS or Linux, Claude Code, python3 3.9+; nothing else. Prefer a checkout? Clon
 - **a background timer**, every five minutes: a launchd agent on macOS, a systemd user timer or a cron line on Linux. It checks the watches you registered and looks at the sessions - a few shell checks, no model and no tokens, and it wakes a session only when one of your conditions comes true. `--no-timer` skips it.
 - **desktop notifications**, if you say yes to the question: on macOS `brew install terminal-notifier` when it is missing, a sender bundle under `~/.claude/longrun/notifier/`, and one test notification that makes macOS ask for permission. On Linux it only checks for `notify-send`. `--notify` and `--no-notify` answer the question in advance.
 
+Needs macOS or Linux, Claude Code and python3 3.9+. From a clone it is the same [`install.sh`](install.sh).
+
 </details>
 
-Then open a project in Claude Code and say **"set up longrun"**: the agent makes the folder a project and walks you through the settings, one at a time. The same from the terminal:
+Then open a project in Claude Code - one already open counts - and say **"set up longrun"**. Or from the terminal:
 
 ```bash
 cd ~/my-project && longrun init && claude "set up longrun"
 ```
 
-Projects and sessions that are already open count too: `longrun init` in the folder, or "set up longrun" in that session, brings them in without a restart - the hooks are live at once, the notes digest arrives at the session's next start.
-
-From there, nothing to call. You can talk in words: *"write that down"*, *"what have we tried"*, *"session status"*, *"hand it to the other session"*, *"tell me when the PR merges"*.
+From there, nothing to call: *"write that down"*, *"what have we tried"*, *"tell me when the PR merges"*.
 
 > **How it works inside, with examples:** [the course](https://krllx.github.io/longrun/course/) - eleven short parts, about 15 minutes.
 
