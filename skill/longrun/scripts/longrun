@@ -30,7 +30,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 HOME = os.path.expanduser("~")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
@@ -39,6 +39,21 @@ UTF8_LOCALE = "en_US.UTF-8" if IS_MAC else "C.UTF-8"  # what a spawned check get
 GLOBAL_DIR = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "longrun")
 REGISTRY = os.path.join(GLOBAL_DIR, "registry.json")
 GLOBAL_CONFIG = os.path.join(GLOBAL_DIR, "config.json")
+# Our own copy of the terminal-notifier bundle: the icon and the sender name of a macOS notification come from
+# the bundle that posted it and nothing can override them per notification, so a nice icon means a nice bundle.
+NOTIFIER_APP = os.path.join(GLOBAL_DIR, "notifier", "longrun.app")
+NOTIFIER_ID = "fr.julienxx.oss.terminal-notifier.longrun"
+LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework"
+              "/Support/lsregister")
+# macOS keeps every notification it was handed here, with a flag saying whether it was ever drawn on screen.
+NOTIFY_DB = os.path.join(HOME, "Library", "Group Containers", "group.com.apple.usernoted", "db2", "db")
+NOTIFY_FIX_MAC = """macOS posts an osascript notification on behalf of Script Editor, which has no notification
+permission of its own, so it is filed and never shown. Install a notifier with its own bundle:
+  brew install terminal-notifier
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f \\
+    "$(brew --prefix terminal-notifier)/terminal-notifier.app"
+  open "$(brew --prefix terminal-notifier)/terminal-notifier.app"   # registers it in System Settings once
+Then `longrun notify --test` again: nothing to configure, `notifier` is auto and picks it up."""
 
 DEFAULTS = {
     "notes_max_bytes": 5000,        # hard cap of the shared NOTES.md (~1.2K tokens of English)
@@ -55,6 +70,11 @@ DEFAULTS = {
     "sessions_block_bytes": 700,    # digest slice for "what the other sessions of this project are doing"
     "shared_delta_max_bytes": 1200, # per-turn slice for shared notes that changed since this session saw them
     "handoff_max_bytes": 1100,      # slice of the pre-compaction snapshot re-injected on SessionStart(compact)
+    "compact_hint": True,           # PreCompact prints instructions for the summariser on stdout; Claude Code appends a
+                                    # hook's stdout to the compaction prompt as its "Additional Instructions" block, for
+                                    # an automatic compaction too, not only for `/compact <text>`
+    "compact_hint_max_bytes": 1200, # cap of that text (Claude Code caps any hook output at 10,000 chars anyway)
+    "compact_instructions": "",     # a project's own line for it ("keep every SQL query in full"), added last
     "archive_keep_days": 30,        # everything in archive/ older than this is deleted
     "compact_keep": 40,             # max archived compaction summaries per local dir
     "session_stale_min": 30,        # heartbeat older than this = stale
@@ -93,6 +113,12 @@ DEFAULTS = {
     "pr_tool": "auto",              # how pr-merged / pr-status ask: gh (GitHub CLI) | arc (Arcadia) | auto = by the folder
     "watch_timer": "auto",          # what runs the watch tick: launchd | systemd (user timer) | cron | none.
                                     # auto = launchd on macOS, else a systemd user timer, else cron
+    "notify_turn_end": "off",       # a notification when a turn ends: off | unfocused (only while the Claude app is not
+                                    # frontmost) | always. The app itself sends this one silent and passive, so macOS files
+                                    # it without a banner; this is the loud, clickable version of the same event
+    "notifier": "auto",             # what shows a desktop notification: terminal-notifier | osascript | notify-send | none.
+                                    # auto = terminal-notifier when installed (macOS: osascript delivers but macOS never
+                                    # draws it), else osascript on macOS, else notify-send. `longrun notify --test` checks
     # "hq": True/False              # opt-in multi-session layer (ledger, inbox, ask, report, status).
     #                               # Unset = inferred: on when a hub is linked or a ledger already exists.
 }
@@ -1304,6 +1330,9 @@ def session_flags(store, m):
             flags.append("fail x%d `%s`" % (n, clip(cmd, 30)))
         for it in pending_asks(store, m.get("sid", ""))[-1:]:
             flags.append("asking the user %s %dm" % (it["id"], age_min(it.get("asked", ""))))
+        lbl = important_label(*important_state(m))
+        if lbl:
+            flags.append(lbl)
     c = ctx_line(m)
     if c:
         flags.append(c)
@@ -1885,7 +1914,7 @@ def cmd_halt(store, args):
     if me:
         journal(store, me, "* HALT: %s" % clip(text, 200))
     notify_orchestrator(store, "HALT by %s: %s. Every session's tool calls are refused until `longrun resume`." % (myname, text), wake=True, from_sid=me)
-    notify_user("longrun HALT", clip(text, 200))
+    notify_user("longrun HALT", clip(text, 200), link=session_deep_link(load_meta(store, me).get("desktop_id") if me else ""))
     print("HALT set%s: %s. Tool calls in %s are refused with this reason; `longrun resume` lifts it." % (" for this project" if only else " (all projects)", text, "this project" if only else "every session"))
     return 0
 
@@ -2687,8 +2716,9 @@ MCP_TOOLS = [
          "expire_min": {"type": "integer", "description": "Minutes until the dialog closes by itself (default 360, 0 = never)."},
          "icon": {"type": "string", "enum": ["note", "caution", "stop"]}}}},
     {"name": "notify",
-     "description": "A desktop notification to the user, no answer expected (Notification Center on macOS, notify-send on Linux). "
-                    "A Focus mode, or a machine with no desktop, may swallow it; for something the user must see now use `ask`.",
+     "description": "A desktop notification to the user, no answer expected (terminal-notifier, else what the OS has). "
+                    "The reply says which program it went through, or that none was available - a Focus mode or a machine with "
+                    "no desktop can still swallow it, so for something the user must see now use `ask`.",
      "inputSchema": {"type": "object", "required": ["text"], "properties": {
          "text": {"type": "string"}, "title": {"type": "string"}}}},
 ]
@@ -2772,8 +2802,11 @@ def mcp_serve(args):
             if name == "ask":
                 text = mcp_ask(c, a)
             elif name == "notify":
-                notify_user(str(a.get("title") or "longrun"), str(a.get("text") or ""))
-                text = "notified (a Focus mode may hide it; for something the user must see now use `ask`)"
+                # a click lands in the session that asked for the notification, not just in the app
+                used = notify_user(str(a.get("title") or "longrun"), str(a.get("text") or ""),
+                                   link=session_link(c["store"], c["sid"]))
+                text = ("notified through %s (a Focus mode may still hide it; for something the user must see now use `ask`)" % used
+                        if used else "NOT notified: %s. Say it in the chat instead." % notify_missing_reason())
             else:
                 reply(mid, error={"code": -32602, "message": "unknown tool %s" % name})
                 return
@@ -3743,21 +3776,426 @@ def watch_message(w, kind, detail):
     return "\n".join(lines)
 
 
-def notify_user(title, text):
-    """A desktop notification when the machine has one (osascript on macOS, notify-send on Linux). Best
-    effort by design: on a server there is nobody looking at the screen, and the message is delivered to
-    the session anyway."""
-    if os.environ.get("LONGRUN_NO_UI"):
-        return
-    title, text = clip(title, 60), clip(text, 200)
+def notifier_kind():
+    """Which program draws a desktop notification. The config key `notifier` pins it
+    (terminal-notifier|osascript|notify-send|none); auto = the one that actually shows something here."""
+    want = str(load_config(None).get("notifier") or "auto").strip().lower()
+    if want in ("terminal-notifier", "osascript", "notify-send", "none"):
+        return want
+    if notifier_bin() != "terminal-notifier" or shutil.which("terminal-notifier"):
+        return "terminal-notifier"
+    if IS_MAC and shutil.which("osascript"):
+        return "osascript"
+    if has_display() and shutil.which("notify-send"):
+        return "notify-send"
+    return "none"
+
+
+def frontmost_bundle():
+    """The bundle id of the application in front, "" when it cannot be told. `lsappinfo` is a plain CLI that
+    reads the same Launch Services state the Dock does: no Automation permission, no prompt, unlike the
+    `System Events` route. Linux has no cheap equivalent, so there nothing is suppressed."""
+    if not IS_MAC or not os.path.exists("/usr/bin/lsappinfo"):
+        return ""
     try:
-        if IS_MAC and shutil.which("osascript"):
-            subprocess.run(["osascript", "-e", 'display notification %s with title %s' % (json.dumps(text), json.dumps(title))],
-                           capture_output=True, timeout=10)
-        elif has_display() and shutil.which("notify-send"):
-            subprocess.run(["notify-send", "-a", "longrun", title, text], capture_output=True, timeout=10)
+        asn = subprocess.run(["/usr/bin/lsappinfo", "front"], capture_output=True, text=True, timeout=5).stdout.strip()
+        if not asn:
+            return ""
+        out = subprocess.run(["/usr/bin/lsappinfo", "info", "-only", "bundleid", asn],
+                             capture_output=True, text=True, timeout=5).stdout
     except Exception:
-        pass
+        return ""
+    m = re.search(r'"CFBundleIdentifier"="([^"]+)"', out)
+    return m.group(1) if m else ""
+
+
+def should_notify_turn_end(store):
+    """Whether this turn's end is worth a notification, by the `notify_turn_end` setting. `unfocused` means
+    the Claude desktop app is not the application in front - the case the app's own notification handles
+    badly, because it sends turn ends with interruptionLevel passive and silent, so macOS files them into
+    Notification Center without ever drawing a banner (Claude.app 2.1.260, verified 2026-09-10). A session
+    running in a terminal has no way to tell whose window is in front, so there `unfocused` notifies too."""
+    mode = str(store.cfg.get("notify_turn_end") or "off").strip().lower()
+    if mode == "always":
+        return True
+    if mode != "unfocused":
+        return False
+    return frontmost_bundle() != "com.anthropic.claudefordesktop"
+
+
+def important_state(m):
+    """The important flag of one session, as (mode, left): ("always", 0), ("count", N) or ("", 0) when it is
+    not set. Important = the end of a turn here is notified whatever `notify_turn_end` says and whoever is in
+    front, because the user is waiting for THIS session while working in another one."""
+    imp = m.get("important")
+    if not isinstance(imp, dict):
+        return "", 0
+    if str(imp.get("mode") or "") == "always":
+        return "always", 0
+    left = int(imp.get("left") or 0)
+    return ("count", left) if left > 0 else ("", 0)
+
+
+def important_label(mode, left):
+    """How the flag is shown in `status`, `important` and the digest head."""
+    if mode == "always":
+        return "important"
+    if mode == "count":
+        return "important (%d turn%s left)" % (left, "" if left == 1 else "s")
+    return ""
+
+
+def consume_important(m):
+    """Called when a turn of this session ends, with its meta already held: returns what to say about the
+    flag ("" = not important) and spends one turn of a counted flag, clearing it when the count runs out."""
+    mode, left = important_state(m)
+    if mode == "always":
+        return "flagged important until `longrun important off`"
+    if mode != "count":
+        return ""
+    left -= 1
+    if left > 0:
+        m["important"] = dict(m["important"], mode="count", left=left)
+        return "important, %d more turn%s" % (left, "" if left == 1 else "s")
+    m.pop("important", None)
+    return "important, the last one: the flag is now off"
+
+
+def session_link(store, sid):
+    """The deep link of a session by its own store, or "" when it is unknown or has no app entry yet."""
+    if not store or not sid:
+        return ""
+    try:
+        return session_deep_link(load_meta(store, sid).get("desktop_id") or "")
+    except Exception:
+        return ""
+
+
+def session_deep_link(desktop_id):
+    """The desktop app's own URL for opening one session in the sidebar. Claude.app registers the `claude`
+    scheme (Info.plist, CFBundleURLSchemes) and routes `/continue` and `/needs-input` by a `session` parameter
+    it validates against /^local_[A-Za-z0-9-]+/ - which is exactly the id longrun keeps as `desktop_id`
+    (`sessionId` in the app's local_*.json). The app builds the same URL for its own notifications and for the
+    Spotlight entry "open the session that has waited longest". Verified on 2.1.260, 2026-09-10.
+    Empty when the session has no app entry: a CLI-only session cannot be jumped to."""
+    did = str(desktop_id or "")
+    return "claude://code/continue?session=%s&source=desktop_action" % did if re.match(r"^local_[A-Za-z0-9-]+$", did) else ""
+
+
+def notifier_bin():
+    """The terminal-notifier to run: our own bundle when `notify setup` has built one (its icon and the name
+    on the banner are ours), otherwise whatever is on PATH."""
+    own = os.path.join(NOTIFIER_APP, "Contents", "MacOS", "terminal-notifier")
+    return own if os.access(own, os.X_OK) else "terminal-notifier"
+
+
+def notify_cmd(kind, title, text, link=""):
+    """terminal-notifier is the only one of the three that can carry a click target (-open, any URL scheme).
+    osascript and notify-send have no equivalent, so there the link is simply dropped."""
+    return {"terminal-notifier": [notifier_bin(), "-title", title, "-message", text, "-sound", "default"]
+                                 + (["-open", link] if link else []),
+            "osascript": ["osascript", "-e", "display notification %s with title %s" % (json.dumps(text), json.dumps(title))],
+            "notify-send": ["notify-send", "-a", "longrun", title, text]}.get(kind)
+
+
+def notify_user(title, text, link=""):
+    """A desktop notification when the machine has one. Best effort by design: on a server nobody is looking
+    at the screen, and the message reaches the session through its socket or inbox anyway. Returns the
+    program that was run, "" when nothing was. `link` is what a click opens, normally the deep link of the
+    session the notification is about (see session_deep_link); only terminal-notifier can carry one.
+
+    macOS draws NOTHING for `osascript -e 'display notification'`: it is posted on behalf of Script Editor,
+    which holds no notification authorisation of its own (no `auth` key in com.apple.ncprefs), so the
+    Notification Center database takes the record with `presented = 0` and no banner is ever shown - 25 of
+    25 that way on this machine on 2026-09-10, while the Claude app's own notifications showed fine.
+    terminal-notifier carries its own signed bundle and gets its own entry, so it is preferred whenever it
+    is installed; `longrun notify --test` reports which of the two this machine really does."""
+    if os.environ.get("LONGRUN_NO_UI"):
+        return ""
+    title, text = clip(title, 60), clip(text, 200)
+    kind = notifier_kind()
+    cmd = notify_cmd(kind, title, text, link)
+    if not cmd or not shutil.which(cmd[0]) or (kind == "notify-send" and not has_display()):
+        return ""
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=10)
+        return kind
+    except Exception:
+        return ""
+
+
+def notify_records(limit=30):
+    """What macOS recorded for the notifications it was handed, newest first: [(title, presented), ...].
+
+    The live database is in WAL mode, and the system checkpoints it lazily - the `db` file here was 5 hours
+    behind its `db-wal`. A read-only connection cannot replay a WAL it may not write the -shm for, so it
+    sees whatever the last checkpoint left and a notification sent seconds ago is simply missing (measured:
+    still absent 60 s later, present instantly through a copy). So the file is copied together with its
+    -wal into a temp dir and the copy is opened read-write: sqlite replays the WAL there, the original is
+    only ever read."""
+    if not IS_MAC or not os.path.exists(NOTIFY_DB):
+        return []
+    import plistlib
+    import shutil as _sh
+    import sqlite3
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="longrun-nc-")
+    try:
+        for suffix in ("", "-wal"):
+            if os.path.exists(NOTIFY_DB + suffix):
+                _sh.copy2(NOTIFY_DB + suffix, os.path.join(tmp, "db" + suffix))
+        con = sqlite3.connect(os.path.join(tmp, "db"), timeout=5)
+        try:
+            rows = con.execute("select data, presented from record order by delivered_date desc limit ?", (limit,)).fetchall()
+        finally:
+            con.close()
+    except Exception:
+        return []
+    finally:
+        _sh.rmtree(tmp, ignore_errors=True)
+    out = []
+    for data, presented in rows:
+        try:
+            out.append((plistlib.loads(data).get("req", {}).get("titl") or "", bool(presented)))
+        except Exception:
+            continue
+    return out
+
+
+def notify_presented(title, wait=8.0):
+    """Did the system actually draw the notification just sent, or merely file it. macOS sets `presented`
+    when the banner goes on screen. True/False, or None when there is nothing to read (not macOS, no
+    database, or the row never turned up - the system also drops older rows of the same sender)."""
+    if not IS_MAC or not os.path.exists(NOTIFY_DB):
+        return None
+    deadline = time.time() + wait
+    while True:
+        for t, presented in notify_records():
+            if t == title:
+                return presented
+        if time.time() >= deadline:
+            return None
+        time.sleep(0.5)
+
+
+def notifier_setup(icon=""):
+    """Build our own copy of the terminal-notifier bundle, so notifications carry our icon and our name.
+
+    The icon and the sender name on a macOS banner come from the posting bundle and macOS offers no way to
+    override either per notification (terminal-notifier 3.1.0 dropped -appIcon and -sender for exactly that
+    reason). A copy with its own CFBundleIdentifier gets its own icon - and, as a consequence, its own entry
+    in System Settings and its own permission, granted the first time it runs after an `open`. Editing a
+    signed bundle invalidates the signature, so it is re-signed ad-hoc. Default icon: the locally installed
+    Claude.app's, because these notifications are about Claude sessions; nothing is redistributed, the icon
+    is copied from the machine's own installation."""
+    if not IS_MAC:
+        return 3, "notify setup is macOS only: on Linux notify-send takes its icon from the desktop theme"
+    src = ""
+    for cand in (shutil.which("terminal-notifier"), "/opt/homebrew/opt/terminal-notifier/terminal-notifier.app",
+                 "/usr/local/opt/terminal-notifier/terminal-notifier.app"):
+        if not cand:
+            continue
+        app = cand if cand.endswith(".app") else os.path.realpath(os.path.join(os.path.dirname(cand), "..", "terminal-notifier.app"))
+        if os.path.isdir(app):
+            src = app
+            break
+    if not src:
+        return 1, "no terminal-notifier.app to copy from: `brew install terminal-notifier` first"
+    if icon and not os.path.exists(icon):
+        return 2, "no such icon file: %s" % icon
+    if not icon:
+        icon = "/Applications/Claude.app/Contents/Resources/electron.icns"
+        icon = icon if os.path.exists(icon) else ""
+    try:
+        os.makedirs(os.path.dirname(NOTIFIER_APP), exist_ok=True)
+        shutil.rmtree(NOTIFIER_APP, ignore_errors=True)
+        shutil.copytree(src, NOTIFIER_APP)
+        if icon:
+            target = os.path.join(NOTIFIER_APP, "Contents", "Resources", "Terminal.icns")
+            if icon.lower().endswith(".icns"):
+                shutil.copy2(icon, target)
+            else:  # sips converts a png/jpg into an icns; a failure is not fatal, the copy keeps its own icon
+                subprocess.run(["sips", "-s", "format", "icns", icon, "--out", target], capture_output=True, timeout=60)
+        plist = os.path.join(NOTIFIER_APP, "Contents", "Info.plist")
+        for key, value in (("CFBundleIdentifier", NOTIFIER_ID), ("CFBundleName", "longrun")):
+            subprocess.run(["/usr/libexec/PlistBuddy", "-c", "Set :%s %s" % (key, value), plist], capture_output=True, timeout=20)
+        shutil.rmtree(os.path.join(NOTIFIER_APP, "Contents", "_CodeSignature"), ignore_errors=True)
+        subprocess.run(["codesign", "--force", "--sign", "-", NOTIFIER_APP], capture_output=True, timeout=60)
+        subprocess.run([LSREGISTER, "-f", NOTIFIER_APP], capture_output=True, timeout=60)
+    except Exception as e:
+        return 3, "could not build %s: %s" % (NOTIFIER_APP, e)
+    built = "notifier bundle: %s (icon: %s)" % (NOTIFIER_APP, icon or "terminal-notifier's own")
+    if os.environ.get("LONGRUN_NO_UI"):
+        return 0, built
+    ok, why = notifier_warm_up()
+    return (0, built) if ok else (1, "%s\nbuilt, but it could not send yet: %s" % (built, why))
+
+
+def notifier_warm_up():
+    """Make the bundle's first notification happen here, at install time, instead of losing a real one.
+
+    A fresh bundle is unknown to the notification system until it has been launched: `open` registers it,
+    and then its FIRST send still fails with "Could not request notification permission" - that failing call
+    is what creates the entry (and the default permission) in System Settings; the next one works. Verified
+    twice on macOS 15, on the brewed bundle and on our copy. So: open, then send until one goes through.
+    macOS may also put up its own "allow notifications?" alert here, which is why the installer says so."""
+    subprocess.run(["open", NOTIFIER_APP], capture_output=True, timeout=20)
+    err = "no attempt was made"
+    for attempt in range(4):
+        time.sleep(1.5 if attempt else 2.5)
+        try:
+            r = subprocess.run([notifier_bin(), "-title", "longrun", "-message",
+                                "notifications are on" if attempt else "checking notifications"],
+                               capture_output=True, text=True, timeout=20)
+        except Exception as e:
+            err = "%s: %s" % (type(e).__name__, e)
+            continue
+        out = (r.stdout or "") + (r.stderr or "")
+        if r.returncode == 0 and "not allowed" not in out and "Could not" not in out:
+            return True, ""
+        err = clip(out.strip(), 160) or "exit %d" % r.returncode
+    return False, err
+
+
+IMPORTANT_HELP = """longrun important [on | next | N | off] [--to WHO]   - a session whose turn ends must never be missed.
+
+  on      notify at every turn end, until `longrun important off`
+  next    the next turn end only, then the flag clears itself
+  N       the next N turn ends (a counter, spent one per turn end)
+  off     drop the flag
+  --to    another session: a sidebar title, a Claude Code name (shop-a0), a session id or its prefix.
+          No --to = this session. `longrun status` and `longrun watch sessions` list them.
+  no argument at all   show the flag of that session, plus every other important session of the project
+
+The flag beats both gates the ordinary turn-end notification has to pass: the `notify_turn_end` setting
+(off by default) and the focus check (`unfocused` stays quiet while Claude is the application in front).
+That is the point - the user is working in another session and is waiting for this one."""
+
+
+def cmd_important(store, args):
+    """Mark a session the user must not miss: its turn ends notify whatever notify_turn_end says and
+    whoever is in front. `on` = until cleared, `next` = one turn end, `N` = a counter, `off` = drop."""
+    who, rest = _flag(args, "--to", "")
+    if rest and rest[0] in ("help", "-h", "--help"):
+        print(IMPORTANT_HELP)
+        return 0
+    if len(rest) > 1:
+        die("usage: longrun important [on | next | N | off] [--to WHO]", 2)
+    t = resolve_session(store, who)
+    sid, name = t["sid"], t.get("name") or sid8(t["sid"])
+    what = (rest[0] if rest else "").strip().lower()
+    with store.shared_lock():
+        m = load_meta(store, sid)
+        if what:
+            if what in ("on", "always", "keep", "yes"):
+                m["important"] = {"mode": "always", "set": ts(), "by": sid8(current_session(store))}
+            elif what in ("off", "no", "none", "clear", "0"):
+                m.pop("important", None)
+            elif what in ("next", "once"):
+                m["important"] = {"mode": "count", "left": 1, "set": ts(), "by": sid8(current_session(store))}
+            elif what.isdigit():
+                m["important"] = {"mode": "count", "left": int(what), "set": ts(), "by": sid8(current_session(store))}
+            else:
+                die("`%s` is not on, next, N or off (longrun important help)" % what, 2)
+            save_meta(store, sid, m)
+    mode, left = important_state(m)
+    if mode:
+        print("%s [%s]: %s - it raises a desktop notification at the end of every turn, focused or not."
+              % (name, sid8(sid), important_label(mode, left)))
+        print("delivery: %s" % notify_state_line())
+    else:
+        print("%s [%s]: not important - turn ends follow notify_turn_end (%s)."
+              % (name, sid8(sid), store.cfg.get("notify_turn_end")))
+    others = []
+    for om in session_metas(store):
+        if om.get("sid") == sid or om.get("ended"):
+            continue
+        ol = important_label(*important_state(om))
+        if ol:
+            others.append("  %-8s %-40s %s" % (om["skey"][:8], clip(session_display_name(om["sid"], store), 40), ol))
+    if others:
+        print("also important in this project:\n%s" % "\n".join(others))
+    return 0
+
+
+def cmd_notify(args):
+    """longrun notify "text" [--title T]   one desktop notification, the same one halt/budget/watch send
+    longrun notify --test                send a probe and report whether the screen really showed it
+    longrun notify setup [--icon P]      build the bundle the notifications are sent from (its icon and name)"""
+    if args and args[0] == "setup":
+        icon, _rest = _flag(args[1:], "--icon", "")
+        rc, msg = notifier_setup(icon)
+        print(msg)
+        if rc == 0:
+            print("Sent from now on as \"longrun\" with that icon. Check: `longrun notify --test`.")
+        return rc
+    test, rest = _flag(args, "--test", False, takes_value=False)
+    title, rest = _flag(rest, "--title", "longrun")
+    kind = notifier_kind()
+    local = resolve_local()
+    store = Store(local) if local else None
+    link = session_link(store, current_session(store)) if store else ""   # a click comes back to this session
+    if not test:
+        text = " ".join(rest).strip()
+        if not text:
+            die("usage: longrun notify \"text\" [--title T] | longrun notify --test", 2)
+        used = notify_user(title, text, link=link)
+        print("sent through %s" % used if used else "nothing sent: %s" % notify_missing_reason(kind))
+        return 0 if used else 1
+    probe = "longrun check %s" % now().strftime("%H:%M:%S")
+    print("notifier: %s%s%s" % (kind, "" if load_config(resolve_local()).get("notifier") != "auto" else " (auto)",
+                                "" if kind != "terminal-notifier" else
+                                ("  sender: %s" % (NOTIFIER_APP if notifier_bin() != "terminal-notifier" else
+                                                   "terminal-notifier's own bundle (`longrun notify setup` for our icon)"))))
+    if kind == "none":
+        print("no notifier: %s" % notify_missing_reason(kind))
+        print("Desktop notifications are optional: halts, budget stops and fired watches reach the sessions\n"
+              "themselves through their socket or inbox either way. To also see them on screen: %s"
+              % ("brew install terminal-notifier, then `longrun notify setup`" if IS_MAC else
+                 "install libnotify (apt install libnotify-bin / dnf install libnotify)"))
+        return 1
+    print("on click:  %s" % (link if link else "nothing: this session has no entry in the app (CLI-only, or the app has not written it yet)"))
+    if not notify_user(probe, "click me: this should open the session that sent it", link=link):
+        print("could not run %s: %s" % (kind, notify_missing_reason(kind)))
+        return 1
+    shown = notify_presented(probe)
+    if shown is None:
+        print("sent through %s. Whether it was drawn cannot be read on this machine - look at the screen." % kind)
+        return 0
+    if shown:
+        print("sent through %s and the system drew it (presented=1). Notifications work." % kind)
+        return 0
+    print("sent through %s, but the system did NOT draw it (presented=0): delivered and silently dropped." % kind)
+    print(NOTIFY_FIX_MAC if kind == "osascript" else
+          "Check System Settings -> Notifications for that program, and that no Focus mode is on.")
+    return 1
+
+
+def notify_state_line():
+    """One line about notifications for `onboard`: what would be used, and whether it is the macOS trap."""
+    kind = notifier_kind()
+    if kind == "osascript":
+        return "osascript - macOS files these and draws nothing: `brew install terminal-notifier`, then `longrun notify --test`"
+    if kind == "none":
+        return "none: %s" % notify_missing_reason(kind)
+    return "%s, verify with `longrun notify --test`" % kind
+
+
+def notify_missing_reason(kind=None):
+    if os.environ.get("LONGRUN_NO_UI"):
+        return "LONGRUN_NO_UI is set: this process shows no dialogs and no notifications"
+    kind = kind or notifier_kind()
+    if kind == "none":
+        if str(load_config(None).get("notifier") or "auto").strip().lower() == "none":
+            return "notifier is set to none (`longrun config set notifier auto --global` to restore)"
+        if IS_MAC:
+            return "neither terminal-notifier nor osascript on PATH"
+        if not has_display():
+            return "no DISPLAY or WAYLAND_DISPLAY: nobody is looking at this screen"
+        return "no notify-send: install libnotify-bin (apt) / libnotify (dnf)"
+    if kind == "notify-send" and not has_display():
+        return "no DISPLAY or WAYLAND_DISPLAY: nobody is looking at this screen"
+    return "%s is not on PATH" % kind
 
 
 def watch_deliver(w, kind, detail):
@@ -3819,7 +4257,8 @@ def watch_deliver(w, kind, detail):
         except Exception:
             pass
     if w.get("notify", True):
-        notify_user("longrun watch %s: %s" % (w["id"], kind), "%s -> %s" % (w["check"]["desc"], w["to"].get("name") or sid8(sid)))
+        notify_user("longrun watch %s: %s" % (w["id"], kind), "%s -> %s" % (w["check"]["desc"], w["to"].get("name") or sid8(sid)),
+                    link=session_deep_link(did))
     w["delivered"] = {"how": how, "at": ts(), "kind": kind}
     return how
 
@@ -4746,8 +5185,10 @@ def build_digest(store, sid, source="manual", cwd=None, continued=False):
     parts = []  # [key, text]
     o = load_orch(store)
     is_orch = bool(sid) and bool(o) and o.get("skey") == skey
-    parts.append(["head", "<longrun v%s project=%s session=%s [%s] source=%s%s>" % (
-        VERSION, store.name, clip(name, 40), skey, source, " role=orchestrator" if is_orch else "")])
+    imp = important_label(*important_state(load_meta(store, sid))) if sid else ""
+    parts.append(["head", "<longrun v%s project=%s session=%s [%s] source=%s%s%s>" % (
+        VERSION, store.name, clip(name, 40), skey, source, " role=orchestrator" if is_orch else "",
+        (" %s: every turn end here raises a desktop notification" % imp) if imp else "")])
     h = halt_applies(store)
     if h:
         parts.append(["halt", "HALT in force since %s by %s: %s. Tool calls are refused until the user lifts it (`longrun resume`)." % (h.get("at"), h.get("by"), h.get("reason"))])
@@ -4839,12 +5280,30 @@ def build_digest(store, sid, source="manual", cwd=None, continued=False):
     return text
 
 
-def cmd_digest(store, args):
-    source = "manual"
+def digest_source(args):
     for i, a in enumerate(args):
         if a == "--source" and i + 1 < len(args):
-            source = args[i + 1]
-    sys.stdout.write(build_digest(store, current_session(store), source) + "\n")
+            return args[i + 1]
+    return "manual"
+
+
+def cmd_digest(store, args):
+    sys.stdout.write(build_digest(store, current_session(store), digest_source(args)) + "\n")
+    return 0
+
+
+def empty_digest(args):
+    """No project for this directory. Said in the digest's own shape and with exit 0, because the skill body
+    interpolates `!`longrun digest`` and Claude Code throws the whole prompt away when that command fails -
+    which is exactly the state someone is in when they type `/longrun init`."""
+    sys.stdout.write(
+        "<longrun v%s project=none source=%s>\n"
+        "No longrun project for %s: no notes, no sessions, nothing is being recorded here yet.\n"
+        "Set one up only if the user asked for it (`/longrun init`, \"настрой longrun\") or the work here is long "
+        "enough to need it: `longrun init` keeps `.longrun/` in the repo, `longrun init --external` keeps the tree "
+        "clean, `longrun link <project>` joins a project that already exists (a worktree of it, say). "
+        "`longrun onboard` walks the user through the settings afterwards.\n"
+        "</longrun>\n" % (VERSION, digest_source(args), os.getcwd()))
     return 0
 
 
@@ -5226,6 +5685,106 @@ def precompact_snapshot(store, sid, tpath, focus=""):
     return p
 
 
+def short_path(p, base):
+    """A path the summariser can still match against the transcript, without spending the budget on the prefix."""
+    try:
+        if base and os.path.realpath(p).startswith(os.path.realpath(base) + os.sep):
+            return os.path.relpath(p, base)
+    except OSError:
+        pass
+    home = os.path.expanduser("~")
+    return ("~" + p[len(home):]) if home and p.startswith(home + os.sep) else p
+
+
+COMPACT_CORE = [
+    "Keep every approach that was tried and did not work, each with the reason it failed, even where that makes the "
+    "summary longer: without them the next turns repeat work already known to be wrong.",
+    "Keep exact strings instead of descriptions of them: file paths, command lines, error text, identifiers, urls, numbers.",
+    "Drop what one Read or one command brings back: file contents, long tool output, diffs already applied. A path plus "
+    "one line of why it matters replaces them.",
+    "Keep the user's own wording for what they asked for and for every correction they made.",
+]
+
+
+def compact_hint(store, sid):
+    """The instructions this session gives to its own compaction, printed by the PreCompact hook.
+
+    Claude Code appends a command hook's stdout to the summariser prompt as its "Additional Instructions" block -
+    for an automatic compaction as well as for `/compact <text>` (verified on 2.1.238: hook stdout with exit 0 ->
+    newCustomInstructions, merged with whatever the user typed). The summariser prompt is otherwise identical in
+    both cases, so this text is the only thing that makes one compaction keep more than another, and the user no
+    longer has to catch the moment and write it by hand. It costs no context: the hook writes it, not the model."""
+    cfg = store.cfg
+    if not cfg.get("compact_hint", True):
+        return ""
+    skey = session_key(sid) if sid else ""
+    m = load_meta(store, sid) if sid else {}
+    parts = [["lead", "This session keeps its durable notes on disk and gets them back right after the compaction, so "
+                      "the summary is what carries everything that is NOT written down yet."]]
+    parts += [["core%d" % i, "- " + line] for i, line in enumerate(COMPACT_CORE)]
+    try:
+        mine = my_tasks(load_board(store), skey) if skey else []
+    except Exception:
+        mine = []
+    if mine:
+        parts.append(["task", "- Carry over in full, this is the work in progress: "
+                              + clip("; ".join(fmt_task(t) for t in mine[:3]), 300)])
+    base = session_cwd(sid, store) or (os.path.dirname(store.local) if os.path.basename(store.local) == ".longrun" else "")
+    files = [short_path(f, base) for f in list(m.get("files") or [])[-12:]]
+    if files:
+        parts.append(["files", "- Files this session is changing; keep each path and what was changed in it: "
+                               + clip(", ".join(files), 300)])
+    ids = ["n%d" % e["id"] for e in load_notes(notes_target(store, True)) if e["id"]][-12:]
+    if skey:
+        ids += ["s%d" % e["id"] for e in load_notes(notes_target(store, False, skey=skey)) if e["id"]][-12:]
+    if ids:
+        parts.append(["notes", "- Already on disk and re-injected automatically after the compaction, so the summary "
+                               "does not need to restate them: longrun notes " + clip(", ".join(ids), 200)])
+    for key in ("compact_instructions", "compact_hint_text"):
+        text = (cfg.get(key) if key == "compact_instructions" else m.get(key)) or ""
+        if str(text).strip():
+            parts.append([key, "- " + clip(str(text), 400)])
+    cap = int(cfg.get("compact_hint_max_bytes") or 1200)
+    body = lambda ps: "\n".join(p[1] for p in ps)
+    for k in ("files", "notes", "task", "lead", "core3", "core2"):  # the explicit human lines and core0/1 never go
+        if len(body(parts).encode("utf-8")) <= cap:
+            break
+        parts = [p for p in parts if p[0] != k]
+    return body(parts)[:cap]
+
+
+def cmd_compact_hint(store, args):
+    """longrun compact-hint               what the PreCompact hook will hand to the summariser, exactly as it will send it
+    longrun compact-hint --set "text"  one more line of your own for this session's next compaction
+    longrun compact-hint --clear       drop that line
+
+    The project-wide version of the same thing is `longrun config set compact_instructions "..."`."""
+    text, rest = _flag(args, "--set", None)
+    clear, rest = _flag(rest, "--clear", False, takes_value=False)
+    if rest:
+        die("usage: longrun compact-hint [--set \"text\" | --clear]", 2)
+    if text is not None or clear:
+        sid, _skey, _n = _me(store)
+        with store.shared_lock():
+            m = load_meta(store, sid)
+            if clear:
+                m.pop("compact_hint_text", None)
+            else:
+                m["compact_hint_text"] = clip(text, 400)
+            save_meta(store, sid, m)
+        print("compact hint %s for this session" % ("cleared" if clear else "set"))
+        return 0
+    sid = current_session(store)
+    out = compact_hint(store, sid)
+    if not out:
+        print("compact_hint is off here (`longrun config set compact_hint true`)")
+        return 0
+    print(out)
+    print("\n(%d B; sent on stdout by the PreCompact hook, which Claude Code appends to the compaction prompt as its "
+          "\"Additional Instructions\" - for automatic compactions too)" % len(out.encode("utf-8")), file=sys.stderr)
+    return 0
+
+
 def nudge_text(store, m):
     """The reminder, or "" when it is not due. Reading around is not activity worth a note: it takes real
     edits or a failed command since the last note, and then a window's worth of turns or tool calls.
@@ -5491,8 +6050,15 @@ def cmd_hook(args):
             save_meta(store, sid, m)
         ci = inp.get("custom_instructions")
         snap = precompact_snapshot(store, sid, tpath, ci or "")  # the journal-derived half needs no transcript
-        journal(store, sid, "compaction %s%s%s" % (inp.get("trigger", "?"), (" | instructions: " + clip(ci, 120)) if ci else "",
-                                                   (" | snapshot " + os.path.relpath(snap, store.local)) if snap else ""))
+        try:
+            hint = compact_hint(store, sid)
+        except Exception:  # steering the summary is a bonus; never let it cost the snapshot or block the compaction
+            hint = ""
+        journal(store, sid, "compaction %s%s%s%s" % (inp.get("trigger", "?"), (" | instructions: " + clip(ci, 120)) if ci else "",
+                                                     (" | snapshot " + os.path.relpath(snap, store.local)) if snap else "",
+                                                     (" | hint %d B" % len(hint.encode("utf-8"))) if hint else ""))
+        if hint:  # stdout of this hook becomes the "Additional Instructions" of the compaction prompt (see compact_hint)
+            print(hint)
         return 0
     if event == "PostCompact":
         summary = inp.get("compact_summary") or ""
@@ -5515,9 +6081,15 @@ def cmd_hook(args):
                 m.pop(k, None)
             sample_ctx(store, m, tpath, force=True)
             tell = ctx_warning(store, m, "ctx_told")
+            imp = consume_important(m)   # spends one turn of a counted flag, inside the same lock
             save_meta(store, sid, m)
         if tell:
             notify_orchestrator(store, "%s [%s]: %s" % (clip(session_display_name(sid, store), 30), session_key(sid)[:8], tell), wake=False, from_sid=sid)
+        if imp or should_notify_turn_end(store):
+            name = clip(session_display_name(sid, store), 55) or "Claude Code"
+            used = notify_user(("* " + name) if imp else name, last or "finished a turn", link=session_link(store, sid))
+            if imp:
+                journal(store, sid, "turn-end notification %s (%s)" % ("through " + used if used else "NOT sent: no notifier here", imp))
         if store.cfg.get("strict_stop") and not inp.get("stop_hook_active"):
             nt = nudge_text(store, m)
             if nt:
@@ -5656,6 +6228,14 @@ def config_coerce(key, raw):
         if raw.strip().lower() not in ("auto", "launchd", "systemd", "cron", "none"):
             die("watch_timer takes auto, launchd, systemd, cron or none", 2)
         return raw.strip().lower()
+    if key == "notify_turn_end":
+        if raw.strip().lower() not in ("off", "unfocused", "always"):
+            die("notify_turn_end takes off, unfocused or always", 2)
+        return raw.strip().lower()
+    if key == "notifier":
+        if raw.strip().lower() not in ("auto", "terminal-notifier", "osascript", "notify-send", "none"):
+            die("notifier takes auto, terminal-notifier, osascript, notify-send or none", 2)
+        return raw.strip().lower()
     if kind is bool:
         v = raw.strip().lower()
         if v in ("1", "true", "on", "yes"):
@@ -5726,6 +6306,9 @@ ONBOARD_SETTINGS = [
     ("pr_tool", "global", "how pr-merged checks ask: gh (GitHub CLI) or arc (Arcadia). auto = by the folder of the watch"),
     ("watch_timer", "global", "what runs the watch tick: launchd (macOS), systemd (a user timer), cron. auto picks what "
                               "this machine has; none = nothing runs it and `longrun watch run` is yours to schedule"),
+    ("notify_turn_end", "global", "a notification when a session finishes a turn, which the app itself sends silent and passive "
+                                  "(macOS files it without a banner). unfocused = only while the Claude app is not in front; "
+                                  "always = every turn end; off = leave it to the app"),
 ]
 
 
@@ -5777,6 +6360,7 @@ def cmd_onboard(args):
         "  project:   %s" % (local if local else "none here. In the folder Claude Code has open: `longrun init` (add .longrun/ to the ignore file when it is inside a repo)"),
         "  timer:     %s" % ("%s, installed (%s)" % (timer_name(), timer_state()) if timer_installed()
                             else "%s, NOT installed: `longrun watch install`" % timer_name()),
+        "  notify:    %s" % notify_state_line(),
         "  autocompact: %s" % ac,
         "  onboarded: %s" % (g.get("onboarded_at") or "never"),
         "",
@@ -5808,8 +6392,8 @@ def fmt_tokens(n):
 
 def cmd_where(args):
     local = resolve_local()
-    if not local:  # printed, not raised: this is what the skill body shows when the project is not set up
-        print("not initialised here: run `longrun init` in the project root (`--external` keeps the tree clean), "
+    if not local:  # printed, not raised: this is what the skill body shows when the project is not set up.
+        print("not initialised here: run `longrun init` in the project root (`--external` keeps the tree clean), "  # exit 1 stays: `where` is a query, and callers branch on it
               "or `longrun link <project>` from a worktree of a project that already has one")
         return 1
     st = Store(local)
@@ -5838,11 +6422,13 @@ NOTES (own = this session's, [s<id>]; shared = the project's, [n<id>], seen by e
   rm s3 n12 ... | replace s3|n12 "text"   delete / rewrite (deleted lines go to archive/notes.md)
   notes [--shared|--own|--session WHO] | prune [--auto] [--shared]   show / archive the cheapest until 60%% of the budget
   log "text"                  one milestone line in this session's journal
+  compact-hint [--set "text"|--clear]   what the PreCompact hook tells the summariser to keep (automatic compactions too)
   recall TERM...              search shared + own notes of every session, journals, archived summaries, transcripts
 
 SESSIONS
   status                      every session of the project: name, alive/stale/ended, own notes, last status
   send [--list|--resume] WHO "text"   a user turn in another session: running -> its socket now; stopped -> its inbox
+  important [on|next|N|off] [--to WHO]   this session's turn ends always raise a notification, focused or not
   watch add|ls|rm|test|sessions|install|status   checks run on a timer with no model; a message when one fires
 
 ORCHESTRATION (one session drives the project; the others report through the board)
@@ -5868,6 +6454,8 @@ SETTINGS
   onboard [done]              the first-conversation brief: what longrun does, the nuances, this machine's state, the settings to decide
   config                      effective settings and where each comes from (default / global / project)
   config set KEY VALUE [--global] | unset KEY [--global]   e.g. `config set notes_max_bytes 8000`, `config set budget_on false --global`
+  notify "text" [--title T] | notify --test   a desktop notification; --test says whether the screen really showed it
+  notify setup [--icon FILE]  build the bundle they are sent from, so they carry our icon and name (macOS)
 
 INTERNAL   digest [--source X] (what the hooks inject) | gc (retention now) | hook EVENT (called by the hooks)
 """ % VERSION
@@ -5932,14 +6520,18 @@ def main(argv):
         return cmd_watch(rest)
     if cmd == "mcp":
         return mcp_serve(rest)
+    if cmd == "notify":  # no project needed: the watcher tick notifies with no project of its own
+        return cmd_notify(rest)
     if cmd == "ask" and rest and rest[0] == "_halt_dialog":  # from the watcher: no project, no session
         return halt_dialog(rest[1:])
+    if cmd == "digest" and not resolve_local():  # same reason as `where`: the skill body runs it with `!`
+        return empty_digest(rest)
     store = require_store()
     table = {"add": cmd_add, "rm": cmd_rm, "replace": cmd_replace, "notes": cmd_notes, "prune": cmd_prune,
              "ledger": cmd_ledger, "ask": cmd_ask, "log": cmd_log, "report": cmd_report, "inbox": cmd_inbox,
              "recall": cmd_recall, "status": cmd_status, "digest": cmd_digest, "gc": cmd_gc, "send": cmd_send,
              "board": cmd_board, "fact": cmd_fact, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,
-             "interrupt": cmd_interrupt, "budget": cmd_budget}
+             "interrupt": cmd_interrupt, "budget": cmd_budget, "compact-hint": cmd_compact_hint, "important": cmd_important}
     if cmd not in table:
         die("unknown command %s (longrun help)" % cmd, 2)
     if cmd in HQ_COMMANDS and not store.hq():

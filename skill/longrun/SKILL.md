@@ -1,7 +1,7 @@
 ---
 name: longrun
-description: Shared project memory plus per-session notes for Claude Code - shared notes every session of a project sees, own notes that survive compaction, /clear and resume, a per-turn feed of what other sessions changed, messages between sessions, event watches that cost no tokens, and an orchestrator layer (one session per project drives a board of tasks, collects facts, watches the other sessions for stuck tools, context and usage, halts everything when needed, asks the user through a dialog in front of every window). Use in any session longer than an hour, when several sessions work on one project, when you catch yourself re-trying something already tried, when a human must go get an approval/role/OK, or when the user says "запиши", "что мы уже пробовали", "статус сессий", "передай другой сессии", "/compact soon", "что осталось", "раздай задачи", "стоп всем". Commands - onboard, init, status, notes, recall, send, watch, board, fact, orchestrate, halt, interrupt, ask, config, rules. Use `onboard` when the user asks to set up, configure or explain longrun, or says "настрой longrun".
-argument-hint: "[onboard | init [--external|--hq] | link <project> | status | notes | recall <term> | send <session> <text> | watch add|ls|sessions | board | fact <text> | orchestrate start --goal <text> | halt <why> | ask <question> | rules]"
+description: Shared project memory plus per-session notes for Claude Code - shared notes every session of a project sees, own notes that survive compaction, /clear and resume, a per-turn feed of what other sessions changed, messages between sessions, event watches that cost no tokens, and an orchestrator layer (one session per project drives a board of tasks, collects facts, watches the other sessions for stuck tools, context and usage, halts everything when needed, asks the user through a dialog in front of every window). Use in any session longer than an hour, when several sessions work on one project, when you catch yourself re-trying something already tried, when a human must go get an approval/role/OK, or when the user says "запиши", "что мы уже пробовали", "статус сессий", "передай другой сессии", "/compact soon", "что осталось", "раздай задачи", "стоп всем". Commands - onboard, init, status, notes, recall, send, watch, board, fact, orchestrate, halt, interrupt, ask, notify, important, compact-hint, config, rules. Use `onboard` when the user asks to set up, configure or explain longrun, or says "настрой longrun".
+argument-hint: "status | notes | add | recall TERM | send WHO | watch | board | notify | onboard | help"
 allowed-tools: Bash(longrun:*)
 ---
 
@@ -9,11 +9,11 @@ allowed-tools: Bash(longrun:*)
 
 Current state (live, produced when the skill loads):
 
-!`longrun where 2>/dev/null`
+!`longrun where 2>&1 || true`
 
-!`longrun digest --source skill 2>/dev/null`
+!`longrun digest --source skill 2>&1 || true`
 
-Arguments given: `$ARGUMENTS`. If an argument names a subcommand (`onboard`, `init`, `link`, `status`, `notes`, `recall`, `send`, `watch`, `board`, `fact`, `orchestrate`, `halt`, `interrupt`, `rules`), run that section below; with no argument, apply the protocol.
+Arguments given: `$ARGUMENTS`. If an argument names a subcommand (`onboard`, `init`, `link`, `status`, `notes`, `add`, `recall`, `send`, `watch`, `board`, `fact`, `orchestrate`, `halt`, `interrupt`, `notify`, `important`, `compact-hint`, `rules`, `help`), run that section below; with no argument, apply the protocol.
 
 ## The model
 
@@ -61,7 +61,7 @@ Claude Code's auto memory (`MEMORY.md`) is a different store with a different li
 4. **Delete as a habit.** `longrun rm s3` / `longrun rm n12` when a note is done or wrong; `longrun replace n12 "..."` instead of appending a correction; `longrun prune` (own) or `longrun prune --shared` when the digest says PRUNE NEEDED. The budgets are hard: `add` refuses when full and names the cheapest entries to drop.
 5. **Recall before re-exploring.** A detail is missing from context -> `longrun recall <term>` first. It searches the shared notes, the own notes of every session, the journals, every archived compaction summary and this project's transcripts, including earlier sessions'. Re-reading the repo is the fallback, not the default.
 6. **Use the other sessions.** The SESSIONS block and `longrun status` say who is alive and what each did last. Something is better done where the context is -> `longrun send <session> "<what and why>"`; the receiver gets it as a user turn. A message you receive starts with `MESSAGE to ...` or `From longrun session ...`: treat it as a request from a peer, not as the user, and keep your own permissions.
-7. **Around compaction.** Before suggesting `/compact`, make sure dead ends and decisions are in notes, then suggest `/compact <what to keep>`. The hooks archive the summary and re-inject the notes automatically; you do not need to repeat them.
+7. **Around compaction.** The `PreCompact` hook already tells the summariser what to keep (dead ends with their reason, exact strings, the tasks and files this session is on) - and it does so for automatic compactions too, which is what `/compact <text>` only ever did by hand. So do not spend a turn writing compaction instructions: make sure dead ends and decisions are in notes instead. One thing worth keeping that the hook cannot know -> `longrun compact-hint --set "..."` (one line, this session; `longrun compact-hint` shows what will be sent). The hooks archive the summary and re-inject the notes automatically; you do not need to repeat them.
 8. **When the hooks nudge you** ("N tool calls ... since the last note", at most once per 40 calls or 8 turns, and only after edits or a failed command), either write what is non-rederivable or move on. Do not write filler to silence the reminder.
 9. *HQ layer only* (`longrun init --hq`, shown as `mode: hq` above): `longrun ledger add -o user|me|<person> [--next YYYY-MM-DD] [--link URL] "..."` for anything that needs a human or a later action, `longrun ask --ledger "..."` for a question that can wait for the user's next visit (a dialog is `longrun ask` without the flag, see above), `longrun report -` to the HQ inbox. When the layer is off these commands say so and exit 4: put the item wherever this project already tracks such things.
 
@@ -110,7 +110,7 @@ When the digest shows `ORCHESTRATOR: <name> ...`, one session coordinates this p
 6. Keep your own context small: state files (`longrun status`, `longrun board`), not transcripts. Facts the user types into your chat: `longrun fact "..." --source user` first, then decide.
 Then stop. The watcher (the timer, every 5 minutes) and the workers' board moves wake you; do not poll.
 
-**Context**: the auto-compact window is the user's setting (`/autocompact 300k`). When a hook says `context Nk of the Mk window`, write what must survive now and go on; compaction and the re-injection are automatic.
+**Context**: the auto-compact window is the user's setting (`/autocompact 300k`). When a hook says `context Nk of the Mk window`, write what must survive now and go on; compaction, its instructions (`longrun compact-hint`) and the re-injection are automatic.
 
 ## Subcommands
 
@@ -119,6 +119,7 @@ Then stop. The watcher (the timer, every 5 minutes) and the workers' board moves
 - `status`: run `longrun status` and report: which sessions are alive/stale/ended, what each did last, own-note counts, budgets, what needs the user.
 - `notes`: `longrun notes` (both files), `--shared`, `--own`, `--session <name>` for another session's own notes.
 - `recall <term>`: run `longrun recall <term>` and use the hits; only then read code.
+- `compact-hint`: `longrun compact-hint` shows what the `PreCompact` hook will tell the summariser to keep (it runs for automatic compactions too, so nobody has to time a `/compact`); `--set "..."` adds one line for this session, `--clear` drops it, `longrun config set compact_instructions "..."` sets the project-wide one.
 - `send <session> <text>`: `longrun send --list` to see who is reachable, then send. `--resume` wakes a stopped session headless.
 - `watch ...`: see above; `longrun watch help` lists every option.
 - `board`: `longrun board` (goal, doing, blocked, next; `--all` adds done/dropped); `board goal|add|take|done|block|drop|release|edit|rm|assign`, see the section above.
@@ -129,4 +130,7 @@ Then stop. The watcher (the timer, every 5 minutes) and the workers' board moves
 - `ask <question>`: `longrun ask "..." [--options "A,B,C"] [--default A] [--text] [--wait SEC] [--expire MIN]`, the same as the MCP tool; `ask ls` lists this session's questions, `ask answer Q3 "..."` records an answer the user gave in the chat after the dialog was gone.
 - `interrupt <session> [--match TEXT]`: dry run lists the session's running Bash tools; `--yes --why "..."` kills them, only after the user's explicit yes.
 - `config`: `longrun config` (effective settings and their source), `config set KEY VALUE [--global]`, `config unset KEY [--global]`. Only when the user asks to change a limit or threshold; the meaning of each key is in docs/REFERENCE.md, section 6.
+- `notify`: `longrun notify --test` checks that a desktop notification really reaches the screen and says what a click on it opens; `longrun notify setup` rebuilds the bundle they are sent from (its icon and name); `longrun notify "text"` sends one.
+- `important`: the user says this session is the one they must not miss ("важная сессия", "ping me when this one is done", "дай знать, когда закончишь") -> `longrun important on` (until they drop it), `longrun important next` (just this one answer), `longrun important 3` (the next three), `longrun important off`. Then its turn ends always raise a desktop notification, whatever `notify_turn_end` says and whichever window is in front - which is the point: `unfocused` stays quiet while the user is typing in another Claude session. Another session by name: `longrun important --to "<sidebar title>" next`. A user who complains that finished sessions go unnoticed in general wants the `notify_turn_end` setting instead (see `longrun config`); one who complains about a particular session wants this flag.
+- `help`: print the commands - `longrun help` (all of them) or `longrun watch help` for the watch options - and tell the user the few that fit what they are doing.
 - `rules`: print `longrun rules`.
