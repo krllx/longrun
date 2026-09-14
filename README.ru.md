@@ -31,6 +31,10 @@
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
+<p align="center">
+  <a href="https://krllx.github.io/longrun/course/ru/"><img src="assets/course-banner.ru.svg" alt="Курс: как устроен longrun - одиннадцать коротких частей, около 15 минут" width="820"></a>
+</p>
+
 ---
 
 ## Быстрый старт
@@ -52,7 +56,7 @@ cd ~/projects/shop && longrun init   # в папке, которую откры�
 
 Дальше звать ничего не нужно. Можно словами: *"запиши"*, *"что мы уже пробовали"*, *"статус сессий"*, *"передай другой сессии"*, *"скажи, когда PR вольется"*.
 
-> **Устройство скилла и примеры:** [krllx.github.io/longrun/course/ru](https://krllx.github.io/longrun/course/ru/). Одиннадцать коротких частей с пошаговыми сценариями, около 15 минут.
+> **Устройство скилла и примеры:** [курс](https://krllx.github.io/longrun/course/ru/) - одиннадцать коротких частей, около 15 минут.
 
 <details>
 <summary><b>Уведомления на рабочем столе</b> - <code>./install.sh</code> настраивает их сам; что он делает и как отказаться</summary>
