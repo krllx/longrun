@@ -67,16 +67,16 @@ curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bas
 cd ~/my-project && longrun init && claude "set up longrun"
 ```
 
-从此什么命令都不用记，直接说就行：*“记一下”*、*“我们都试过什么”*、*“PR 合了告诉我”*。
+从此什么命令都不用记，直接说就行：“*记一下*”、“*我们都试过什么*”、“*PR 合了告诉我*”。
 
-> **内部怎么运转，还带例子：**[课程](https://krllx.github.io/longrun/course/zh-CN/)，11 个短章节，约 15 分钟。
+> **内部怎么运转，还带例子**：[课程](https://krllx.github.io/longrun/course/zh-CN/)，11 个短章节，约 15 分钟。
 
 <details>
 <summary><b>桌面通知</b>：它们有什么用，安装脚本又问了什么</summary>
 
-- **为什么要有：**全部停止、事件监听触发、一轮回答结束，这些本来就会传到会话里；横幅是为了让*你*在盯着另一个窗口时也能注意到。longrun 从不依赖它们。
-- **macOS：**通过 Homebrew 装 `terminal-notifier`（系统自带的东西都画不出横幅），外加一次授权弹窗。安装时回答了“否”？以后再 `longrun notify setup`。
-- **Linux：**`notify-send` (`libnotify`)，大多数桌面环境已经有了。
+- **为什么要有**：全部停止、事件监听触发、一轮回答结束，这些本来就会传到会话里；横幅是为了让*你*在盯着另一个窗口时也能注意到。longrun 从不依赖它们。
+- **macOS**：通过 Homebrew 装 `terminal-notifier`（系统自带的东西都画不出横幅），外加一次授权弹窗。安装时回答了“否”？以后再 `longrun notify setup`。
+- **Linux**：`notify-send` (`libnotify`)，大多数桌面环境已经有了。
 
 `longrun notify --test` 检查通知是否真的到了屏幕上。有两个设置值得看看：`notify_turn_end unfocused`（Claude 窗口不在前台时，会话每结束一轮就弹一条横幅）和 `longrun important on|next`，用于那个你绝对不能错过的会话。agent 调用的 `notify` 工具来自安装脚本注册的 `longrun` MCP 服务器。完整说明，包括 macOS 的各种怪癖：[docs/REFERENCE.md](docs/REFERENCE.md)。
 
@@ -84,25 +84,25 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 ## 一句话概括
 
-**不用你开口，从第一个会话起就有的：**agent 把笔记写到磁盘上（死胡同、决定、事实），每次 compaction、`/clear` 和 resume 之后 hook 都把它们带回来；compaction 时会告诉做总结的模型该留下什么；每一轮都显示项目里其他会话改了什么。
+**不用你开口，从第一个会话起就有的**：agent 把笔记写到磁盘上（死胡同、决定、事实），每次 compaction、`/clear` 和 resume 之后 hook 都把它们带回来；compaction 时会告诉做总结的模型该留下什么；每一轮都显示项目里其他会话改了什么。
 
-**你开口，或者 agent 自己看出需要时：**“PR 合了告诉我”（一个等待时不花 token 的事件监听）、会话之间的消息和任务、你在意的那个会话干完时发条通知、一个会话带着其他会话走向目标。
+**你开口，或者 agent 自己看出需要时**：“PR 合了告诉我”（一个等待时不花 token 的事件监听）、会话之间的消息和任务、你在意的那个会话干完时发条通知、一个会话带着其他会话走向目标。
 
 ## 为什么
 
 | 没有 longrun | 有了 longrun |
 |---|---|
-| compaction 把历史压成一段总结，最先丢掉的就是原因。半小时后 agent 又提出了它自己已经回退掉的那个改法。 | **笔记在磁盘上。**每条死胡同、决定和事实各占一行。共享笔记每个会话都看得到，自有笔记在每次 compaction、`/clear` 和 resume 之后回来。 |
-| 第二个会话根本不知道第一个存在。一个已经开了 PR，另一个还在说“PR 还没建”。 | **消息和任务。**一个会话发出消息或派出任务，它会作为一轮用户输入落到另一个会话里。 |
-| “PR 合了告诉我”要么变成烧 token 的轮询循环，要么变成睡过头的 sleep。 | **事件监听。**launchd 每五分钟检查一次条件，不调用模型，条件成立就唤醒会话。可靠、及时、还不花钱。 |
-| 五个会话在一个项目上，只有人自己知道什么做完了、什么卡住了、下一步是什么。 | **一个编排器。**一个会话维护任务板、派发任务、发现卡住的同伴，只在必要时才通过对话框问人。 |
+| compaction 把历史压成一段总结，最先丢掉的就是原因。半小时后 agent 又提出了它自己已经回退掉的那个改法。 | **笔记在磁盘上**。每条死胡同、决定和事实各占一行。共享笔记每个会话都看得到，自有笔记在每次 compaction、`/clear` 和 resume 之后回来。 |
+| 第二个会话根本不知道第一个存在。一个已经开了 PR，另一个还在说“PR 还没建”。 | **消息和任务**。一个会话发出消息或派出任务，它会作为一轮用户输入落到另一个会话里。 |
+| “PR 合了告诉我”要么变成烧 token 的轮询循环，要么变成睡过头的 sleep。 | **事件监听**。launchd 每五分钟检查一次条件，不调用模型，条件成立就唤醒会话。可靠、及时、还不花钱。 |
+| 五个会话在一个项目上，只有人自己知道什么做完了、什么卡住了、下一步是什么。 | **一个编排器**。一个会话维护任务板、派发任务、发现卡住的同伴，只在必要时才通过对话框问人。 |
 
 一个 python 文件，没有依赖。
 
 ## 会话协作的四种方式
 
 > [!NOTE]
-> 下面这些命令是 agent 自己会跑的：skill 会告诉它什么时候写笔记、什么时候发消息、什么时候设一个事件监听。这里没有一条需要你背下来：你只要说*“记一下”*或者*“PR 合了告诉我”*，甚至什么都不说。列出来只是因为你想手动跑的时候随时可以跑。
+> 下面这些命令是 agent 自己会跑的：skill 会告诉它什么时候写笔记、什么时候发消息、什么时候设一个事件监听。这里没有一条需要你背下来：你只要说“*记一下*”或者“*PR 合了告诉我*”，甚至什么都不说。列出来只是因为你想手动跑的时候随时可以跑。
 
 ### 1. 磁盘上的共享文档
 
@@ -166,15 +166,15 @@ sequenceDiagram
     L-->>S: 同样的摘要，外加你上次停在哪
 ```
 
-**启动。**hook 按目录找到项目并打印摘要：共享笔记、自有笔记、其他会话（是否还活着、各自最后干了什么）、待触发的事件监听、未送达的消息。
+**启动**。hook 按目录找到项目并打印摘要：共享笔记、自有笔记、其他会话（是否还活着、各自最后干了什么）、待触发的事件监听、未送达的消息。
 
-**干活。**agent 每碰到一个死胡同、做出一个决定或拿到一条来之不易的事实，就写一行。hook 统计编辑次数并记录失败的命令。连着编辑了很久却一条笔记都没写，会收到一次提醒。
+**干活**。agent 每碰到一个死胡同、做出一个决定或拿到一条来之不易的事实，就写一行。hook 统计编辑次数并记录失败的命令。连着编辑了很久却一条笔记都没写，会收到一次提醒。
 
-**每一轮。**投递收件箱里的消息。其他会话对共享笔记做的改动以差异形式出现：`+` 新增、`~` 改写、`-` 删除。
+**每一轮**。投递收件箱里的消息。其他会话对共享笔记做的改动以差异形式出现：`+` 新增、`~` 改写、`-` 删除。
 
-**compaction。**在它之前，先给最近的请求、编辑过的文件和最近的失败拍一张快照，外加给做总结的模型本人的指示：保留死胡同连同原因、保留精确字符串、丢掉一次 Read 就能拿回来的东西。自动 compaction 和 `/compact <text>` 在 Claude Code 里用的是同一段总结提示词，所以这和你自己写 `/compact` 提示是一回事，只是由 longrun 替你写好，也不用你算时机。compaction 之后，longrun 把那段总结原样归档。下一次启动打印的是摘要加一个 HANDOFF 区块，于是会话接着原地继续。resume 和 `/clear` 沿用同一批笔记；fork 出来的会话拿到一份副本。
+**compaction**。在它之前，先给最近的请求、编辑过的文件和最近的失败拍一张快照，外加给做总结的模型本人的指示：保留死胡同连同原因、保留精确字符串、丢掉一次 Read 就能拿回来的东西。自动 compaction 和 `/compact <text>` 在 Claude Code 里用的是同一段总结提示词，所以这和你自己写 `/compact` 提示是一回事，只是由 longrun 替你写好，也不用你算时机。compaction 之后，longrun 把那段总结原样归档。下一次启动打印的是摘要加一个 HANDOFF 区块，于是会话接着原地继续。resume 和 `/clear` 沿用同一批笔记；fork 出来的会话拿到一份副本。
 
-**清理。**每小时一次：旧条目进归档（`pin` 除外）、日志只留尾巴、长期沉默的会话进归档。预算满了 `add` 会拒绝，并指出可以删掉哪些。什么都不会被悄悄丢掉。
+**清理**。每小时一次：旧条目进归档（`pin` 除外）、日志只留尾巴、长期沉默的会话进归档。预算满了 `add` 会拒绝，并指出可以删掉哪些。什么都不会被悄悄丢掉。
 
 ## 三个实体
 
@@ -188,7 +188,7 @@ worktree 用 `longrun link <project>` 挂上去，本身没有笔记。
 
 ## 该写什么
 
-只有一个判据：**一条命令、一次 Read 或一次 grep 能不能把它找回来？**能的话，就别写。
+只有一个判据：**一条命令、一次 Read 或一次 grep 能不能把它找回来**？能的话，就别写。
 
 | 标签 | 写什么 | 写到哪 |
 |---|---|---|
@@ -218,13 +218,13 @@ longrun orchestrate start --goal "..." | board | fact | ask | halt | resume | in
 <details>
 <summary><b>常见问题</b></summary>
 
-**PR 明明在，agent 却说“PR 还没建”。**这条事实不在共享笔记里：`longrun add --shared -t pin "PR 42 = branch feature/checkout"`。
+**PR 明明在，agent 却说“PR 还没建”**。这条事实不在共享笔记里：`longrun add --shared -t pin "PR 42 = branch feature/checkout"`。
 
-**worktree 里的会话看不到项目笔记。**`longrun where` 必须能显示出项目。如果它说 "not initialised"：在那个 worktree 里跑 `longrun link <project>`。
+**worktree 里的会话看不到项目笔记**。`longrun where` 必须能显示出项目。如果它说 "not initialised"：在那个 worktree 里跑 `longrun link <project>`。
 
-**消息发出去了，会话却没动静。**`longrun send --list`：收件人是 "stopped" 就说明消息在收件箱里，它下一轮才会拿到。要它现在就拿：`--resume`。
+**消息发出去了，会话却没动静**。`longrun send --list`：收件人是 "stopped" 就说明消息在收件箱里，它下一轮才会拿到。要它现在就拿：`--resume`。
 
-**事件监听一直不触发。**`longrun watch status`、`longrun watch ls --all`、`longrun watch test -- <the same check>`。常见原因是 `cmd` 里用了相对路径或 shell 别名。
+**事件监听一直不触发**。`longrun watch status`、`longrun watch ls --all`、`longrun watch test -- <the same check>`。常见原因是 `cmd` 里用了相对路径或 shell 别名。
 </details>
 
 ## 开发
