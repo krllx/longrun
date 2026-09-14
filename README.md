@@ -40,11 +40,22 @@ English | [Русский](README.ru.md)
 ## Quick start
 
 ```bash
-git clone https://github.com/<you>/longrun-skill && cd longrun-skill
-./install.sh            # skill, 11 hooks, CLI ~/.local/bin/longrun, MCP server
-longrun watch install   # the timer: watches and the watcher every 5 minutes
-cd ~/projects/shop && longrun init   # in the folder you open in Claude Code
+curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+cd ~/projects/my-project && longrun init   # the folder you open in Claude Code
 ```
+
+From a clone it is the same [`./install.sh`](install.sh).
+
+> [!NOTE]
+> **What the installer changes on this machine**, so none of it is a surprise - and `./install.sh --uninstall` takes every line of it back:
+>
+> - `~/.claude/settings.json` - 11 hook entries and two permission rules that let the agent call `longrun`. The file is copied to `~/.claude/backups/` first, and hooks that are not ours are left untouched.
+> - `~/.claude/skills/longrun/` and the symlink `~/.local/bin/longrun`.
+> - the MCP server `longrun` in user scope (`claude mcp add`), which is where the `ask` and `notify` tools come from.
+> - **a background timer**, every five minutes: a launchd agent on macOS, a systemd user timer or a cron line on Linux. It checks the watches you registered and looks at the sessions - a few shell checks, no model and no tokens, and it wakes a session only when one of your conditions comes true. `--no-timer` skips it.
+> - **desktop notifications**: on macOS `brew install terminal-notifier` when it is missing, a sender bundle under `~/.claude/longrun/notifier/`, and one test notification - macOS asks once whether to allow them. On Linux it only checks for `notify-send`. `--no-notify` skips it.
+>
+> Everything stays on the machine: the notes are plain files under the project and `~/.claude/longrun/`, and the installer goes online only for these sources and that one `brew install`. Prefer to read the script before running it: `curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh -o install.sh`, read, then `bash install.sh`.
 
 Then, in a Claude Code session in that folder:
 

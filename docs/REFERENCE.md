@@ -305,7 +305,7 @@ Environment variables for tests: `LONGRUN_ASK_FIXTURE=<json {"button","text","st
 
 Everything except four things is plain POSIX python with no dependencies, and works the same on both. The four things are decided at runtime, once, by what the machine actually has.
 
-**The timer that runs the tick.** `longrun watch install` writes whichever the config key `watch_timer` says, and by default the one this OS provides:
+**The timer that runs the tick.** `install.sh` installs it (`--no-timer` skips it), and the first `watch add` installs it if it is missing; `longrun watch install` writes whichever the config key `watch_timer` says, and by default the one this OS provides:
 
 | OS | What is created | Where | State |
 |---|---|---|---|
