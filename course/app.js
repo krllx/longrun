@@ -16,6 +16,29 @@
   function svgEl(tag, attrs) { const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+  /* ---------- Language bar ----------
+     The one list of locales the course has. The bar is built here instead of being written
+     into every locale's HTML, because that edit - adding the new language to the pages that
+     already exist - is the one everyone forgets. Adding a language is one line below.
+     English lives at course/, every other locale one level down at course/<code>/.
+     The static link already in .lang stays as the no-JS fallback until this replaces it.
+     A locale goes in here only once its page is published, or the bar links to a 404. */
+  const LOCALES = [
+    { code: 'en', name: 'English', dir: '' },
+    { code: 'ru', name: 'Русский', dir: 'ru' },
+  ];
+  function LangBar() {
+    const box = document.querySelector('nav.side .lang');
+    if (!box) return;
+    const cur = document.documentElement.lang || 'en';
+    const up = cur === 'en' ? '' : '../';
+    const links = LOCALES.filter(l => l.code !== cur)
+      .map(l => el('a', { href: up + (l.dir ? l.dir + '/' : ''), hreflang: l.code, lang: l.code, text: l.name }));
+    if (!links.length) return;
+    box.textContent = '';
+    links.forEach((a, i) => { if (i) box.appendChild(document.createTextNode(' · ')); box.appendChild(a); });
+  }
+
   /* ---------- Diagram: boxes + arrows, highlightable ---------- */
   function Diagram(container, nodes, edges, size) {
     const W = size[0], H = size[1];
@@ -174,5 +197,8 @@
     window.addEventListener('scroll', upd, { passive: true }); upd();
   }
 
-  window.LR = { Diagram, Player, HookLoop, Quiz, Nav, renderTree, el };
+  window.LR = { Diagram, Player, HookLoop, Quiz, Nav, LangBar, LOCALES, renderTree, el };
+  /* self-starting: a locale page needs no extra call, and none of the existing pages change */
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', LangBar);
+  else LangBar();
 })();

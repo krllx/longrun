@@ -11,6 +11,17 @@
   :root { --bg: #16171a; --fg: #ececea; --muted: #a0a09a; --line: #2e2f34; --panel: #1e1f23; --code-bg: #26272c;
     --accent-soft: #3a2519; --ok-soft: #1c3326; --warn-soft: #3a2f16; --project-soft: #1c2a3d; --session-soft: #2a2140; --timer-soft: #163232; --human-soft: #3b1a2e; }
 }
+/* CJK locales. Geist has no kana and no Han glyphs, so Latin keeps rendering in Geist and
+   everything else falls through to the system face. No CJK webfont on purpose: a full one
+   runs into megabytes, and every desktop already ships a good one. The Latin tracking and
+   the leading set below for Geist are wrong for CJK, so both are reset here. */
+html[lang="ja"]    { --sans: "Geist", "Inter", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", sans-serif; }
+html[lang="zh-CN"] { --sans: "Geist", "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+html[lang="ja"] body, html[lang="zh-CN"] body { line-height: 1.85; letter-spacing: normal; }
+html[lang="ja"] :is(h1, h2, h3, .brand, .card h4, .player .stepname),
+html[lang="zh-CN"] :is(h1, h2, h3, .brand, .card h4, .player .stepname) { letter-spacing: normal; }
+html[lang="ja"] :is(p, li, td) { line-break: strict; }
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body { margin: 0; font-family: var(--sans); color: var(--fg); background: var(--bg); line-height: 1.65; font-size: 17px;
