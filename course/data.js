@@ -26,7 +26,7 @@ window.COURSE = (function () {
 
   const PROJ = { label: 'shop/.longrun/  (общее, в проекте)', prefix: 'shop/.longrun/', files: [
     { path: 'NOTES.md', what: 'Общие заметки [n1], [n2]... одной строкой, с автором. Бюджет 5000 байт.', who: 'Пишет агент: add --shared, rm, replace, prune --shared' },
-    { path: 'config.json', what: 'Настройки проекта: режим hq, бюджеты, пороги.', who: 'init; правится руками' },
+    { path: 'config.json', what: 'Настройки проекта: режим hq (слой ledger и inbox, `longrun init --hq`), бюджеты, пороги.', who: 'init; longrun config set' },
     { path: 'state.json', what: 'Счетчики id заметок и задач.', who: 'CLI' },
     { path: 'inbox/<msg>.md', what: 'Сообщение сессии, которая сейчас не работает. Доставленное уходит в inbox/.archive/.', who: 'send, watch, board, ask; читают хуки адресата' },
     { path: 'archive/precompact/<sid>-<time>.md', what: 'Снимок перед компакцией: последние просьбы человека, правленые файлы, недавние FAIL. Из него собирается блок HANDOFF (передача самому себе после компакции) в следующем дайджесте.', who: 'хук PreCompact' },
