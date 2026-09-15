@@ -80,46 +80,46 @@ One gloss per page, at the first occurrence only. Latin everywhere after.
 
 These are translated, and translated the same way every time.
 
-| English | ja | ko | zh-CN |
-| --- | --- | --- | --- |
-| session | セッション | 세션 | 会话 |
-| project | プロジェクト | 프로젝트 | 项目 |
-| note, notes | メモ | 메모 | 笔记 |
-| shared notes | 共有メモ | 공유 메모 | 共享笔记 |
-| own notes | 自分のメモ | 자체 메모 | 自有笔记 |
-| digest | ダイジェスト | 다이제스트 | 摘要 |
-| ledger | 台帳 | 원장 | 台账 |
-| inbox | 受信箱 | 수신함 | 收件箱 |
-| archive | アーカイブ | 아카이브 | 归档 |
-| journal | ジャーナル | 저널 | 작업 일지 / 日志 |
-| watch (event watch) | ウォッチ | 워치 | 事件监听 |
-| message | メッセージ | 메시지 | 消息 |
-| task | タスク | 작업 | 任务 |
-| board | ボード | 보드 | 任务板 |
-| orchestrator | オーケストレーター | 오케스트레이터 | 编排器 |
-| fact | 事実 | 사실 | 事实 |
-| halt (stop everything) | 全停止 | 전체 중단 | 全部停止 |
-| interrupt | 割り込み | 끼어들기 | 打断 |
-| budget (5h usage) | 予算 | 예산 | 预算 |
-| context window | コンテキストウィンドウ | 컨텍스트 윈도 | 上下文窗口 |
-| turn | ターン | 턴 | 轮次 |
-| timer | タイマー | 타이머 | 定时器 |
-| milestone | マイルストーン | 마일스톤 | 里程碑 |
-| notification | 通知 | 알림 | 通知 |
-| important session | 重要セッション | 중요 세션 | 重要会话 |
-| dialog (the ask popup) | ダイアログ | 대화 상자 | 对话框 |
-| prune | 整理 | 정리 | 清理 |
-| stuck (session) | 停滞 | 정체 | 卡住 |
-| summary (what compaction leaves) | 要約 | 요약 | 总结 |
-| digest vs summary | ダイジェスト vs 要約 - never both 要約 | 다이제스트 vs 요약 - never both 요약 | 摘要 vs 总结 - never both 摘要 |
-| dead end | 行き止まり | 막다른 길 | 死胡同 |
-| watcher (the one watching sessions) | 監視役 | 감시자 | 监视器 |
-| delta (of the shared notes) | 差分 | 변경분 | 差异 |
-| polling | ポーリング | 폴링 | 轮询 |
-| cheat sheet | チートシート | - | 速查表 |
-| agent | エージェント | 에이전트 | agent (kept Latin) |
-| worker (the session taking tasks) | 作業役 | 작업 세션 | 干活的会话 |
-| summariser (the model compaction uses) | 要約するモデル | 요약하는 모델 | 做总结的模型 |
+| English | ru | ja | ko | zh-CN |
+| --- | --- | --- | --- | --- |
+| session | сессия | セッション | 세션 | 会话 |
+| project | проект | プロジェクト | 프로젝트 | 项目 |
+| note, notes | заметка, заметки | メモ | 메모 | 笔记 |
+| shared notes | общие заметки | 共有メモ | 공유 메모 | 共享笔记 |
+| own notes | свои заметки | 自分のメモ | 자체 메모 | 自有笔记 |
+| digest | дайджест | ダイジェスト | 다이제스트 | 摘要 |
+| ledger | `ledger` (kept Latin) | 台帳 | 원장 | 台账 |
+| inbox | `inbox` (kept Latin) | 受信箱 | 수신함 | 收件箱 |
+| archive | архив | アーカイブ | 아카이브 | 归档 |
+| journal | журнал | ジャーナル | 저널 | 작업 일지 / 日志 |
+| watch (event watch) | `watch` (kept Latin) | ウォッチ | 워치 | 事件监听 |
+| message | сообщение | メッセージ | 메시지 | 消息 |
+| task | задача | タスク | 작업 | 任务 |
+| board | борд | ボード | 보드 | 任务板 |
+| orchestrator | оркестратор | オーケストレーター | 오케스트레이터 | 编排器 |
+| fact | факт | 事実 | 사실 | 事实 |
+| halt (stop everything) | остановка всех сессий (`halt`) | 全停止 | 전체 중단 | 全部停止 |
+| interrupt | прервать (`interrupt`) | 割り込み | 끼어들기 | 打断 |
+| budget (5h usage) | бюджет | 予算 | 예산 | 预算 |
+| context window | окно контекста | コンテキストウィンドウ | 컨텍스트 윈도 | 上下文窗口 |
+| turn | ход | ターン | 턴 | 轮次 |
+| timer | таймер | タイマー | 타이머 | 定时器 |
+| milestone | веха | マイルストーン | 마일스톤 | 里程碑 |
+| notification | уведомление | 通知 | 알림 | 通知 |
+| important session | важная сессия | 重要セッション | 중요 세션 | 重要会话 |
+| dialog (the ask popup) | диалог | ダイアログ | 대화 상자 | 对话框 |
+| prune | `prune` (kept Latin) | 整理 | 정리 | 清理 |
+| stuck (session) | застрявшая | 停滞 | 정체 | 卡住 |
+| summary (what compaction leaves) | резюме | 要約 | 요약 | 总结 |
+| digest vs summary | дайджест vs резюме - never both резюме | ダイジェスト vs 要約 - never both 要約 | 다이제스트 vs 요약 - never both 요약 | 摘要 vs 总结 - never both 摘要 |
+| dead end | тупик | 行き止まり | 막다른 길 | 死胡同 |
+| watcher (the one watching sessions) | наблюдатель | 監視役 | 감시자 | 监视器 |
+| delta (of the shared notes) | дельта | 差分 | 변경분 | 差异 |
+| polling | опрос | ポーリング | 폴링 | 轮询 |
+| cheat sheet | шпаргалка | チートシート | - | 速查表 |
+| agent | агент | エージェント | 에이전트 | agent (kept Latin) |
+| worker (the session taking tasks) | рабочая сессия | 作業役 | 작업 세션 | 干活的会话 |
+| summariser (the model compaction uses) | суммаризатор | 要約するモデル | 요약하는 모델 | 做总结的模型 |
 
 A `-` means no translator has needed that term in that language yet. Fill the cell in when
 you do, in the PR that needs it - do not leave the row out because one column is empty.
@@ -131,7 +131,62 @@ monospace. First occurrence may pair them: ウォッチ（`longrun watch`）.
 Terms not in this table: pick the word an ordinary developer in that language would
 use, and add a row here in the same PR. The table is meant to grow.
 
-## 4. Japanese (ja)
+## 4. Russian (ru)
+
+Russian is the project's second language and the base of the course data, so it is also
+where the most native readers will notice a sentence that was born in English. The rules
+below came out of a line-by-line review of `README.ru.md`; the tells in section 10 are
+the same list seen from the other side.
+
+**Register.** Neutral written Russian; the reader is "вы" (lower case). Developer docs,
+not a chat message.
+
+**Verbs are the first tell.** The English README is deliberately casual; the same
+casualness in Russian reads as careless. Use the neutral verb: вызывать not звать,
+запускать not гонять, тратить not жечь, удалять not снести, приходить or предоставлять
+not приезжать, опрашивать not поллить, инструмент not тул.
+
+**Every sentence keeps its subject.** English drops nouns and stays readable; Russian
+does not. "Остановленная - из inbox проекта на следующем ходу" has to become
+"Остановленная сессия заберет его из inbox проекта на следующем ходу". No dash asides in
+the middle of a sentence ("- уже открытый тоже подходит -"): parentheses or a second
+sentence. No question-and-answer rhythm ("Ответили нет при установке? Потом - ..."): one
+conditional sentence.
+
+**An English image is spelled out, not carried over.** "The reasons go first" is not
+"первыми пропадают причины" - the reader asks "причины чего?"; write "первыми пропадают
+причины решений: почему подход отбросили, почему выбрали этот путь". "A sleep that
+oversleeps" is "пауза на заданное время, после которой событие уже давно произошло или
+еще не наступило". If a phrase would make a reader stop and ask what it means, rewrite
+it rather than translate it.
+
+**Set phrases the review settled**, beyond the single words in the glossary: "ведет
+остальные к заданной цели" for driving the others to a goal; "закончила ход" and "на
+каждом ходу" for turns; "фоновый таймер" where the English says `launchd` but means the
+timer on any OS - the three platform names are listed once, where the installer is
+described.
+
+**Cyrillic forms of the section 2 words.** The Russian pages predate section 2 and use
+the established Russian developer words: хук, скилл, компакция, токен, промпт, сокет.
+Keep them, consistently, and do not "fix" them back to Latin in a sync. Everything else
+in section 2 stays Latin as written there: commands, note types, config keys, hook
+names, paths, `worktree`, `inbox`, `watch`, `resume`, platform names. The rule against
+transliteration was written for scripts where the katakana or hangul form is also an
+ordinary word; хук and скилл have no such collision.
+
+**Typography** matches the rest of the repo's Russian text: no "ё" (все, ведет, еще),
+straight quotes "..." only, no dash of any length - a plain minus with spaces is the
+only dash - and arrows written as `->`.
+
+**Avoid:**
+- звать, гонять, жечь, снести, приезжать, поллить, тул
+- a clause with no subject: "Работающая получает его сразу" -> "Работающая сессия получает его сразу"
+- a dash aside inside a sentence
+- a metaphor carried over whole: "сон, который проспит"
+- `launchd` as the timer's name in a sentence that also covers Linux
+- «ёлочки», ё, an em dash or an en dash
+
+## 5. Japanese (ja)
 
 **Politeness.** です・ます throughout the body, one register, no drift into だ・である.
 Headings, table cells and list labels end in a noun (体言止め) with no です. Instructions
@@ -155,7 +210,7 @@ it contains Japanese.
 - ！ and ～ as tone markers
 - word-for-word English clause order; split a long English sentence into two Japanese ones
 
-## 5. Korean (ko)
+## 6. Korean (ko)
 
 **Register.** 합니다체 (하십시오체) throughout. No 해요체, no 반말, no mixing.
 
@@ -181,7 +236,7 @@ Choose the particle by how the Latin word is read in Korean: `hook`은 (훅), `s
 - stacked ~에 대한 / ~에 있어서
 - 시키다 where 하다 is meant: 실행시킵니다 -> 실행합니다
 
-## 6. Simplified Chinese (zh-CN)
+## 7. Simplified Chinese (zh-CN)
 
 **Characters and vocabulary are mainland only.** 软件 not 軟體, 内存 not 記憶體, 默认 not
 預設, 网络 not 網路, 缓存, 提交, 分支, 仓库, 上下文, 令牌, 进程, 终端.
@@ -206,7 +261,7 @@ drop the pronoun where Chinese allows it.
 - 一个 as a literal "a"
 - English clause order carried over whole - recast long sentences
 
-## 7. The course site
+## 8. The course site
 
 The course is data-driven and Russian is the base: `data.js`, `data2.js`, `data3.js`
 hold the scenarios with Russian strings, and `en.js` overrides titles, captions, node
@@ -251,7 +306,7 @@ ships a good one. `--mono` stays as it is - everything in monospace is ASCII.
 spaces between words and breaks anywhere, so a break placed for English lands wrong -
 re-place them per language or drop them.
 
-## 8. How a translation is made
+## 9. How a translation is made
 
 One file at a time, whole file in one pass - not chunk by chunk. Terminology and
 register drift between chunks, and that drift is the hardest thing to fix afterwards.
@@ -298,9 +353,14 @@ gh api -X POST /markdown -f mode=gfm -f text="$(cat README.ja.md)" > /tmp/out.ht
 Korean puts a space after its sentence punctuation, so it is mostly safe - but it is
 cheaper to run the check than to assume.
 
-## 9. Review checklist
+## 10. Review checklist
 
 The tells, per language. If a PR has none of these, it is probably fine.
+
+**Russian** - звать / гонять / жечь / снести / приезжать - a clause without its subject
+("Остановленная - из inbox") - a dash aside mid-sentence - ё, «ёлочки» or an em dash -
+`launchd` where the sentence also covers Linux - `hook` or `skill` in Latin inside prose
+(the Russian pages use хук and скилл).
 
 **Japanese** - です/ます mixed with だ/である - `hook` or `skill` written in katakana -
 spaces inserted around Latin words - ユーザ / サーバ without the long-vowel mark -
@@ -314,4 +374,4 @@ Latin - 的 three times in one clause - 您 - any Traditional character or Taiwa
 
 **All languages** - a command or flag that differs from the English page - a number that
 differs (test counts, sizes, minutes) - a heading anchor that no longer matches a link -
-terminal output translated - a visible `**` or `*` on the rendered page (see section 8).
+terminal output translated - a visible `**` or `*` on the rendered page (see section 9).

@@ -1,7 +1,7 @@
 ---
 name: translate-docs
-description: Translate this repo's README or course site into zh-CN, ja or ko, or review an incoming translation PR, following the project's translation canon. Use when the user says "переведи README", "translate the course", "сделай японскую версию", "review the zh-CN PR", names a locale (zh-CN, ja, ko), or asks to update a translation after the English page changed. Do not use for translating chat replies or code comments - this is only for the published README and course pages.
-argument-hint: "README ja | course zh-CN | review ko | sync ja"
+description: Translate this repo's README or course site into ru, zh-CN, ja or ko, or review an incoming translation PR, following the project's translation canon. Use when the user says "переведи README", "translate the course", "сделай японскую версию", "поправь русский README", "review the zh-CN PR", names a locale (ru, zh-CN, ja, ko), or asks to update a translation after the English page changed. Do not use for translating chat replies or code comments - this is only for the published README and course pages.
+argument-hint: "README ru | course zh-CN | review ko | sync ja"
 ---
 
 # Translating longrun's README and course
@@ -20,7 +20,7 @@ term is missing, add a row to that table in the same PR.
    Copy code blocks, commands, links, anchors and badge URLs byte for byte.
 4. **Review pass A - native reader.** Spawn a fresh agent that sees *only the
    translation*, never the English, and reads it as a developer who speaks that
-   language. Ask it for the checklist tells in section 9.
+   language. Ask it for the checklist tells in section 10.
 5. **Review pass B - against the source.** A second fresh agent diffs translation
    against English for missing sections, changed commands, broken anchors, changed
    numbers.
