@@ -110,14 +110,16 @@ These are translated, and translated the same way every time.
 | dialog (the ask popup) | ダイアログ | 대화 상자 | 对话框 |
 | prune | 整理 | 정리 | 清理 |
 | stuck (session) | 停滞 | 정체 | 卡住 |
-| summary (what compaction leaves) | 要約 | - | 总结 |
-| digest vs summary | ダイジェスト vs 要約 - never both 要約 | - | 摘要 vs 总结 - never both 摘要 |
-| dead end | 行き止まり | - | 死胡同 |
-| watcher (the one watching sessions) | 監視役 | - | 监视器 |
-| delta (of the shared notes) | 差分 | - | 差异 |
-| polling | ポーリング | - | 轮询 |
+| summary (what compaction leaves) | 要約 | 요약 | 总结 |
+| digest vs summary | ダイジェスト vs 要約 - never both 要約 | 다이제스트 vs 요약 - never both 요약 | 摘要 vs 总结 - never both 摘要 |
+| dead end | 行き止まり | 막다른 길 | 死胡同 |
+| watcher (the one watching sessions) | 監視役 | 감시자 | 监视器 |
+| delta (of the shared notes) | 差分 | 변경분 | 差异 |
+| polling | ポーリング | 폴링 | 轮询 |
 | cheat sheet | チートシート | - | 速查表 |
-| agent | エージェント | - | agent (kept Latin) |
+| agent | エージェント | 에이전트 | agent (kept Latin) |
+| worker (the session taking tasks) | 作業役 | 작업 세션 | 干活的会话 |
+| summariser (the model compaction uses) | 要約するモデル | 요약하는 모델 | 做总结的模型 |
 
 A `-` means no translator has needed that term in that language yet. Fill the cell in when
 you do, in the PR that needs it - do not leave the row out because one column is empty.
