@@ -317,12 +317,68 @@ content.
 **Second person is 你**, not 您. These are developer docs, not a sales page. Better still,
 drop the pronoun where Chinese allows it.
 
+**An English image is spelled out, not carried over.** The mainland review stopped at
+the same places the Russian one did. "The reasons go first" is not 最先丢掉的就是原因 - the
+reader asks 什么的原因; write 最先丢掉的就是各个决定背后的原因：为什么放弃了某个做法、为什么选了这条路.
+"A sleep that oversleeps" is not 睡过头的 sleep but 一段定时的 sleep，醒来时事件不是早已发生，就是还没到.
+"Runs ahead of plan" is 超出计划进度, not 跑在计划前面. Two images in one clause
+(这个窗口的消耗跑在计划前面) is the surest sign that a sentence was carried over whole.
+
+**它 / 它的 / 那个 / 我们 are the pronoun tell.** English needs "it" in every clause; Chinese
+names the noun or drops it. 它到底改了什么 -> 安装脚本到底改了什么 (a `<summary>` is read on its
+own, with no antecedent); 通过它的 socket -> 通过自己的 socket; 它自己已经回退掉的那个改法 ->
+自己已经回退掉的改法; 不属于我们的 hook -> 不是 longrun 的 hook, because the reader does not
+know who "we" are.
+
+**A clause keeps its verb and its object.** A bare command is not a sentence: 以后再
+`longrun notify setup` -> 以后再跑 `longrun notify setup`. 从收件箱里取走 leaves the reader
+asking who took what from whom: 从收件箱里收到. 会告诉做总结的模型 has nobody telling: hook
+会告诉做总结的模型.
+
+**A heading is read with its everyday meaning.** 响应式 is responsive layout or Rx to a
+Chinese developer, so "reactivity" is 事件驱动; 有选择的自治 reads as "optional", so "selective
+autonomy" is 有限度的自治. Before reusing an established term for the English sense, ask what
+it means on a Chinese job board.
+
+**Colloquial words, not colloquial images.** 干活, 记一下 and 卡住 read fine; a metaphor built
+from them does not: agent 欠下的一件小尾巴 -> agent 还没做完的一件小事; 一头撞上去就写共享 ->
+如果别的会话也可能撞上同一个死胡同，就写共享; 画不出横幅 -> 弹不出横幅.
+
+**Set phrases the review settled:** 走向既定目标 for driving the others to the goal; 一轮用户输入
+for a user turn; 从上次停下的地方继续 for "continues from the same place"; 后台定时器 where the
+English says `launchd` but means the timer on any OS; 一项检查 for a watch's check (not 一段,
+not 一次); 笔记本电脑 for laptop, never 笔记本 on a page where 笔记 means notes; 笔记预算 in the
+cleanup paragraph, because by then 预算 alone is the 5-hour usage budget.
+
 **Avoid:**
 - 的 stacked in one clause: 会话的共享的笔记的列表 -> 会话的共享笔记列表
 - 被 where Chinese prefers an active verb
 - 进行 / 对……进行 padding: 对笔记进行保存 -> 保存笔记
 - 一个 as a literal "a"
 - English clause order carried over whole - recast long sentences
+
+### Glossary additions (fold into section 3 after merge)
+
+| English | zh-CN |
+| --- | --- |
+| reactivity (section heading) | 事件驱动 |
+| selective autonomy | 有限度的自治 |
+| user turn (a message arriving as one) | 一轮用户输入 |
+| the goal (drive the others to it) | 既定目标 |
+| background timer (launchd / systemd / cron, any OS) | 后台定时器 |
+| budget (the notes size limit, not the 5-hour one) | 笔记预算 |
+| laptop | 笔记本电脑 (never 笔记本) |
+| check (a watch's deterministic check) | 一项检查 |
+| registry (longrun's own list of sessions) | 登记表 (never 注册表, which is the Windows registry) |
+| headquarters (the `hq` mode) | 指挥部 (hq) at first mention |
+
+### Tells (fold into section 10 after merge)
+
+**Chinese** - 它 / 它的 / 那个 opening a clause whose noun is a sentence away - 我们 on a page
+with no "we" - a command with no verb in front of it (以后再 `longrun notify setup`) - a
+metaphor carried over whole (睡过头的 sleep, 跑在计划前面) - 响应式 for reactivity - 笔记本 for
+laptop - 注册表 for longrun's registry - 预算 without 笔记 outside the budget section -
+`launchd` where the sentence also covers Linux.
 
 ## 8. The course site
 
