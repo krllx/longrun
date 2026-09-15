@@ -37,8 +37,8 @@
 <div class="grid2">
   <div class="card project"><h4>1. ディスク上の共有ドキュメント</h4><p>プロジェクトごとに1つの<code>.longrun/</code>に全セッションから見えるメモがあり、さらにセッションごとに自分のメモがあります。hookはcompaction（会話履歴が自動で要約されること）、<code>/clear</code>、resumeのたびに両方を戻し、毎ターン他のセッションが何を変えたかを見せます。第<a href="#l3">3</a>章、<a href="#l5">5</a>章、<a href="#l6">6</a>章。</p></div>
   <div class="card session"><h4>2. 委譲：メッセージとタスク</h4><p>他のセッション宛のメッセージやタスクは、そこではユーザーのターンとして届きます。動いていればsocket経由、止まっていれば次のターンに受信箱経由です。セッションの名前は、サイドバーに表示されているタイトルです。第<a href="#l7">7</a>章。</p></div>
-  <div class="card dir"><h4>3. 反応性：取りこぼしのない待機</h4><p>ウォッチとは、タイマーが5分ごとにモデルなしで実行するチェックです。条件が成立すると、セッションは渡しておいた文面とともに目を覚まします。ポーリングループはなく、待つ間のtokenもかからず、イベントを取りこぼすsleepもありません。第<a href="#l7">7</a>章。</p></div>
-  <div class="card"><h4>4. 選択的な自律：オーケストレーター</h4><p>1つのセッションがボードを持ち、すでに開いているセッションを目標まで導きます。タスクを配り、詰まりを解消し、停滞しているセッションを見つけ、どうしても必要なときだけダイアログで人間に尋ねます。停止、強制終了、再開の主導権は人間が握ったままです。第<a href="#l8">8</a>章。</p></div>
+  <div class="card dir"><h4>3. イベント駆動：取りこぼしのない待機</h4><p>ウォッチとは、タイマーが5分ごとにモデルなしで実行するチェックです。条件が成立すると、セッションは渡しておいた文面とともに目を覚まします。ポーリングループはなく、待つ間のtokenもかからず、決めた時間だけ待って遅すぎたり早すぎたりするsleepもありません。第<a href="#l7">7</a>章。</p></div>
+  <div class="card"><h4>4. オンにして初めて働く自律：オーケストレーター</h4><p>1つのセッションがボードを持ち、すでに開いているセッションを目標まで導きます。タスクを配り、詰まりを解消し、停滞しているセッションを見つけ、どうしても必要なときだけダイアログで人間に尋ねます。停止、強制終了、再開の主導権は人間が握ったままです。第<a href="#l8">8</a>章。</p></div>
 </div>
 
 <section class="lesson" id="l0">
@@ -49,7 +49,7 @@
 <li><b>1度だけインストール。</b>1行で済み、checkoutも要りません。インストーラーがソースを自分で取ってきます：
 <pre><code>curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash</code></pre>
 入るのはskill、<code>~/.claude/settings.json</code>の11個のhook、CLIの<code>~/.local/bin/longrun</code>、<code>longrun</code> MCPサーバー、そしてチェックと監視役を5分ごとに走らせるタイマーです。尋ねられるのは1つだけ、次の項目のデスクトップ通知です。cloneから入れる場合も同じ<code>install.sh</code>で、<code>--uninstall</code>が元に戻します。</li>
-<li><b>通知（任意）。</b><code>install.sh</code>は通知を設定するかを尋ね、この項目が必要かどうかは、その答えで決まります。longrunが通知に依存することはありません。全停止、予算による停止、発火したウォッチは、いずれにせよsocketか受信箱を通ってセッションに届くので、断っても他には何も変わりません（<code>--no-notify</code>で先に答えておけ、<code>longrun notify setup</code>で後から有効にできます）。macOSでは、<code>terminal-notifier</code>がなければインストーラーが<code>brew install terminal-notifier</code>を実行し（Homebrewが前提です。なければその旨を伝えて先へ進みます）、<code>~/.claude/longrun/notifier/longrun.app</code>を作り、テスト通知を1つ送ります。macOSは"longrun"からの通知を許可するかを1度だけ尋ねることがあるので、許可してください。これに代わる標準の経路はありません。<code>osascript -e 'display notification'</code>はScript Editorの名義で通知を出しますが、Script Editorは通知権限を持たないため、システムは通知を記録するだけで何も表示せず、終了コードは0を返します（macOS 15で25回中25回。Script Editorを先に起動しても権限は付きません）。わざわざアプリのコピー(<code>longrun.app</code>)を作るのは、アイコンと送信者名が送信元のバンドルからしか来ないからで、このバンドルのアイコンはClaudeのもので、名前は<code>longrun</code>です。Linuxでは<code>notify-send</code> (<code>libnotify</code>)で、たいていのデスクトップ環境にはすでに入っています。どちらでも<code>longrun notify --test</code>で確かめられます。テスト通知を1つ送り、システムが実際に表示したかを読み返し、クリックするとどのセッションが開くかを出力します。絶対に見逃したくないセッションが1つあるなら<code>longrun important on</code>（または<code>next</code>、あるいは数字）です。そのセッションのターンの終わりは、<code>notify_turn_end</code>がどう設定されていようと、どのウィンドウが前面だろうと必ず通知されます。別のClaudeセッションで入力している間は、前面ウィンドウを見る通常の判定ではこの通知を出せません。</li>
+<li><b>通知（任意）。</b><code>install.sh</code>は通知を設定するかを尋ね、この項目が必要かどうかは、その答えで決まります。longrunが通知に依存することはありません。全停止、予算による停止、発火したウォッチは、いずれにせよsocketか受信箱を通ってセッションに届くので、断っても他には何も変わりません（<code>--no-notify</code>で先に答えておけ、<code>longrun notify setup</code>で後から有効にできます）。macOSでは、<code>terminal-notifier</code>がなければインストーラーが<code>brew install terminal-notifier</code>を実行し（Homebrewが前提です。なければその旨を伝えて先へ進みます）、<code>~/.claude/longrun/notifier/longrun.app</code>を作り、テスト通知を1つ送ります。macOSは"longrun"からの通知を許可するかを1度だけ尋ねることがあるので、許可してください。macOS標準の手段でこの手順を置き換えることはできません。<code>osascript -e 'display notification'</code>はScript Editorの名義で通知を出しますが、Script Editorは通知権限を持たないため、システムは通知を記録するだけで何も表示せず、終了コードは0を返します（macOS 15で25回中25回。Script Editorを先に起動しても権限は付きません）。わざわざアプリのコピー(<code>longrun.app</code>)を作るのは、アイコンと送信者名が送信元のバンドルからしか来ないからで、このバンドルのアイコンはClaudeのもので、名前は<code>longrun</code>です。Linuxでは<code>notify-send</code> (<code>libnotify</code>)で、たいていのデスクトップ環境にはすでに入っています。どちらでも<code>longrun notify --test</code>で確かめられます。テスト通知を1つ送り、システムが実際に表示したかを読み返し、クリックするとどのセッションが開くかを出力します。絶対に見逃したくないセッションが1つあるなら<code>longrun important on</code>（または<code>next</code>、あるいは数字）です。そのセッションのターンの終わりは、<code>notify_turn_end</code>がどう設定されていようと、どのウィンドウが前面だろうと必ず通知されます。別のClaudeセッションで入力している間は、前面ウィンドウを見る通常の判定ではこの通知を出せません。</li>
 <li><b>フォルダをプロジェクトにする。</b>longrunにとってのプロジェクトは、Claude Codeで開くフォルダです。リポジトリのルートである必要はありません。複数のリポジトリを含むフォルダ、monorepoのサブディレクトリ、空の司令塔フォルダでもかまいません。そこで1度<code>longrun init</code>を実行します。ターミナルでも、Claude Codeのセッションの中でもよく、頼めばエージェントが代わりに実行します。<code>.longrun/</code>ディレクトリができます。そのフォルダがリポジトリの中にあるなら、ignoreファイルに追加してください（または<code>longrun init --external</code>で、ディレクトリを<code>~/.claude/longrun/</code>の下に置きます）。同じプロジェクトの各worktreeからは<code>longrun link &lt;path to the project&gt;</code>。確認は<code>longrun where</code>です。</li>
 <li><b>設定する。</b>セッションでエージェントに「set up longrun」と言います（または<code>/longrun onboard</code>）。エージェントは<code>longrun onboard</code>を実行し、skillが何をするかを手短に説明し、主な設定について尋ねます。autocompactのウィンドウ、5時間枠の予算、停滞のしきい値、メモのサイズです。答えはエージェントが<code>longrun config set</code>で適用します。例外が1つ。hookはautocompactのウィンドウを設定できないので、エージェントはClaude Codeで<code>/autocompact 300k</code>（または選んだ値）と入力するよう頼みます。そのしきい値の5万token手前で、hookがcompactionの前にメモを書くようセッションに促します。キーの詳細は下の第9章。</li>
 <li><b>作業する。</b>呼ぶものは何もありません。開始時にセッションはダイジェスト（共有メモ、自分のメモ、他に誰が作業中か）を受け取り、compactionの後はすべて自動で戻り、他のセッションの変更は次のターンで届きます。行き止まりと決定のメモは、エージェントが自分で書きます。言葉で頼めます。「記録しておいて」「これまで何を試したか」「セッションの状況」「別のセッションに渡して」「何が残っているか」「PRがマージされたら教えて」。</li>
@@ -66,7 +66,7 @@
 <div class="stripe">
   <div class="s bad"><b>問題1：compaction</b>要約が真っ先に落とすのは「何を試し、なぜ失敗したか」です。30分後、エージェントは自分がすでに取り消した修正をまた提案します。</div>
   <div class="s bad"><b>問題2：複数のセッション</b>それぞれが自分のウィンドウの中だけで動いています。片方がPRを作っても、もう片方は知らずに「PRはまだ作られていない」と言います。片方が踏んだ行き止まりを、もう片方がまた踏みます。</div>
-  <div class="s bad"><b>問題3：待機</b>「PRがマージされたら教えて」は、起きるたびにtokenを浪費するポーリングループになるか、イベントを取りこぼすsleepになります。</div>
+  <div class="s bad"><b>問題3：待機</b>「PRがマージされたら教えて」は、起きるたびにtokenを浪費するポーリングループになるか、決めた時間だけ待つsleepになります。sleepが明けたころには、イベントはとうに過ぎているか、まだ来ていません。</div>
   <div class="s bad"><b>問題4：多数のセッション、1つの目標</b>1つのプロジェクトに5つのセッション。何が終わり、何が詰まり、次が何かを知っているのは人間だけです。引き継ぎはすべて人間を通ります。</div>
   <div class="s good"><b>対策1：ディスク上のドキュメント</b>ディスク上のメモは劣化しません。hookはcompaction、<code>/clear</code>、resumeのたびにメモを戻し、compactionの要約をそのままアーカイブします。</div>
   <div class="s good"><b>対策2：メッセージとタスク</b>プロジェクトごとに1つの<code>.longrun/</code>があります。中身は全セッションから見える共有メモ、状態つきのセッション一覧、ユーザーのターンとして配送されるメッセージとタスクです。</div>
@@ -179,7 +179,7 @@
 <p>1行、英語で、400文字まで（同じ事実を他の言語で書くとtokenが約1.5倍かかり、上限は動かせないからです）。判断基準は1つ。<b>コマンド1回、Read1回、grep1回で取り戻せるか？</b>取り戻せるなら書きません。</p>
 <table>
 <tr><th>タグ</th><th>何を</th><th>たいていどこへ</th></tr>
-<tr><td><span class="tag">dead</span></td><td>失敗したアプローチと、その理由</td><td>自分のメモ。他のセッションも踏みそうなら共有</td></tr>
+<tr><td><span class="tag">dead</span></td><td>失敗したアプローチと、その理由</td><td>自分のメモ。他のセッションも同じ行き止まりに突き当たりそうなら共有</td></tr>
 <tr><td><span class="tag">decision</span></td><td>選択と、その理由</td><td>他のセッションに関わるなら共有</td></tr>
 <tr><td><span class="tag">fact</span></td><td>手間をかけて分かった環境の事実</td><td>共有</td></tr>
 <tr><td><span class="tag">ctx</span></td><td>人間から与えられたタスクの枠組み</td><td>自分のメモ</td></tr>
