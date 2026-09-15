@@ -1,4 +1,4 @@
-English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
 <p align="center">
   <img src="assets/hero.jpg" alt="longrun: memory that survives compaction" width="820">
