@@ -121,6 +121,30 @@ These are translated, and translated the same way every time.
 | agent | агент | エージェント | 에이전트 | agent (kept Latin) |
 | worker (the session taking tasks) | рабочая сессия | 作業役 | 작업 세션 | 干活的会话 |
 | summariser (the model compaction uses) | суммаризатор | 要約するモデル | 요약하는 모델 | 做总结的模型 |
+| background timer (the five-minute check; `launchd` in the English, any OS meant) | фоновый таймер | バックグラウンドのタイマー | 백그라운드 타이머 | 后台定时器 |
+| tick (of the timer) | тик | ティック | - | - |
+| the 5-hour window (usage) | 5-часовое окно | 5時間枠 | - | - |
+| notes limit (the byte cap `add` enforces; not the 5-hour budget) | лимит заметок | 予算; メモの容量が上限に達したとき where the 5-hour 予算 is in the same paragraph | 메모 한도 (메모 한도에 이르면, not 가득 차면) - never 예산, which is the 5-hour usage budget | 笔记预算 |
+| fixed check (a watch's check with no model judgement; was 'deterministic') | детерминированная проверка | 決定論的なチェック - not 決定的 | 정해진 규칙대로만 판정하는 검사 | 一项检查 (not 一段, not 一次) |
+| a watch fires | watch срабатывает | - | 워치가 발동합니다 | - |
+| event-driven (section 3 heading; was 'reactivity') | - | - | - | 事件驱动 |
+| autonomy you switch on (section 4 heading; was 'selective autonomy') | - | - | - | 有限度的自治 |
+| control (stays with the human; was 'the levers') | управление остается у человека | 主導権 | 제어권 | - |
+| the goal you set | к заданной цели | - | - | 既定目标 |
+| user turn (a message arriving as one) | ход пользователя | - | - | 一轮用户输入 |
+| running / stopped (session) | работающая / остановленная сессия | 動いている / 止まっている | 돌아가고 있는 세션 / 멈춰 있는 세션 | - |
+| peers (other sessions) | сессии | セッション - never 仲間 | - | - |
+| call (the agent calls a tool) / run (a person runs a command) | - | - | 호출 / 실행 | - |
+| revert (a fix) | откатить | 取り消す - not 差し戻す | - | - |
+| default (setting) | по умолчанию | デフォルト - not 既定 | - | - |
+| cleanup (the hourly job) | уборка | 片付け - distinct from prune, 整理 | - | - |
+| task framing (`ctx`) | рамки задачи | タスクの前提 | - | - |
+| a small thing the agent still has to do (`todo`) | короткий список незавершенного | 後で済ませるべき作業 | - | - |
+| banner (a desktop notification) | баннер | - | 배너 | - |
+| sidebar | сайдбар | - | 사이드바 | - |
+| laptop | ноутбук | - | - | 笔记本电脑 (never 笔记本) |
+| registry (`registry.json`, the Claude Code session registry) | реестр | - | - | 登记表 (never 注册表, which is the Windows registry) |
+| headquarters (the `hq` mode) | штаб | - | - | 指挥部 (hq) at first mention |
 
 A `-` means no translator has needed that term in that language yet. Fill the cell in when
 you do, in the PR that needs it - do not leave the row out because one column is empty.
@@ -249,34 +273,6 @@ entity descriptions) keeps です・ます like body text; 体言止め is for l
 - ！ and ～ as tone markers
 - word-for-word English clause order; split a long English sentence into two Japanese ones
 
-### Glossary additions (fold into section 3 after merge)
-
-| English | ja |
-| --- | --- |
-| budget (of the notes store, bytes) | 予算; メモの容量が上限に達したとき where the 5-hour 予算 is in the same paragraph |
-| the 5-hour window (usage) | 5時間枠 |
-| tick (of the timer) | ティック |
-| background timer (`launchd` in the English, any OS meant) | バックグラウンドのタイマー |
-| levers (the human keeps the) | 主導権 |
-| alive / stopped (session) | 動いている / 止まっている |
-| revert (a fix) | 取り消す - not 差し戻す |
-| deterministic (check) | 決定論的 - not 決定的 |
-| default (setting) | デフォルト - not 既定 |
-| peers (other sessions) | セッション - never 仲間 |
-| cleanup (the hourly job) | 片付け - distinct from prune, 整理 |
-| task framing (`ctx`) | タスクの前提 |
-| follow-up (`todo`) | 後で済ませるべき作業 |
-
-### Tells (fold into section 10 after merge)
-
-- a list or a bare noun phrase after 。 with nothing saying what it is ("ボードを持ちます。目標、タスク、…です。", "設定が2つ。")
-- それ / これ / そこ standing in for it / this / there; その with no antecedent
-- 寝過ごす, 燃やす, レバー, 舵取り, 沈黙した, 押し込める, 先を行く - an English image carried over
-- 差し戻す for "reverted", 決定的 for "deterministic", 既定 for "default", 仲間 for other sessions
-- 予算 for the notes byte limit right next to the 5-hour 予算; ウィンドウ for the 5-hour usage window
-- `launchd` where the sentence also covers Linux
-- full-width （） around Latin-only content, or a space before a half-width ( after a code span
-
 ## 6. Korean (ko)
 
 **Register.** 합니다체 (하십시오체) throughout. No 해요체, no 반말, no mixing.
@@ -344,27 +340,6 @@ agent calls a tool, 실행 when a person runs a command.
 - ~을 통해 for a plain instrument: socket을 통해 받습니다 -> socket으로 받습니다
 - 개 as the classifier for settings or kinds: 설정이 두 개 -> 설정이 두 가지; 11개 장 -> 장 11개
 
-### Glossary additions (fold into section 3 after merge)
-
-| English | ko |
-| --- | --- |
-| background timer (the five-minute check, any OS) | 백그라운드 타이머 |
-| notes limit (the byte cap `add` enforces) | 메모 한도 (메모 한도에 이르면, not 가득 차면) - never 예산, which is the 5h usage budget |
-| deterministic check | 정해진 규칙대로만 판정하는 검사 |
-| levers (the human keeps the levers) | 제어권 |
-| banner (a desktop notification) | 배너 |
-| a watch fires | 워치가 발동합니다 |
-| call (the agent calls a tool) / run (a person runs a command) | 호출 / 실행 |
-| sidebar | 사이드바 |
-| running session / stopped session | 돌아가고 있는 세션 / 멈춰 있는 세션 |
-
-### Tells (fold into section 10 after merge)
-
-**Korean** - 그것 / 이것 / 거기 / 둘 with no noun behind them - ~하는 것은 ... 입니다 cleft -
-전부라 / 실행이라 contractions inside 합니다체 - 아니면 as a conjunction - a flag as the whole
-predicate (`--resume`입니다) - ~을 통해 for a plain instrument - 레버, 늦잠, token을 태우다 -
-예산 for the notes limit - `launchd` in a sentence that also covers Linux.
-
 ## 7. Simplified Chinese (zh-CN)
 
 **Characters and vocabulary are mainland only.** 软件 not 軟體, 内存 not 記憶體, 默认 not
@@ -422,29 +397,6 @@ cleanup paragraph, because by then 预算 alone is the 5-hour usage budget.
 - 进行 / 对……进行 padding: 对笔记进行保存 -> 保存笔记
 - 一个 as a literal "a"
 - English clause order carried over whole - recast long sentences
-
-### Glossary additions (fold into section 3 after merge)
-
-| English | zh-CN |
-| --- | --- |
-| reactivity (section heading) | 事件驱动 |
-| selective autonomy | 有限度的自治 |
-| user turn (a message arriving as one) | 一轮用户输入 |
-| the goal (drive the others to it) | 既定目标 |
-| background timer (launchd / systemd / cron, any OS) | 后台定时器 |
-| budget (the notes size limit, not the 5-hour one) | 笔记预算 |
-| laptop | 笔记本电脑 (never 笔记本) |
-| check (a watch's deterministic check) | 一项检查 |
-| registry (longrun's own list of sessions) | 登记表 (never 注册表, which is the Windows registry) |
-| headquarters (the `hq` mode) | 指挥部 (hq) at first mention |
-
-### Tells (fold into section 10 after merge)
-
-**Chinese** - 它 / 它的 / 那个 opening a clause whose noun is a sentence away - 我们 on a page
-with no "we" - a command with no verb in front of it (以后再 `longrun notify setup`) - a
-metaphor carried over whole (睡过头的 sleep, 跑在计划前面) - 响应式 for reactivity - 笔记本 for
-laptop - 注册表 for longrun's registry - 预算 without 笔记 outside the budget section -
-`launchd` where the sentence also covers Linux.
 
 ## 8. The course site
 
@@ -547,15 +499,29 @@ The tells, per language. If a PR has none of these, it is probably fine.
 `launchd` where the sentence also covers Linux - `hook` or `skill` in Latin inside prose
 (the Russian pages use хук and скилл).
 
-**Japanese** - です/ます mixed with だ/である - `hook` or `skill` written in katakana -
-spaces inserted around Latin words - ユーザ / サーバ without the long-vowel mark -
-〜することができます - あなた as the subject.
+**Japanese** - です/ます mixed with だ/である - `hook` or `skill` written in katakana - spaces
+inserted around Latin words - ユーザ / サーバ without the long-vowel mark - 〜することができます - あなた as
+the subject - a list or a bare noun phrase after 。 with nothing saying what it is
+("ボードを持ちます。目標、タスク、…です。", "設定が2つ。") - それ / これ / そこ standing in for it / this / there, その
+with no antecedent - an English image carried over (寝過ごす, 燃やす, レバー, 舵取り, 沈黙した, 押し込める,
+先を行く) - 差し戻す for "reverted", 決定的 for "deterministic", 既定 for "default", 仲間 for other
+sessions - 予算 for the notes byte limit right next to the 5-hour 予算, ウィンドウ for the 5-hour
+usage window - `launchd` where the sentence also covers Linux - full-width （） around
+Latin-only content, or a space before a half-width ( after a code span.
 
-**Korean** - 띄어쓰기: 할수 있습니다, 하는것 - 저장되어집니다 - 은(는) both-options form -
-해요체 mixed into 합니다체 - 들 on every noun - 실행시킵니다.
+**Korean** - 띄어쓰기: 할수 있습니다, 하는것 - 저장되어집니다 - 은(는) both-options form - 해요체 mixed into 합니다체 -
+들 on every noun - 실행시킵니다 - 그것 / 이것 / 거기 / 둘 with no noun behind them - ~하는 것은 ... 입니다
+cleft - 전부라 / 실행이라 contractions inside 합니다체 - 아니면 as a conjunction - a flag as the whole
+predicate (`--resume`입니다) - ~을 통해 for a plain instrument - 레버, 늦잠, token을 태우다 - 예산 for the
+notes limit - `launchd` in a sentence that also covers Linux.
 
 **Chinese** - half-width `,` or `.` in a Chinese sentence - no space between Chinese and
-Latin - 的 three times in one clause - 您 - any Traditional character or Taiwanese term.
+Latin - 的 three times in one clause - 您 - any Traditional character or Taiwanese term - 它
+/ 它的 / 那个 opening a clause whose noun is a sentence away - 我们 on a page with no "we" - a
+command with no verb in front of it (以后再 `longrun notify setup`) - a metaphor carried over
+whole (睡过头的 sleep, 跑在计划前面) - 响应式 for event-driven - 笔记本 for laptop - 注册表 for longrun's
+registry - 预算 without 笔记 outside the budget section - `launchd` where the sentence also
+covers Linux.
 
 **All languages** - a command or flag that differs from the English page - a number that
 differs (test counts, sizes, minutes) - a heading anchor that no longer matches a link -
