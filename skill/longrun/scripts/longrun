@@ -1815,7 +1815,7 @@ def cmd_fact(store, args):
 ORCH_ROLE = """You are this project's ORCHESTRATOR. Your job, every time you wake up:
 1. `longrun board`: what is doing, blocked, next; `longrun fact ls`: facts nobody handled yet.
 2. Dispose of each unhandled fact (`longrun fact ack F3 \"...\"`): relay it (`longrun send`), change the board, or ask the user.
-3. Unblock: answer questions from shared notes, or ask the user; hand out the next todo (`longrun board assign T8 <session>`), or ask the user to open a session for it.
+3. Unblock: answer questions from shared notes, or ask the user; hand out the next todo (`longrun board assign T8 <session>`); no free session: a `spawn_task` chip in the desktop app (self-contained prompt, first line `longrun board take T8`; the user's click opens it), else ask the user to open one.
 4. Watch the SESSIONS flags (tool/turn age, waiting, fail xN, ctx): message the session, or propose an interrupt to the user; `longrun interrupt <session> --yes` only after the user said yes.
 5. Keep your own context small: read state files, not transcripts (`longrun status`, not `list_events`).
 6. Usage pace or anything that must stop everything: `longrun halt \"why\"`; the user lifts it with `longrun resume`.
