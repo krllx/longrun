@@ -127,8 +127,8 @@ These are translated, and translated the same way every time.
 | notes limit (the byte cap `add` enforces; not the 5-hour budget) | лимит заметок | 予算; メモの容量が上限に達したとき where the 5-hour 予算 is in the same paragraph | 메모 한도 (메모 한도에 이르면, not 가득 차면) - never 예산, which is the 5-hour usage budget | 笔记预算 |
 | fixed check (a watch's check with no model judgement; was 'deterministic') | детерминированная проверка | 決定論的なチェック - not 決定的 | 정해진 규칙대로만 판정하는 검사 | 一项检查 (not 一段, not 一次) |
 | a watch fires | watch срабатывает | - | 워치가 발동합니다 | - |
-| event-driven (section 3 heading; was 'reactivity') | - | - | - | 事件驱动 |
-| autonomy you switch on (section 4 heading; was 'selective autonomy') | - | - | - | 有限度的自治 |
+| event-driven (section 3 heading; was 'reactivity') | по событию | - | - | 事件驱动 |
+| autonomy you switch on (section 4 heading; was 'selective autonomy') | самостоятельность, которую включаете вы | - | - | 有限度的自治 |
 | control (stays with the human; was 'the levers') | управление остается у человека | 主導権 | 제어권 | - |
 | the goal you set | к заданной цели | - | - | 既定目标 |
 | user turn (a message arriving as one) | ход пользователя | - | - | 一轮用户输入 |
