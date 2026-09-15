@@ -74,7 +74,7 @@ case there is the app's `list_events`, on demand.
 | Write to a worker | `longrun send`: to a live session via the socket (a turn starts immediately), to the rest via inbox (read on the next event, costs no tokens) | exists |
 | Assign a task | `longrun board assign T7 <session>`: the worker sees `YOUR TASK` in its digest on the next event | new |
 | Ask the human | the asker's `ask` tool: a dialog in front of the windows, the answer arrives as a turn | new, section 5 |
-| Start a session | ask the human (a dialog with a ready first line `longrun take T7`), the app's `spawn_task` chip, or `claude --bg "..."` for self-contained unattended tasks (documented: supervisor, `claude agents --json` with `state` and `waitingFor`) | exists in Claude Code |
+| Start a session | in the desktop app the `spawn_task` chip: the orchestrator leaves a button with a self-contained prompt and the human's click opens the session (the click is the confirmation); in the terminal a dialog or the chat with a ready first line `longrun take T7`; `claude --bg "..."` for self-contained unattended tasks (documented: supervisor, `claude agents --json` with `state` and `waitingFor`) | exists in Claude Code |
 | Stop everyone | `longrun halt "reason"`: the PreToolUse hook forbids any tool in every session of the account, the model sees the reason; `longrun resume` lifts it | new, documented `permissionDecision: deny` |
 | Interrupt a tool | kill the tool's child process of the session; the worker gets "interrupted by the orchestrator: reason" through PostToolUseFailure | new, only with the human's confirmation, not verified in the app |
 | Order a compaction | not possible directly: a slash command in a cross-session message arrives as text and is not executed (documented). The threshold is held by the auto-compaction window: `/autocompact 300k` is saved in `autoCompactWindow` and applies to all sessions; longrun's PreCompact/PostCompact hooks take a snapshot and return the digest. The orchestrator asks the worker in advance to write its notes, and offers the human a compaction with a custom prompt as one button in the dialog | exists, the human sets the threshold |
@@ -92,6 +92,13 @@ without long notes.
 next event, takes it with `board take T7`, works, closes it with `board done T7 "result"`.
 The worker's Stop hook sends an event to the orchestrator. An event that needs a decision (done,
 blocked, question) wakes the orchestrator through the socket; the rest lands in the inbox.
+
+**A task and nobody to give it to.** The orchestrator does not open sessions on its own. In the
+desktop app it leaves a `spawn_task` chip: the title is the task, the prompt is self-contained (what
+to do and why, the first line `longrun board take T7`, and `longrun link <project root>` in case the
+app opens the session in a fresh worktree, where `longrun where` says not initialised). Nothing runs
+until the human clicks the chip, so no dialog precedes it; the orchestrator names the chips it left
+in its reply. In the terminal there is no chip: a dialog or the chat with the first line to paste.
 
 **Snag.** Every 5 minutes the watcher computes the flags from section 3. A rule fired
 (a tool longer than 30 minutes, a turn longer than an hour, three identical FAILs, waiting for
