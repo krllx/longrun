@@ -14,7 +14,7 @@
   C.PROJ.label = 'shop/.longrun/  (shared, inside the project)';
   const PF = {
     'NOTES.md': ['Shared notes [n1], [n2]... one line each, with the author. Budget 5000 bytes.', 'Written by the agent: add --shared, rm, replace, prune --shared'],
-    'config.json': ['Project settings: hq mode, budgets, thresholds.', 'init; longrun config set'],
+    'config.json': ['Project settings: hq mode (the ledger and inbox layer, `longrun init --hq`), budgets, thresholds.', 'init; longrun config set'],
     'state.json': ['Counters for note and task ids.', 'CLI'],
     'inbox/<msg>.md': ['A message for a session that is not running now. Delivered ones move to inbox/.archive/.', 'send, watch, board, ask; read by the recipient\'s hooks'],
     'archive/precompact/<sid>-<time>.md': ['Snapshot before compaction: the user\'s last requests, edited files, recent FAILs. The HANDOFF block (a hand-over to yourself after compaction) is built from it.', 'PreCompact hook'],
