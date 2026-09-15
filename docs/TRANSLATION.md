@@ -108,6 +108,7 @@ These are translated, and translated the same way every time.
 | notification | 通知 | 알림 | 通知 |
 | important session | 重要セッション | 중요 세션 | 重要会话 |
 | dialog (the ask popup) | ダイアログ | 대화 상자 | 对话框 |
+| chip (the app's one-click button that opens a session) | チップ（ボタン） | 칩(버튼) | 按钮（chip） |
 | prune | 整理 | 정리 | 清理 |
 | stuck (session) | 停滞 | 정체 | 卡住 |
 | summary (what compaction leaves) | 要約 | 요약 | 总结 |
