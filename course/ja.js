@@ -14,7 +14,7 @@
   C.PROJ.label = 'shop/.longrun/  （共有、プロジェクトの中）';
   const PF = {
     'NOTES.md': ['共有メモ[n1]、[n2]……1件1行、著者つき。予算5000バイト。', 'エージェントが書く：add --shared, rm, replace, prune --shared'],
-    'config.json': ['プロジェクトの設定：hqモード、予算、しきい値。', 'init; longrun config set'],
+    'config.json': ['プロジェクトの設定：hqモード（台帳と受信箱の層、`longrun init --hq`）、予算、しきい値。', 'init; longrun config set'],
     'state.json': ['メモidとタスクidのカウンター。', 'CLI'],
     'inbox/<msg>.md': ['いま動いていないセッション宛のメッセージ。配送済みのものはinbox/.archive/へ移ります。', 'send, watch, board, ask。受け取る側のhookが読む'],
     'archive/precompact/<sid>-<time>.md': ['compactionの前のスナップショット：ユーザーの直近のリクエスト、編集したファイル、最近のFAIL。HANDOFFブロック（compaction後の自分への引き継ぎ）はこのスナップショットから組み立てられます。', 'PreCompact hook'],
