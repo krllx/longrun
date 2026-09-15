@@ -127,10 +127,10 @@ These are translated, and translated the same way every time.
 | notes limit (the byte cap `add` enforces; not the 5-hour budget) | лимит заметок | 予算; メモの容量が上限に達したとき where the 5-hour 予算 is in the same paragraph | 메모 한도 (메모 한도에 이르면, not 가득 차면) - never 예산, which is the 5-hour usage budget | 笔记预算 |
 | fixed check (a watch's check with no model judgement; was 'deterministic') | детерминированная проверка | 決定論的なチェック - not 決定的 | 정해진 규칙대로만 판정하는 검사 | 一项检查 (not 一段, not 一次) |
 | a watch fires | watch срабатывает | - | 워치가 발동합니다 | - |
-| event-driven (section 3 heading; was 'reactivity') | по событию | イベント駆動 | - | 事件驱动 |
-| autonomy you switch on (section 4 heading; was 'selective autonomy') | самостоятельность, которую включаете вы | オンにして初めて働く自律 | - | 有限度的自治 |
+| event-driven (section 3 heading; was 'reactivity') | по событию | イベント駆動 | 이벤트 기반 - not 반응성, which a Korean developer reads as responsiveness | 事件驱动 |
+| autonomy you switch on (section 4 heading; was 'selective autonomy') | самостоятельность, которую включаете вы | オンにして初めて働く自律 | 켜야 동작하는 자율성 | 有限度的自治 |
 | control (stays with the human; was 'the levers') | управление остается у человека | 主導権 | 제어권 | - |
-| the goal you set | к заданной цели | 決めた目標 - あなた is dropped, as everywhere | - | 既定目标 |
+| the goal you set | к заданной цели | 決めた目標 - あなた is dropped, as everywhere | 정해진 목표 | 既定目标 |
 | user turn (a message arriving as one) | ход пользователя | - | - | 一轮用户输入 |
 | running / stopped (session) | работающая / остановленная сессия | 動いている / 止まっている | 돌아가고 있는 세션 / 멈춰 있는 세션 | - |
 | peers (other sessions) | сессии | セッション - never 仲間 | - | - |
