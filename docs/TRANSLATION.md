@@ -230,12 +230,74 @@ Choose the particle by how the Latin word is read in Korean: `hook`은 (훅), `s
 
 **Punctuation** is half-width `.` and `,` with a following space, straight quotes.
 
+**Every pronoun gets its noun.** English leans on "it", "there", "them" and Korean loses
+the referent at once; the largest list in the native review of `README.ko.md` was exactly
+this. 그것을 다시 불러옵니다 -> 그 메모를 다시 불러옵니다; 거기에 담깁니다 -> 보드에는 ... 담깁니다;
+longrun이 둘을 이어 줍니다 -> longrun이 옛 id와 새 id를 이어 줍니다; 그 전에 after a bold label
+-> compaction 직전에. A bare 것 counts too: 켜야 동작하는 것도 있습니다 -> 켜야 동작하는 기능도
+있습니다.
+
+**No cleft through 것.** "What the installer puts in is X" and "the only one who knows is
+the human" are plain sentences in Korean. 설치 스크립트가 넣는 것은 skill과 hook입니다 ->
+설치 스크립트는 skill과 hook을 설치합니다; 아는 것은 사람뿐입니다 -> 사람만 압니다; 에이전트가 스스로
+실행하는 것입니다 -> 에이전트가 스스로 실행합니다.
+
+**A list or a flag is not a predicate.** A bare enumeration closed with 입니다, or a flag
+standing as the whole predicate, reads as a fragment. 공유 메모, 자체 메모, ... 메시지입니다 ->
+다이제스트에는 공유 메모, 자체 메모, ... 메시지가 들어 있습니다; 지금 당장 필요하면 `--resume`입니다
+-> `--resume`을 붙입니다; 같은 `install.sh`입니다 -> 같은 `install.sh`를 씁니다. A colon-introduced
+list needs a verb on its first item: 오래된 항목은 아카이브로(`pin`은 제외), 저널은 잘라 내고 ->
+오래된 항목은 아카이브로 보내고(`pin`은 제외), 저널은 잘라 내고.
+
+**An English image is spelled out, not carried over.** Same rule as in Russian. 늦잠 자는
+법이 없는 대기 -> 놓치는 일 없는 대기; 늦잠 자는 sleep -> 제때 깨어나지 못하는 sleep; 레버는 사람이
+쥐고 있습니다 -> 제어권은 사람이 쥐고 있습니다; token을 태우는 -> token을 소모하는; 전체 이야기 ->
+자세한 설명; 정체된 동료 -> 정체된 세션 (sessions are not colleagues).
+
+**Register slips that are not 해요체.** The body can stay 합니다체 and still sound spoken:
+the contracted -라 for -이므로 (전부라, 실행이라 -> 전부이므로, 실행되므로), 아니면 as a conjunction
+(-> ~거나), 도무지 in a FAQ heading, 늘어놓다 for "listed here" (-> 적어 두다). Developer chat
+verbs stay in chat: 명령이 딸린 skill -> 명령이 포함된 skill, 5분마다 도는 타이머 -> 5분마다 실행되는
+타이머 (돌아가고 있는 세션 for a running session is the accepted milder form).
+
+**Set phrases the review settled**, beyond the glossary: 백그라운드 타이머 where the English
+says `launchd` but means the timer on any OS (the platform names appear once, where the
+installer is described); 메모 한도 for the byte limit `add` enforces, never 예산, which is
+the 5-hour usage budget; worktree 자체의 메모는 따로 없습니다 for "a worktree has no notes of
+its own", because 자체 메모 is the glossary term for a session's own notes; 정해진 규칙대로만
+판정하는 검사 for "deterministic check" (결과가 항상 같은 검사 says the check is useless); 턴을
+마쳤을 때 for a session that "finishes" (세션이 끝났을 때 says it terminated); 호출 when the
+agent calls a tool, 실행 when a person runs a command.
+
 **Avoid:**
 - double passive: 저장되어집니다 -> 저장됩니다
 - 가지다 as a calque of "have": 세션은 메모를 가집니다 -> 세션에는 메모가 있습니다
 - 들 on every plural - Korean does not need it
 - stacked ~에 대한 / ~에 있어서
 - 시키다 where 하다 is meant: 실행시킵니다 -> 실행합니다
+- ~을 통해 for a plain instrument: socket을 통해 받습니다 -> socket으로 받습니다
+- 개 as the classifier for settings or kinds: 설정이 두 개 -> 설정이 두 가지; 11개 장 -> 장 11개
+
+### Glossary additions (fold into section 3 after merge)
+
+| English | ko |
+| --- | --- |
+| background timer (the five-minute check, any OS) | 백그라운드 타이머 |
+| notes limit (the byte cap `add` enforces) | 메모 한도 (메모 한도에 이르면, not 가득 차면) - never 예산, which is the 5h usage budget |
+| deterministic check | 정해진 규칙대로만 판정하는 검사 |
+| levers (the human keeps the levers) | 제어권 |
+| banner (a desktop notification) | 배너 |
+| a watch fires | 워치가 발동합니다 |
+| call (the agent calls a tool) / run (a person runs a command) | 호출 / 실행 |
+| sidebar | 사이드바 |
+| running session / stopped session | 돌아가고 있는 세션 / 멈춰 있는 세션 |
+
+### Tells (fold into section 10 after merge)
+
+**Korean** - 그것 / 이것 / 거기 / 둘 with no noun behind them - ~하는 것은 ... 입니다 cleft -
+전부라 / 실행이라 contractions inside 합니다체 - 아니면 as a conjunction - a flag as the whole
+predicate (`--resume`입니다) - ~을 통해 for a plain instrument - 레버, 늦잠, token을 태우다 -
+예산 for the notes limit - `launchd` in a sentence that also covers Linux.
 
 ## 7. Simplified Chinese (zh-CN)
 
