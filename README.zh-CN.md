@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bas
 ```
 
 > [!NOTE]
-> 安装脚本会装上 skill 和终端里的 `longrun` 命令，把 hook 写进 `~/.claude/settings.json`，并在后台留一个每五分钟跑一次的定时器。配置桌面通知之前它会先问你。`install.sh --uninstall` 把这一切撤回去。
+> 安装脚本会装上 skill 和终端里的 `longrun` 命令，把 hook 写进 `~/.claude/settings.json`，并在后台留一个每五分钟跑一次的定时器。还会问你要不要配置桌面通知。`install.sh --uninstall` 把这一切撤回去。
 
 <details>
 <summary>安装脚本到底在这台机器上改了什么</summary>
@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bas
 - `~/.claude/skills/longrun/` 和符号链接 `~/.local/bin/longrun`。
 - 用户级 (user scope) 的 MCP 服务器 `longrun` (`claude mcp add`)，`ask` 和 `notify` 这两个工具就是从这儿来的。
 - **后台定时器**，每五分钟一次：macOS 上是 launchd agent，Linux 上是 systemd user timer 或 cron 里的一行。它检查你注册的事件监听，并看一眼各个会话：几条 shell 检查而已，不调用模型也不花 token，只有你设的某个条件成立时才唤醒会话。`--no-timer` 跳过这一步。
-- **桌面通知**，前提是安装脚本问要不要桌面通知时你回答了“是”：macOS 上在缺少 `terminal-notifier` 时执行 `brew install terminal-notifier`，在 `~/.claude/longrun/notifier/` 下放一个发送用的 bundle，再发一条测试通知让 macOS 弹出授权。Linux 上只检查有没有 `notify-send`。`--notify` 和 `--no-notify` 可以提前替你回答。
+- **桌面通知**，前提是安装脚本问要不要桌面通知时你回答了“是”：macOS 上在缺少 `terminal-notifier` 时执行 `brew install terminal-notifier`，在 `~/.claude/longrun/notifier/` 下放一个发送通知用的 bundle，再发一条测试通知让 macOS 弹出授权。Linux 上只检查有没有 `notify-send`。`--notify` 和 `--no-notify` 可以提前替你回答。
 
 需要 macOS 或 Linux、Claude Code 和 python3 3.9+。从 clone 下来的仓库安装，用的也是同一个 [`install.sh`](install.sh)。
 
@@ -86,7 +86,7 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 **不用你开口，从第一个会话起就有**：agent 把笔记写到磁盘上（死胡同、决定、事实），每次 compaction、`/clear` 和 resume 之后 hook 都把它们带回来；compaction 时 hook 会告诉做总结的模型该留下什么；每一轮都显示项目里其他会话改了什么。
 
-**你开口，或者 agent 自己看出需要时**：“PR 合了告诉我”（等待期间不花 token 的事件监听）、会话之间的消息和任务、你在意的那个会话干完时发条通知、一个会话带着其他会话走向既定目标。
+**你开口，或者 agent 自己看出需要时**：“PR 合了告诉我”（等待期间不花 token 的事件监听）、会话之间的消息和任务、你在意的那个会话干完一轮时发条通知、一个会话带着其他会话走向既定目标。
 
 ## 为什么
 
@@ -125,7 +125,7 @@ longrun board assign T8 "PR 43: payments"      # a task instead of a message
 
 ### 3. 事件驱动：等待不花 token
 
-事件监听就是一项确定性的检查，由定时器每五分钟跑一次，全程不调用模型（macOS 上是 launchd agent，Linux 上是 systemd user timer 或一个 cron 任务）。条件成立时，会话会以消息的形式收到你事先留下的那段文字。笔记本电脑休眠只是让检查晚一点做。
+事件监听就是一项确定性的检查，由定时器每五分钟跑一次，全程不调用模型（macOS 上是 launchd agent，Linux 上是 systemd user timer 或一个 cron 任务）。条件成立时，会话会以消息的形式收到 `--then` 里的那段文字。笔记本电脑休眠只是让检查晚一点做。
 
 ```bash
 longrun watch add --to "PR 43: payments" --then "rebase onto main" -- pr-merged 42
@@ -144,7 +144,7 @@ longrun board take T7; longrun board done T7 "PR 42 merged"    # in a worker
 longrun ask "Merge PR 42?" --options "Yes,No"                  # a dialog, answered inline
 ```
 
-开关始终握在人手里：打断卡住的进程 (`longrun interrupt`)、全部停止 (`longrun halt`)、解除停止。监视器和编排器只负责提议。还有一条默认关闭、要你自己打开的规则：5 小时用量预算 (`longrun budget on`)，窗口内的用量超出计划进度时全部停止，并问你接下来怎么办。
+控制权始终握在人手里：打断卡住的进程 (`longrun interrupt`)、全部停止 (`longrun halt`)、解除停止。监视器和编排器只负责提议。还有一条默认关闭、要你自己打开的规则：5 小时用量预算 (`longrun budget on`)，窗口内的用量超出计划进度时全部停止，并问你接下来怎么办。
 
 ## 工作原理
 
@@ -168,11 +168,11 @@ sequenceDiagram
 
 **启动**。hook 按目录找到项目并打印摘要：共享笔记、自有笔记、其他会话（是否还活着、各自最后干了什么）、待触发的事件监听、未送达的消息。
 
-**干活**。agent 每碰到一个死胡同、做出一个决定或拿到一条来之不易的事实，就写一行。hook 统计编辑次数并记录失败的命令。连着编辑了很久却一条笔记都没写，会收到一次提醒。
+**干活**。agent 每碰到一个死胡同、做出一个决定或拿到一条来之不易的事实，就写一行。hook 统计编辑次数并记录失败的命令。连着编辑了很久却一条笔记都没写，会提醒 agent 记一条。
 
 **每一轮**。投递收件箱里的消息。其他会话对共享笔记做的改动以差异形式出现：`+` 新增、`~` 改写、`-` 删除。
 
-**compaction**。compaction 之前，先给最近的请求、编辑过的文件和最近的失败拍一张快照，外加给做总结的模型的指示：保留死胡同连同原因、保留精确字符串、丢掉一次 Read 就能拿回来的东西。自动 compaction 和 `/compact <text>` 在 Claude Code 里用的是同一段总结提示词，所以这和你自己写 `/compact` 提示是一回事，只是由 longrun 替你写好，也不用你算时机。compaction 之后，longrun 把那段总结原样归档。下一次启动打印的是摘要加一个 HANDOFF 区块，于是会话从上次停下的地方继续。resume 和 `/clear` 沿用同一批笔记；fork 出来的会话拿到一份副本。
+**compaction**。compaction 之前，先给最近的请求、编辑过的文件和最近的失败拍一张快照，外加给做总结的模型的指示：保留死胡同连同原因、保留精确字符串、丢掉读一次文件就能拿回来的东西。自动 compaction 和 `/compact <text>` 在 Claude Code 里用的是同一段总结提示词，所以这和你自己写 `/compact` 提示是一回事，只是由 longrun 替你写好，也不用你算时机。compaction 之后，longrun 把那段总结原样归档。下一次启动打印的是摘要加一个 HANDOFF 区块，于是会话从上次停下的地方继续。resume 和 `/clear` 沿用同一批笔记；fork 出来的会话拿到一份副本。
 
 **清理**。每小时一次：旧条目进归档（`pin` 除外）、日志只留尾巴、长期沉默的会话进归档。笔记预算满了 `add` 会拒绝，并指出可以删掉哪些。不会悄悄丢掉任何东西。
 
@@ -181,14 +181,14 @@ sequenceDiagram
 | 实体 | 是什么 | 存什么 |
 |---|---|---|
 | **项目** | 一个 `.longrun/` 目录，位于项目文件夹里，或者在目录树之外 (`--external`) | 共享笔记、收件箱、任务板、归档 |
-| **会话** | 一次 Claude Code 对话；在应用里就是侧边栏的一行。resume 会拿到新的 id，longrun 把它们串起来 | 自有笔记、日志、计数器、最后状态 |
+| **会话** | 一次 Claude Code 对话；在应用里就是侧边栏的一行。resume 会拿到新的 id，longrun 把旧 id 和新 id 串起来 | 自有笔记、日志、计数器、最后状态 |
 | **目录** | 会话启动时所在的文件夹：仓库根目录、worktree、子目录 | 什么都不存。只说明这个会话属于哪个项目 |
 
-worktree 用 `longrun link <project>` 挂上去，本身没有笔记。
+worktree 用 `longrun link <project>` 挂上去，本身不存放笔记。
 
 ## 该写什么
 
-只有一个判据：**一条命令、一次 Read 或一次 grep 能不能把它找回来**？能的话，就别写。
+只有一个判据：**一条命令、读一次文件或一次 grep 能不能把它找回来**？能的话，就别写。
 
 | 标签 | 写什么 | 写到哪 |
 |---|---|---|
@@ -199,7 +199,7 @@ worktree 用 `longrun link <project>` 挂上去，本身没有笔记。
 | `ctx` | 你给出的任务背景 | 自有 |
 | `todo` | agent 还没做完的一件小事 | 自有 |
 
-里程碑（已推送、PR 已开、测试变绿）写进日志：`longrun log "PR opened"`。比任务存在更久的东西（用户是谁、他怎么干活）写进 Claude Code 的自动记忆，不写这里。
+里程碑（已推送、PR 已开、测试变绿）写进日志：`longrun log "PR opened"`。比任务存在更久的东西（用户是谁、他怎么干活）写进 Claude Code 的自动记忆，而不是 longrun。
 
 ## 命令
 
@@ -211,7 +211,7 @@ longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' |
 longrun orchestrate start --goal "..." | board | fact | ask | halt | resume | interrupt | budget
 ```
 
-完整的参数、文件格式和已验证的事实：[docs/REFERENCE.md](docs/REFERENCE.md)。编排器的设计和还没做的部分：[docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md)。
+完整的参数、文件格式和关于 Claude Code 的已验证事实：[docs/REFERENCE.md](docs/REFERENCE.md)。编排器的设计和还没做的部分：[docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md)。
 
 <!-- site: nuances, limits and edge cases move to the site; add the link here -->
 

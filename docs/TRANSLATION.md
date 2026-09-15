@@ -129,7 +129,7 @@ These are translated, and translated the same way every time.
 | a watch fires | watch срабатывает | - | 워치가 발동합니다 | - |
 | event-driven (section 3 heading; was 'reactivity') | по событию | イベント駆動 | 이벤트 기반 - not 반응성, which a Korean developer reads as responsiveness | 事件驱动 |
 | autonomy you switch on (section 4 heading; was 'selective autonomy') | самостоятельность, которую включаете вы | オンにして初めて働く自律 | 켜야 동작하는 자율성 | 有限度的自治 |
-| control (stays with the human; was 'the levers') | управление остается у человека | 主導権 | 제어권 | - |
+| control (stays with the human; was 'the levers') | управление остается у человека | 主導権 | 제어권 | 控制权 - 开关 reads as a physical switch |
 | the goal you set | к заданной цели | 決めた目標 - あなた is dropped, as everywhere | 정해진 목표 | 既定目标 |
 | user turn (a message arriving as one) | ход пользователя | - | - | 一轮用户输入 |
 | running / stopped (session) | работающая / остановленная сессия | 動いている / 止まっている | 돌아가고 있는 세션 / 멈춰 있는 세션 | - |
