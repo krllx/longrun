@@ -117,34 +117,34 @@ These are translated, and translated the same way every time.
 | watcher (the one watching sessions) | наблюдатель | 監視役 | 감시자 | 监视器 |
 | delta (of the shared notes) | дельта | 差分 | 변경분 | 差异 |
 | polling | опрос | ポーリング | 폴링 | 轮询 |
-| cheat sheet | шпаргалка | チートシート | - | 速查表 |
+| cheat sheet | шпаргалка | チートシート | 치트 시트 | 速查表 |
 | agent | агент | エージェント | 에이전트 | agent (kept Latin) |
 | worker (the session taking tasks) | рабочая сессия | 作業役 | 작업 세션 | 干活的会话 |
 | summariser (the model compaction uses) | суммаризатор | 要約するモデル | 요약하는 모델 | 做总结的模型 |
 | background timer (the five-minute check; `launchd` in the English, any OS meant) | фоновый таймер | バックグラウンドのタイマー | 백그라운드 타이머 | 后台定时器 |
-| tick (of the timer) | тик | ティック | - | - |
-| the 5-hour window (usage) | 5-часовое окно | 5時間枠 | - | - |
+| tick (of the timer) | тик | ティック | 틱 (틱마다, not 매 틱마다) | `tick` (kept Latin) |
+| the 5-hour window (usage) | 5-часовое окно | 5時間枠 | 5시간 윈도 - 윈도, as in 컨텍스트 윈도 | 5 小时窗口 |
 | notes limit (the byte cap `add` enforces; not the 5-hour budget) | лимит заметок | 予算; メモの容量が上限に達したとき where the 5-hour 予算 is in the same paragraph | 메모 한도 (메모 한도에 이르면, not 가득 차면) - never 예산, which is the 5-hour usage budget | 笔记预算 |
 | fixed check (a watch's check with no model judgement; was 'deterministic') | детерминированная проверка | 決定論的なチェック - not 決定的 | 정해진 규칙대로만 판정하는 검사 | 一项检查 (not 一段, not 一次) |
-| a watch fires | watch срабатывает | - | 워치가 발동합니다 | - |
+| a watch fires | watch срабатывает | 発火する | 워치가 발동합니다 | 触发 |
 | event-driven (section 3 heading; was 'reactivity') | по событию | イベント駆動 | 이벤트 기반 - not 반응성, which a Korean developer reads as responsiveness | 事件驱动 |
 | autonomy you switch on (section 4 heading; was 'selective autonomy') | самостоятельность, которую включаете вы | オンにして初めて働く自律 | 켜야 동작하는 자율성 | 有限度的自治 |
 | control (stays with the human; was 'the levers') | управление остается у человека | 主導権 | 제어권 | 控制权 - 开关 reads as a physical switch |
 | the goal you set | к заданной цели | 決めた目標 - あなた is dropped, as everywhere | 정해진 목표 | 既定目标 |
-| user turn (a message arriving as one) | ход пользователя | - | - | 一轮用户输入 |
-| running / stopped (session) | работающая / остановленная сессия | 動いている / 止まっている | 돌아가고 있는 세션 / 멈춰 있는 세션 | - |
-| peers (other sessions) | сессии | セッション - never 仲間 | - | - |
-| call (the agent calls a tool) / run (a person runs a command) | - | - | 호출 / 실행 | - |
-| revert (a fix) | откатить | 取り消す - not 差し戻す | - | - |
-| default (setting) | по умолчанию | デフォルト - not 既定 | - | - |
-| cleanup (the hourly job) | уборка | 片付け - distinct from prune, 整理 | - | - |
-| task framing (`ctx`) | рамки задачи | タスクの前提 | - | - |
-| a small thing the agent still has to do (`todo`) | короткий список незавершенного | 後で済ませるべき作業 | - | - |
-| banner (a desktop notification) | баннер | - | 배너 | - |
-| sidebar | сайдбар | - | 사이드바 | - |
-| laptop | ноутбук | - | - | 笔记本电脑 (never 笔记本) |
-| registry (`registry.json`, the Claude Code session registry) | реестр | - | - | 登记表 (never 注册表, which is the Windows registry) |
-| headquarters (the `hq` mode) | штаб | - | - | 指挥部 (hq) at first mention |
+| user turn (a message arriving as one) | ход пользователя | ユーザーのターン | 사용자 턴 | 一轮用户输入 |
+| running / stopped (session) | работающая / остановленная сессия | 動いている / 止まっている | 돌아가고 있는 세션 / 멈춰 있는 세션 | 正在运行 / 已经停了 |
+| peers (other sessions) | сессии | セッション - never 仲間 | 세션 - never 동료 | 同伴 |
+| call (the agent calls a tool) / run (a person runs a command) | вызывать / запускать - not звать, not гонять | 呼ぶ / 実行する | 호출 / 실행 | 调用 / 跑 |
+| revert (a fix) | откатить | 取り消す - not 差し戻す | 되돌리다 | 回退 |
+| default (setting) | по умолчанию | デフォルト - not 既定 | 기본값 - not 디폴트 | 默认 - not 預設 |
+| cleanup (the hourly job) | уборка | 片付け - distinct from prune, 整理 | 정리 | 清理 |
+| task framing (`ctx`) | рамки задачи | タスクの前提 | 작업의 배경과 조건 | 任务背景 |
+| a small thing the agent still has to do (`todo`) | короткий список незавершенного | 後で済ませるべき作業 | 짧은 후속 작업 | 还没做完的一件小事 |
+| banner (a desktop notification) | баннер | バナー | 배너 | 横幅 |
+| sidebar | сайдбар | サイドバー | 사이드바 | 侧边栏 |
+| laptop | ноутбук | ノートPC - not ラップトップ | 노트북 | 笔记本电脑 (never 笔记本) |
+| registry (`registry.json`, the Claude Code session registry) | реестр | レジストリ | 레지스트리 | 登记表 (never 注册表, which is the Windows registry) |
+| headquarters (the `hq` mode) | штаб | 司令塔 | 본부 (hq) at first mention | 指挥部 (hq) at first mention |
 
 A `-` means no translator has needed that term in that language yet. Fill the cell in when
 you do, in the PR that needs it - do not leave the row out because one column is empty.
