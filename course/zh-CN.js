@@ -14,7 +14,7 @@
   C.PROJ.label = 'shop/.longrun/  （共享，在项目里）';
   const PF = {
     'NOTES.md': ['共享笔记 [n1]、[n2]…… 每条一行，带作者。预算 5000 字节。', '由 agent 写：add --shared, rm, replace, prune --shared'],
-    'config.json': ['项目设置：hq 模式、预算、阈值。', 'init; longrun config set'],
+    'config.json': ['项目设置：hq 模式（台账和收件箱那一层，`longrun init --hq`）、预算、阈值。', 'init; longrun config set'],
     'state.json': ['笔记 id 和任务 id 的计数器。', 'CLI'],
     'inbox/<msg>.md': ['给当前没在运行的会话的消息。送达后移到 inbox/.archive/。', 'send, watch, board, ask；由收件会话的 hook 读取'],
     'archive/precompact/<sid>-<time>.md': ['compaction 之前的快照：用户最近的几个请求、编辑过的文件、最近的 FAIL。HANDOFF 区块（compaction 之后留给自己的交接说明）就是用它拼出来的。', 'PreCompact hook'],

@@ -37,8 +37,8 @@
 <div class="grid2">
   <div class="card project"><h4>1. 磁盘上的共享文档</h4><p>每个项目一个 <code>.longrun/</code>，里面是所有会话都看得到的笔记，另外每个会话还有自有笔记。每次 compaction（对话历史被自动摘要）、<code>/clear</code> 和 resume 之后，hook 把两者都带回来，并在每一轮显示其他会话改了什么。见第 <a href="#l3">3</a>、<a href="#l5">5</a>、<a href="#l6">6</a> 章。</p></div>
   <div class="card session"><h4>2. 交接：消息和任务</h4><p>发给另一个会话的消息或任务，在那边是一轮用户输入：对方在运行就走 socket，对方停了就在下一轮走收件箱。会话的名字就是你在侧边栏看到的标题。见第 <a href="#l7">7</a> 章。</p></div>
-  <div class="card dir"><h4>3. 事件驱动：不会错过事件的等待</h4><p>事件监听就是一项确定性的检查，由定时器每五分钟跑一次，全程不调用模型。条件成立时，会话带着你给的那段文字醒来。没有轮询循环，等待不花 token，也没有睡过头、错过事件的 sleep。见第 <a href="#l7">7</a> 章。</p></div>
-  <div class="card"><h4>4. 有限度的自治：编排器</h4><p>一个会话维护任务板，带着已经打开的那些会话走向既定目标：派任务、解阻塞、发现卡住的同伴，只在必要时才通过对话框问人。开关（全部停止、打断、解除停止）始终握在人手里。见第 <a href="#l8">8</a> 章。</p></div>
+  <div class="card dir"><h4>3. 事件驱动：不会错过事件的等待</h4><p>事件监听就是一项确定性的检查，由定时器每五分钟跑一次，全程不调用模型。条件成立时，会话带着你给的那段文字醒来。没有轮询循环，等待不花 token，也没有定时的 sleep，醒来时不是太晚就是太早。见第 <a href="#l7">7</a> 章。</p></div>
+  <div class="card"><h4>4. 有限度的自治：编排器</h4><p>一个会话维护任务板，带着已经打开的那些会话走向既定目标：派任务、解阻塞、发现卡住的同伴，只在必要时才通过对话框问人。控制权（全部停止、打断、解除停止）始终握在人手里。见第 <a href="#l8">8</a> 章。</p></div>
 </div>
 
 <section class="lesson" id="l0">
@@ -49,7 +49,7 @@
 <li><b>装一次就好。</b>一行命令，不需要 checkout，安装脚本自己去取源码：
 <pre><code>curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash</code></pre>
 它装上 skill、<code>~/.claude/settings.json</code> 里的 11 个 hook、CLI <code>~/.local/bin/longrun</code>、<code>longrun</code> MCP 服务器，以及一个定时器，每五分钟跑一次检查和监视器。它只问你一件事：桌面通知，也就是下一步。从 clone 下来的仓库安装，用的也是同一个 <code>install.sh</code>；<code>--uninstall</code> 撤销一切。</li>
-<li><b>通知，想要就装。</b><code>install.sh</code> 会问要不要配置通知，装不装取决于你当时的回答。longrun 从不依赖通知：全部停止、预算停止和触发的事件监听，本来就会经由 socket 或收件箱到达会话，所以拒绝了也不会有别的影响（<code>--no-notify</code> 提前替你回答，<code>longrun notify setup</code> 以后再打开）。在 macOS 上，缺少 <code>terminal-notifier</code> 时安装脚本会执行 <code>brew install terminal-notifier</code>（前提是有 Homebrew；没有就直说一声然后跳过），构建 <code>~/.claude/longrun/notifier/longrun.app</code> 并发一条测试通知；macOS 可能会问一次是否允许来自 "longrun" 的通知，允许它。系统里没有别的路子能替代这一套：<code>osascript -e 'display notification'</code> 是以 Script Editor 的身份发出的，而它没有通知权限，于是系统把通知归档、什么都不画，还返回 0（在 macOS 15 上 25 次全是如此；就算先打开过 Script Editor 也拿不到权限）。之所以要复制一个 bundle，是因为图标和发送者名字只能来自发送它的那个 bundle，而这一个带着 Claude 的图标和 <code>longrun</code> 这个名字。在 Linux 上用的是 <code>notify-send</code> (<code>libnotify</code>)，大多数桌面环境已经有了。两种系统都可以用 <code>longrun notify --test</code> 检查：它发一条探针，再回头读一次，确认系统真的把它画了出来，并打印点一下会打开哪个会话。如果有一个会话你绝对不能错过：<code>longrun important on</code>（或者 <code>next</code>，或者一个数字）让它每轮结束时一定发通知，不管 <code>notify_turn_end</code> 设成了什么，也不管当前前台是哪个窗口；你在另一个 Claude 会话里打字时，Claude 窗口就在前台，按前台窗口判断的那条规则就不会发通知。</li>
+<li><b>通知，想要就装。</b><code>install.sh</code> 会问要不要配置通知，装不装取决于你当时的回答。longrun 从不依赖通知：全部停止、预算停止和触发的事件监听，本来就会经由 socket 或收件箱到达会话，所以拒绝了也不会有别的影响（<code>--no-notify</code> 提前替你回答，<code>longrun notify setup</code> 以后再打开）。在 macOS 上，缺少 <code>terminal-notifier</code> 时安装脚本会执行 <code>brew install terminal-notifier</code>（前提是有 Homebrew；没有就直说一声然后跳过），构建 <code>~/.claude/longrun/notifier/longrun.app</code> 并发一条测试通知；macOS 可能会问一次是否允许来自 "longrun" 的通知，允许它。macOS 自带的手段替代不了这一步：<code>osascript -e 'display notification'</code> 是以 Script Editor 的身份发出的，而它没有通知权限，于是系统把通知归档、什么都不画，还返回 0（在 macOS 15 上 25 次全是如此；就算先打开过 Script Editor 也拿不到权限）。之所以要复制一个 bundle，是因为图标和发送者名字只能来自发送它的那个 bundle，而这一个带着 Claude 的图标和 <code>longrun</code> 这个名字。在 Linux 上用的是 <code>notify-send</code> (<code>libnotify</code>)，大多数桌面环境已经有了。两种系统都可以用 <code>longrun notify --test</code> 检查：它发一条探针，再回头读一次，确认系统真的把它画了出来，并打印点一下会打开哪个会话。如果有一个会话你绝对不能错过：<code>longrun important on</code>（或者 <code>next</code>，或者一个数字）让它每轮结束时一定发通知，不管 <code>notify_turn_end</code> 设成了什么，也不管当前前台是哪个窗口；你在另一个 Claude 会话里打字时，Claude 窗口就在前台，按前台窗口判断的那条规则就不会发通知。</li>
 <li><b>把文件夹变成项目。</b>对 longrun 来说，项目就是你在 Claude Code 里打开的那个文件夹。不一定是仓库根目录：可以是装着好几个仓库的文件夹、monorepo 的一个子目录，或者一个空的指挥部 (hq) 文件夹。在那里跑一次 <code>longrun init</code>：在终端里跑，或者直接在 Claude Code 会话里说一声，agent 会替你跑。一个 <code>.longrun/</code> 目录会出现；如果这个文件夹在仓库里，把它加进 ignore 文件（或者用 <code>longrun init --external</code>，它把目录放到 <code>~/.claude/longrun/</code> 下）。同一个项目的每个 worktree 里：<code>longrun link &lt;project&gt;</code>。检查一下：<code>longrun where</code>。</li>
 <li><b>调一调。</b>在会话里对 agent 说："set up longrun"（或者 <code>/longrun onboard</code>）。它会跑 <code>longrun onboard</code>，简短讲一下这个 skill 做什么，然后问你几个主要设置：autocompact 窗口、5 小时窗口的预算、卡住的阈值、笔记大小。它自己用 <code>longrun config set</code> 把答案写进配置。只有一个例外：hook 设不了 autocompact 窗口，所以 agent 会让你在 Claude Code 里手敲 <code>/autocompact 300k</code>（或者你选的那个值）。在离这个阈值还有 5 万 token 时，会有一个 hook 提醒会话在 compaction 之前先把笔记写好。各个 key 的细节见下面第 9 章。</li>
 <li><b>干活。</b>不用调用任何命令。会话启动时拿到摘要（共享笔记、自有笔记、还有谁在干活），compaction 之后一切自己回来，其他会话的改动在下一轮送到。agent 自己会把死胡同和决定写成笔记。你可以用平常的话说：“记一下”、“我们都试过什么”、“会话状态”、“把这个交给另一个会话”、“还剩什么”、“PR 合了告诉我”。</li>
@@ -66,7 +66,7 @@
 <div class="stripe">
   <div class="s bad"><b>问题 1：compaction</b>总结最先丢掉的就是“我们试过什么、为什么没成”。半小时后 agent 又提出了自己已经回退掉的改法。</div>
   <div class="s bad"><b>问题 2：多个会话</b>各自活在自己的窗口里。一个已经开了 PR，另一个不知道，还在说“PR 还没建”。一个撞过的死胡同，另一个再撞一次。</div>
-  <div class="s bad"><b>问题 3：等待</b>“PR 合了告诉我”要么变成轮询循环，每次醒来都烧 token，要么变成一段睡过头、错过事件的 sleep。</div>
+  <div class="s bad"><b>问题 3：等待</b>“PR 合了告诉我”要么变成轮询循环，每次醒来都烧 token，要么变成一段定时的 sleep，醒来时事件不是早已发生，就是还没到。</div>
   <div class="s bad"><b>问题 4：多个会话，一个目标</b>五个会话在一个项目上，只有人自己知道什么做完了、什么卡住了、下一步是什么。每一次交接都要经过人。</div>
   <div class="s good"><b>解法 1：磁盘上的文档</b>磁盘上的笔记不会退化。每次 compaction、<code>/clear</code> 和 resume 之后 hook 把笔记带回来，并把 compaction 的总结原样归档。</div>
   <div class="s good"><b>解法 2：消息和任务</b>每个项目一个 <code>.longrun/</code>：所有会话都看得到的共享笔记、带状态的会话列表，以及作为一轮用户输入送达的消息和任务。</div>
