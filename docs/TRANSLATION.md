@@ -204,12 +204,78 @@ half-width. Punctuation is full-width 、and 。- never ，．
 **Parentheses.** Half-width `( )` when the content is Latin only, full-width （） when
 it contains Japanese.
 
+**Every list has a topic.** English hangs a list off a colon; Japanese cannot hang it off a
+。. "ボードを持ちます。目標、タスク、外から来た事実です。" leaves the reader asking what the three
+nouns are - write "ボードを持ちます。ボードに載るのは目標、タスク、外から来た事実です。". The same
+for a bare noun phrase in body text ("設定が2つ。" -> "設定が2つあります。") and for a command list
+with no verb ("…`longrun watch test`。" -> "…`longrun watch test`で確かめます。").
+
+**The actor stays named when it changes.** In a list item whose topic is a file, "先にファイルを
+コピーし" reads as if the file did the copying: "インストーラーは先にこのファイルをコピーし".
+"要約するモデルには何を残すかを伝えます" has nobody telling: "hookは要約するモデルにも何を残すかを
+伝えます". A verb with no object gets one: "1度だけ促します" -> "メモを書くよう1度だけ促します".
+
+**それ / これ / そこ are not "it / this / there".** Japanese names the referent or drops it:
+"そこではユーザーのターンとして届きます" -> "相手のセッションにはユーザーのターンとして届きます";
+"その文面" with no antecedent -> "`--then`で指定した文面"; "これは同じ舵取りを" -> "longrunは同じ指示を".
+
+**An English image is spelled out, not carried over** - the Russian rule, seen from the
+Japanese side. "寝過ごすsleep" -> "決めた時間だけ待つsleepになります。sleepが明けたころには、
+イベントはとうに過ぎているか、まだ来ていません"; "tokenを燃やす" -> "tokenを浪費する"; "レバーは
+人間が握ったまま" -> "主導権は人間が握ったまま"; "履歴を要約に押し込める" -> "圧縮する"; "沈黙した
+セッション" -> "動きのないセッション"; "このページより先を行っている" -> "このページより新しい".
+
+**Developer words, not dictionary words.** 差し戻す is "send back for rework" in review
+vocabulary; a reverted fix is 取り消した修正. 決定的 is "decisive"; a deterministic check is
+決定論的なチェック. 既定 is bureaucratic; a default is デフォルト. Other sessions are セッション,
+never 仲間. "cronの1行" -> "crontabの1行".
+
+**Set phrases the review settled**, beyond the glossary: バックグラウンドのタイマー where the
+English says `launchd` but means the timer on any OS; 5時間枠 for the 5-hour usage window
+(ウィンドウ alone collides with the GUI windows in the same paragraph); メモの容量が上限に達した
+とき for "a budget is full" in the paragraph that has just called the 5-hour usage limit 予算
+(the course, like the English, says 予算 for both); 主導権は人間が握った
+ままです for "the human keeps the levers"; 取りこぼしのない待機 for "waiting that never
+oversleeps"; 動いている / 止まっている for a session that is alive / stopped.
+
+**Register by surface.** The hero taglines end in a noun or in the plain form (セッションが目を
+覚ます), like headings, not in ます. A table cell that holds whole sentences (the "Why" table, the
+entity descriptions) keeps です・ます like body text; 体言止め is for labels and short cells.
+
 **Avoid:**
 - 〜することができます -> 〜できます
 - long の chains: セッションのメモの一覧の表示 -> セッションのメモを一覧表示
 - あなた / 私たち - Japanese drops the subject; so do we
 - ！ and ～ as tone markers
 - word-for-word English clause order; split a long English sentence into two Japanese ones
+
+### Glossary additions (fold into section 3 after merge)
+
+| English | ja |
+| --- | --- |
+| budget (of the notes store, bytes) | 予算; メモの容量が上限に達したとき where the 5-hour 予算 is in the same paragraph |
+| the 5-hour window (usage) | 5時間枠 |
+| tick (of the timer) | ティック |
+| background timer (`launchd` in the English, any OS meant) | バックグラウンドのタイマー |
+| levers (the human keeps the) | 主導権 |
+| alive / stopped (session) | 動いている / 止まっている |
+| revert (a fix) | 取り消す - not 差し戻す |
+| deterministic (check) | 決定論的 - not 決定的 |
+| default (setting) | デフォルト - not 既定 |
+| peers (other sessions) | セッション - never 仲間 |
+| cleanup (the hourly job) | 片付け - distinct from prune, 整理 |
+| task framing (`ctx`) | タスクの前提 |
+| follow-up (`todo`) | 後で済ませるべき作業 |
+
+### Tells (fold into section 10 after merge)
+
+- a list or a bare noun phrase after 。 with nothing saying what it is ("ボードを持ちます。目標、タスク、…です。", "設定が2つ。")
+- それ / これ / そこ standing in for it / this / there; その with no antecedent
+- 寝過ごす, 燃やす, レバー, 舵取り, 沈黙した, 押し込める, 先を行く - an English image carried over
+- 差し戻す for "reverted", 決定的 for "deterministic", 既定 for "default", 仲間 for other sessions
+- 予算 for the notes byte limit right next to the 5-hour 予算; ウィンドウ for the 5-hour usage window
+- `launchd` where the sentence also covers Linux
+- full-width （） around Latin-only content, or a space before a half-width ( after a code span
 
 ## 6. Korean (ko)
 
