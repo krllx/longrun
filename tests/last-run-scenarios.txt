@@ -44,5 +44,11 @@ This session keeps its durable notes on disk and gets them back right after the 
   ok   S8.1 a message to a stopped session arrives as its next turn, with the sender named
   ok   S8.2 a running session gets it on its socket right away, as a user turn
   ok   S8.3 a watch registered by name fires into that session with the --then text
+== S9: the picture of the other sessions stays live, and windows the user closed in the app go away
+  ok   S9.1 a session opened after C started shows up on C's next turn, with what it is doing
+  ok   S9.2 nothing changed -> nothing injected
+  ok   S9.3 a new last reply and the session ending both reach C
+  ok   S9.4 a window archived in the app disappears from the delta and from the block
+  ok   S9.5 ...but longrun status --all still shows it, and says why it was hidden
 
-PASS=32 FAIL=0  (tmp: /tmp/longrun-scen.WvtCrX)
+PASS=37 FAIL=0  (tmp: /tmp/longrun-scen.LBrviG)

@@ -23,7 +23,7 @@ Three things, nothing else:
 - **Session** = this conversation. Own notes (`[s<id>]`), a journal, a heartbeat; all outside the repo. A resume in the desktop app gives the session a new CLI id; longrun follows the chain, so own notes continue.
 - **Directory** (repo root, a worktree, a subdirectory, a folder with several repos) only decides which project a session belongs to. It owns nothing.
 
-Every SessionStart, including after compaction, injects: SHARED notes, OWN notes, SESSIONS (who else is working, what each did last), pending watches, messages. Every turn injects what other sessions changed in the shared notes since you last saw them, and any message sent to you.
+Every SessionStart, including after compaction, injects: SHARED notes, OWN notes, SESSIONS (who else is working, what each did last), pending watches, messages. Every turn injects what changed since: shared notes other sessions added or rewrote, a session that appeared, ended or did something new, and any message sent to you.
 
 ## Onboarding: the first conversation about longrun
 
