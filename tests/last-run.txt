@@ -12,6 +12,15 @@
   ok   NOTES.md never exceeds cap (759 B)
   ok   prune --auto --shared shrinks to <=60% (390 B) and archives
   ok   prune keeps dead/decision over fact
+  ok   a stale mark without a reason is refused
+  ok   a marked entry still shows, with the mark and the reason, so other sessions see it too
+  ok   prune offers the marked entry first, before the cheap tags
+  ok   stale ls lists the marks with who made them and when
+  ok   stale --clear takes the mark back
+  ok   a mark does not outlive its entry
+  ok   a muted entry leaves this session's digest, and the head says how many are hidden
+  ok   muting changes nothing on disk and nothing for another session
+  ok   unmute --all brings them back
   ok   rm n1 archives
   ok   replace n2
   ok   add after prune fits
@@ -244,4 +253,4 @@
   ok   the token comes from Claude Code's own credentials file when there is no keychain item
   ok   no credentials anywhere is an error, never an empty token
 
-PASS=222 FAIL=0  (tmp: /tmp/longrun-test.6v1WtH)
+PASS=231 FAIL=0  (tmp: /tmp/longrun-test.vpY9dg)

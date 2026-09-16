@@ -463,10 +463,14 @@ def archive_notes(t, entries, why):
         append(t["archive"], "%s %s | %s" % (ts(), why, fmt_note(e, t["prefix"])))
 
 
-def prune_candidates(entries, n=5):
-    """Oldest, non-pinned, todo/ctx first: the cheapest entries to lose."""
+def prune_candidates(entries, n=5, stale=None):
+    """Oldest, non-pinned, todo/ctx first: the cheapest entries to lose. An entry a session marked
+    stale comes before all of them whatever its tag - somebody looked at it and said it stopped being
+    true, which is better evidence than any weight here."""
     weight = {"todo": 0, "ctx": 1, "fact": 2, "decision": 3, "dead": 3, "doc": 8, "pin": 9}
-    return sorted(entries, key=lambda e: (weight.get(e["tag"], 2), e["date"], e["id"]))[:n]
+    marks = stale or {}
+    return sorted(entries, key=lambda e: (0 if str(e["id"]) in marks else 1,
+                                          weight.get(e["tag"], 2), e["date"], e["id"]))[:n]
 
 
 def author_label(store, sid=""):
@@ -537,7 +541,7 @@ def cmd_add(store, args):
         new = {"id": next_id_in(t["state"], "note"), "date": short_date(), "tag": tag, "scope": scope, "text": text}
         cap = t["cap"]
         if notes_bytes(entries + [new]) > cap:
-            cands = prune_candidates(entries)
+            cands = prune_candidates(entries, stale=load_stale(store) if shared else None)
             sys.stderr.write("longrun: %s is at %d/%d bytes; the new entry does not fit.\n"
                              "Free space first: `longrun rm <id>` / `longrun replace <id> <shorter text>` / `longrun prune --auto%s`.\n"
                              "Cheapest to drop:\n%s\n" % (t["label"], notes_bytes(entries), cap, (" " + t["cmd"]) if t["cmd"] else "",
@@ -576,6 +580,7 @@ def cmd_rm(store, args):
         removed += ["%s%d" % (t["prefix"], e["id"]) for e in gone]
         if t["shared"]:
             dropped += [e["id"] for e in gone]
+            drop_stale(store, [e["id"] for e in gone])
         if gone:
             rc = 0
         print("%s: %d/%d bytes" % (t["label"], notes_bytes(keep), t["cap"]))
@@ -749,6 +754,134 @@ def cmd_doc(store, args):
     die("usage: longrun doc [ls | add <path> \"<what is in it>\" | touch n12 \"<new line>\" | rm n12]", 2)
 
 
+# --- stale: a session says an entry stopped being true, without deciding for everyone that it must go.
+# Kept beside NOTES.md rather than in it: the note format is what every existing project's n1..nN are
+# written in, and a marker inside the line would have to be parsed by every version that reads them.
+def stale_path(store):
+    return os.path.join(store.local, "stale.json")
+
+
+def load_stale(store):
+    d = read_json(stale_path(store))
+    return d if isinstance(d, dict) else {}
+
+
+def is_stale(store, e, marks=None):
+    m = (load_stale(store) if marks is None else marks).get(str(e["id"]))
+    return m if isinstance(m, dict) else None
+
+
+def stale_suffix(store, e, marks=None):
+    m = is_stale(store, e, marks)
+    return "  (STALE since %s: %s)" % (m.get("at", "?")[:10], clip(m.get("why") or "no reason given", 110)) if m else ""
+
+
+def drop_stale(store, ids):
+    """Forget the marks of entries that are no longer there, so stale.json cannot outlive NOTES.md."""
+    if not ids:
+        return
+    marks = load_stale(store)
+    if any(str(i) in marks for i in ids):
+        for i in ids:
+            marks.pop(str(i), None)
+        write_json(stale_path(store), marks)
+
+
+def sweep_stale(store):
+    """Marks whose entry has gone (removed by hand, archived by age, replaced by a hand edit)."""
+    live = {str(e["id"]) for e in load_notes(notes_target(store, True))}
+    marks = load_stale(store)
+    dead = [k for k in marks if k not in live]
+    if dead:
+        for k in dead:
+            marks.pop(k, None)
+        write_json(stale_path(store), marks)
+    return len(dead)
+
+
+def cmd_stale(store, args):
+    """longrun stale n12 "<why it stopped being true>" | longrun stale --clear n12 | longrun stale ls
+
+    A thumbs-down, not a delete. Deleting is a decision for everyone and a session usually cannot make
+    it alone: the entry may still be true somewhere else, or the session may simply be wrong. A mark
+    says "probably obsolete, and here is why", every session sees it, and the next sweep takes the
+    marked ones first."""
+    clear, rest = _flag(args, "--clear", False, takes_value=False)
+    if rest and rest[0] in ("ls", "list"):
+        marks = load_stale(store)
+        entries = {str(e["id"]): e for e in load_notes(notes_target(store, True))}
+        for i in sorted(marks, key=lambda x: int(x) if x.isdigit() else 0):
+            e = entries.get(i)
+            print("n%-4s %s\n      marked %s by %s: %s" % (i, fmt_note(e) if e else "(entry is gone)",
+                                                           marks[i].get("at", "?"), marks[i].get("by", "?"), marks[i].get("why", "")))
+        print("(%d marked stale; `longrun prune --auto --shared` takes these first)" % len(marks))
+        return 0
+    ids = parse_ids(rest[:1], "n")
+    if not ids:
+        die("usage: longrun stale n12 \"<why it stopped being true>\" | longrun stale --clear n12 | longrun stale ls", 2)
+    _, i = ids[0]
+    entries = {e["id"]: e for e in load_notes(notes_target(store, True))}
+    if i not in entries:
+        die("no shared note n%d (`longrun notes --shared`)" % i, 1)
+    why = " ".join(" ".join(rest[1:]).split())
+    me, _skey, myname = _me(store, need=False)
+    with store.lock():
+        marks = load_stale(store)
+        if clear:
+            if marks.pop(str(i), None) is None:
+                print("n%d was not marked stale" % i)
+                return 0
+            write_json(stale_path(store), marks)
+            print("n%d is no longer marked stale" % i)
+            return 0
+        if not why:
+            die("say why in a few words: `longrun stale n%d \"superseded by the 0.6 layout\"`. A mark with no "
+                "reason is worse than none: the next session cannot tell whether to trust the entry or you." % i, 2)
+        marks[str(i)] = {"why": clip(why, 200), "at": ts(), "by": myname}
+        write_json(stale_path(store), marks)
+    if me:
+        journal(store, me, "stale n%d: %s" % (i, clip(why, 160)))
+    print("n%d marked stale: %s\nIt still shows, with the mark, so other sessions see it too. `longrun prune --auto --shared` "
+          "takes marked entries first; `longrun rm n%d` removes it outright; `longrun stale --clear n%d` takes the mark back."
+          % (i, clip(why, 160), i, i))
+    return 0
+
+
+def cmd_mute(store, args):
+    """longrun mute n12 [n13 ...] | longrun unmute n12 | longrun unmute --all | longrun mute
+
+    "Take this out of MY context" - the cheapest form of manifesto point 2, deciding what to unload.
+    Muting changes nothing on disk and nothing for anybody else: the entry simply stops being injected
+    into this session's digest, and the block head says how many are hidden."""
+    unmute = args and args[0] == "unmute-mode"
+    rest = args[1:] if unmute else args
+    all_, rest = _flag(rest, "--all", False, takes_value=False)
+    sid, _skey, _n = _me(store)
+    ids = [i for _, i in parse_ids(rest, "n")]
+    with store.shared_lock():
+        m = load_meta(store, sid)
+        muted = [int(x) for x in (m.get("muted") or [])]
+        if not ids and not all_:
+            entries = {e["id"]: e for e in load_notes(notes_target(store, True))}
+            if not muted:
+                print("nothing muted in this session. `longrun mute n12` drops one shared entry out of THIS session's "
+                      "digest; the file and the other sessions are untouched.")
+                return 0
+            for i in muted:
+                print("n%-4d %s" % (i, fmt_note(entries[i]) if i in entries else "(entry is gone)"))
+            print("(%d muted here; `longrun unmute --all` brings them back)" % len(muted))
+            return 0
+        if unmute:
+            muted = [] if all_ else [i for i in muted if i not in ids]
+        else:
+            muted = sorted(set(muted) | set(ids))
+        m["muted"] = muted
+        save_meta(store, sid, m)
+    print("%d shared entr%s muted in this session (%s)" % (len(muted), "y" if len(muted) == 1 else "ies",
+          ", ".join("n%d" % i for i in muted) or "none"))
+    return 0
+
+
 def cmd_prune(store, args):
     auto = "--auto" in args
     shared = "--shared" in args or "-S" in args
@@ -759,19 +892,20 @@ def cmd_prune(store, args):
         cap = t["cap"]
         if not auto:
             print("%s %d/%d bytes. Candidates (cheapest to lose first):" % (t["label"], notes_bytes(entries), cap))
-            for e in prune_candidates(entries, 10):
+            for e in prune_candidates(entries, 10, stale=load_stale(store) if shared else None):
                 print("  " + fmt_note(e, t["prefix"]))
             print("Remove with `longrun rm <ids>`, or `longrun prune --auto%s` to archive the cheapest until %d%%." % ((" " + t["cmd"]) if t["cmd"] else "", target_pct))
             return 0
-        gone = []
+        gone, marks = [], load_stale(store) if shared else {}
         while entries and notes_bytes(entries) > cap * target_pct / 100:
-            c = prune_candidates(entries, 1)
-            if not c or c[0]["tag"] == "pin":
+            c = prune_candidates(entries, 1, stale=marks)
+            if not c or (c[0]["tag"] == "pin" and str(c[0]["id"]) not in marks):
                 break
             entries.remove(c[0])
             gone.append(c[0])
         archive_notes(t, gone, "prune")
         save_notes(t, entries)
+        drop_stale(store, [e["id"] for e in gone])
     print("archived %d entries to %s; now %d/%d bytes" % (len(gone), os.path.relpath(t["archive"], os.path.dirname(t["path"])), notes_bytes(entries), cap))
     return 0
 
@@ -5187,21 +5321,25 @@ def sheddable(entries):
     return [e for e in entries if e["tag"] != "pin"]
 
 
-def notes_block(t, budget, label="", drop_oldest=0):
+def notes_block(t, budget, label="", drop_oldest=0, muted=()):
     """One notes block of the digest. `drop_oldest` leaves out that many of the oldest non-pin
     entries: that is how the notes give way when everything together is over `inject_max_bytes`.
-    Clipping the rendered text instead would eat the tail, and the tail is the NEWEST entries."""
-    entries = load_notes(t)
+    Clipping the rendered text instead would eat the tail, and the tail is the NEWEST entries.
+    `muted` are ids this session asked not to be shown; they stay in the file and for everyone else."""
+    all_entries = load_notes(t)
+    muted_here = [e for e in all_entries if e["id"] in set(muted or ())]
+    entries = [e for e in all_entries if e not in muted_here]
     cfg = t.get("cfg") or load_config(None)
     cap = t["cap"]
-    used = notes_bytes(entries)
+    used = notes_bytes(all_entries)   # the file, not what this session chose to see
     eff = digest_cap(cfg, t["shared"])
     pct = int(100 * used / eff) if eff else 0
     warn = int(cfg.get("notes_warn_pct", DEFAULTS["notes_warn_pct"]))
     prune = ("  PRUNE NEEDED: `longrun prune%s`%s" % ((" " + t["cmd"]) if t["cmd"] else "",
              (" (only ~%d B of these fit a digest)" % eff) if eff < used else "")) if pct >= warn else ""
-    head = "%s %d entries %d/%d B (~%d tok)%s" % (label or t["label"], len(entries), used, cap,
-                                                  est_tokens(notes_body(entries)), prune)
+    head = "%s %d entries %d/%d B (~%d tok)%s%s" % (label or t["label"], len(all_entries), used, cap,
+                                                    est_tokens(notes_body(all_entries)), prune,
+                                                    ("  (%d muted here: `longrun unmute --all`)" % len(muted_here)) if muted_here else "")
     body = list(entries)
     if drop_oldest > 0:
         for e in sheddable(entries)[:drop_oldest]:
@@ -5212,15 +5350,22 @@ def notes_block(t, budget, label="", drop_oldest=0):
                      % (len(entries) - len(body), "y" if len(entries) - len(body) == 1 else "ies",
                         (" " + t["cmd"]) if t["cmd"] else " --own"))
     store = t.get("store")
-    text = "\n".join(lines + [fmt_note(e, t["prefix"]) + (doc_suffix(store, e) if (e["tag"] == "doc" and store is not None) else "")
-                              for e in body])
+    marks = load_stale(store) if (store is not None and t["shared"]) else {}
+
+    def render(e):
+        tail = doc_suffix(store, e) if (e["tag"] == "doc" and store is not None) else ""
+        return fmt_note(e, t["prefix"]) + tail + (stale_suffix(store, e, marks) if marks else "")
+
+    text = "\n".join(lines + [render(e) for e in body])
     if len(text.encode("utf-8")) > budget:  # only a hand-edited file over its own cap gets here
         text = text.encode("utf-8")[: budget - 40].decode("utf-8", "ignore") + "\n…(notes truncated: over budget, run `longrun prune`)"
     return text
 
 
 def shared_state_map(store):
-    return {str(e["id"]): hashlib.md5(e["text"].encode("utf-8")).hexdigest()[:8] for e in load_notes(notes_target(store, True))}
+    marks = load_stale(store)
+    return {str(e["id"]): hashlib.md5((e["text"] + (marks.get(str(e["id"]), {}) or {}).get("why", "")).encode("utf-8")).hexdigest()[:8]
+            for e in load_notes(notes_target(store, True))}
 
 
 def mark_shared_seen(store, m, ids=None, drop=None):
@@ -5247,7 +5392,9 @@ def shared_delta(store, m, budget):
     text, which is what this used to do, meant the entries past the budget were never shown to this
     session at all - not now, not on any later turn."""
     entries = {str(e["id"]): e for e in load_notes(notes_target(store, True))}
-    cur = {k: hashlib.md5(e["text"].encode("utf-8")).hexdigest()[:8] for k, e in entries.items()}
+    marks = load_stale(store)
+    cur = {k: hashlib.md5((e["text"] + (marks.get(k, {}) or {}).get("why", "")).encode("utf-8")).hexdigest()[:8]
+           for k, e in entries.items()}   # a stale mark changes an entry's standing without changing its text
     seen = m.get("shared_seen")
     if seen is None:
         m["shared_seen"] = cur
@@ -5262,7 +5409,7 @@ def shared_delta(store, m, budget):
     lines, used, left = [head], len(head.encode("utf-8")), 0
     shown = dict(seen)
     for mark, e in todo:
-        line = "  %s %s" % (mark, fmt_note(e))
+        line = "  %s %s%s" % (mark, fmt_note(e), stale_suffix(store, e, marks))
         n = len(line.encode("utf-8")) + 1
         if used + n > budget and len(lines) > 1:  # the first entry always goes, or nothing ever would
             left = len(todo) - len(lines) + 1
@@ -5561,8 +5708,9 @@ def build_digest(store, sid, source="manual", cwd=None, continued=False):
     if msgs:
         parts.append(["messages", msgs])
     note_blocks = {}  # key -> (target, budget, label), so the shedding pass below can re-render them
+    muted = [int(x) for x in ((load_meta(store, sid).get("muted") or []) if sid else [])]
     note_blocks["shared"] = (notes_target(store, True), int(cfg["notes_max_bytes"]) + 400, "")
-    parts.append(["shared", notes_block(*note_blocks["shared"])])
+    parts.append(["shared", notes_block(*note_blocks["shared"], muted=muted)])
     if sid:
         own = notes_target(store, False, sid=sid)
         label = own["label"] if not continued else "OWN notes (this session, continued from an earlier CLI id)"
@@ -5657,7 +5805,7 @@ def build_digest(store, sid, source="manual", cwd=None, continued=False):
             t_, b_, l_ = note_blocks[key]
             for i, (pk, _) in enumerate(parts):
                 if pk == key:
-                    parts[i] = [key, notes_block(t_, b_, l_, drop_oldest=shed[key])]
+                    parts[i] = [key, notes_block(t_, b_, l_, drop_oldest=shed[key], muted=muted if key == "shared" else ())]
                     break
     text = render()
     if len(text.encode("utf-8")) > total:
@@ -5950,18 +6098,22 @@ def age_notes(t, cfg, report, what):
         cap, pct = digest_cap(cfg, t["shared"]), int(cfg.get("notes_autoprune_pct") or 0)
         target = int(cfg["notes_warn_pct"])
         cheap = 0
+        marks = load_stale(t["store"]) if (t["shared"] and t.get("store")) else {}
         if pct and cap and notes_bytes(keep) > cap * pct / 100.0:
             while notes_bytes(keep) > cap * target / 100.0:
-                c = [e for e in prune_candidates(keep, len(keep)) if e["tag"] in ("todo", "ctx")]
+                c = [e for e in prune_candidates(keep, len(keep), stale=marks)
+                     if e["tag"] in ("todo", "ctx") or str(e["id"]) in marks]
                 if not c:
                     break
                 keep.remove(c[0])
                 archive_notes(t, [c[0]], "autoprune")
                 cheap += 1
             if cheap:
-                report.append("%s: auto-archived %d cheap entries (todo/ctx) from %d%% down to %d%% of the budget" % (what, cheap, pct, target))
+                report.append("%s: auto-archived %d entries (marked stale, or cheap todo/ctx) from %d%% down to %d%% of the budget" % (what, cheap, pct, target))
         if gone or cheap:
             save_notes(t, keep)
+            if t["shared"] and t.get("store"):
+                drop_stale(t["store"], [e["id"] for e in entries if e not in keep])
         aged = age_log(t["archive"], int(cfg["archive_keep_days"]))
         if aged:
             report.append("%s: dropped %d old archive lines" % (what, aged))
@@ -5994,6 +6146,9 @@ def cmd_gc(store, args, quiet=False):
     report = []
     age_docs(store, report)
     age_notes(notes_target(store, True), cfg, report, "shared notes")
+    swept = sweep_stale(store)
+    if swept:
+        report.append("stale marks: dropped %d whose entry is gone" % swept)
     with store.lock():
         comp = sorted(glob.glob(os.path.join(store.archive, "compact", "*.md")), key=os.path.getmtime)
         for f in comp[: max(0, len(comp) - int(cfg["compact_keep"]))]:
@@ -6236,6 +6391,25 @@ def card_mark(m):
     m["carded_at_turns"] = int(m.get("turns") or 0)
 
 
+def sweep_hint(store, m):
+    """Every now and then the card also asks the other half of the question: not what to write, but what
+    has stopped being true. Manifesto point 3. Offered at most once per half an ageing window, and only
+    when there is actually something old enough to re-read."""
+    every = max(1, int(store.cfg["notes_max_age_days"]) // 2)
+    last = m.get("swept_at") or ""
+    if last and (now() - _dt.datetime.strptime(last[:10], "%Y-%m-%d")).days < every:
+        return ""
+    marks = load_stale(store)
+    old = [e for e in load_notes(notes_target(store, True))
+           if str(e["id"]) not in marks and (now() - entry_date(e)).days >= every]
+    if not old:
+        return ""
+    m["swept_at"] = ts()
+    return ("\nWhile you are here: %d shared note%s older than %d days and nobody has looked at %s since. Any of them "
+            "no longer true? `longrun stale n<id> \"<why>\"` marks one for everyone (`longrun notes --shared` lists them)."
+            % (len(old), "" if len(old) == 1 else "s", every, "it" if len(old) == 1 else "them"))
+
+
 def turn_card_data(m, closed=False):
     """What the card is made of: the files this turn changed, the commands that failed in it, and whether
     anything was written down. `closed` reads the card the Stop hook froze (the turn that just ended);
@@ -6271,12 +6445,13 @@ def turn_card(store, m, closed=False):
     if fails:
         bits.append("%d failed command%s (%s)" % (len(fails), "" if len(fails) == 1 else "s", clip(fails[-1], 60)))
     bits.append("0 notes")
+    tail = sweep_hint(store, m)
     where = "`longrun add -t dead|decision|fact \"...\"` (own; `--shared` for what other sessions need)" + \
             (", or `longrun ledger add -o user \"...\"` when a human has to do something" if store.hq() else "")
     return ("longrun, %s: %s. Is there anything in it that another session, or you after a compaction, could not "
             "get back with one command - an approach that failed and why, a decision, a fact that cost effort? "
             "Then write that one line: %s. If there is not, go on."
-            % ("your last turn" if closed else "this turn so far", ", ".join(bits), where))
+            % ("your last turn" if closed else "this turn so far", ", ".join(bits), where)) + tail
 
 
 def cmd_hook(args):
@@ -6955,6 +7130,8 @@ NOTES (own = this session's, [s<id>]; shared = the project's, [n<id>], seen by e
   add [--shared] -t TAG "text"  one line. TAG: dead | decision | fact | ctx | todo | pin | doc
   rm s3 n12 ... | replace s3|n12 "text"   delete / rewrite (deleted lines go to archive/notes.md)
   notes [--shared|--own|--session WHO] | prune [--auto] [--shared]   show / archive the cheapest until 60%% of the budget
+  stale n12 "why" | stale --clear n12 | stale ls   an entry stopped being true: everyone sees the mark, prune takes it first
+  mute n12 | unmute [n12|--all]   drop a shared entry out of THIS session's digest; the file and the others are untouched
   doc add PATH "what is in it" | doc ls | doc touch n12 "..." | doc rm n12
                               long material stays in a file; the notes carry one line saying where it is and what is in it
   log "text"                  one milestone line in this session's journal
@@ -7016,7 +7193,8 @@ NOT HERE   Claude Code's auto memory (MEMORY.md) is a different store with a dif
            still matter after this task ships? Yes -> memory, no -> longrun.
 WHEN       right after a failed attempt, a decision, a discovery, before a risky/long step, when the user corrects you,
            before suggesting `/compact`. The hooks remind you after %d edits/commands or %d turns without a note.
-DELETE     `rm` what is done or wrong; `replace` instead of appending a correction; `prune` when the digest says PRUNE
+DELETE     `stale n12 "why"` when a shared entry has probably stopped being true (everyone sees the mark and
+           the next cleanup takes it first); `rm` what is done or wrong; `replace` instead of appending a correction; `prune` when the digest says PRUNE
            NEEDED. Entries older than %d days (except `pin`) are archived automatically, cheap `todo`/`ctx` entries are
            archived above %d%% of a budget so writing never simply stops; archives are deleted after %d days.
 OTHERS     `longrun status` shows who is alive and what each session did last; `longrun send <name> "..."` hands work
@@ -7068,7 +7246,8 @@ def main(argv):
     table = {"add": cmd_add, "rm": cmd_rm, "replace": cmd_replace, "notes": cmd_notes, "prune": cmd_prune,
              "ledger": cmd_ledger, "ask": cmd_ask, "log": cmd_log, "report": cmd_report, "inbox": cmd_inbox,
              "recall": cmd_recall, "status": cmd_status, "digest": cmd_digest, "gc": cmd_gc, "send": cmd_send,
-             "doc": cmd_doc, "board": cmd_board, "fact": cmd_fact, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,
+             "doc": cmd_doc, "stale": cmd_stale, "mute": cmd_mute,
+             "unmute": lambda st, a: cmd_mute(st, ["unmute-mode"] + a), "board": cmd_board, "fact": cmd_fact, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,
              "interrupt": cmd_interrupt, "budget": cmd_budget, "compact-hint": cmd_compact_hint, "important": cmd_important}
     if cmd not in table:
         die("unknown command %s (longrun help)" % cmd, 2)

@@ -28,7 +28,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-358_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-367_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -216,6 +216,8 @@ One test: **would one command, one file read or grep get this back?** If yes, do
 | `doc` | a pointer to a file too long for a note: `longrun doc add <path> "what is in it"` | shared |
 | `todo` | a small thing the agent still has to do | own |
 
+A note that stopped being true is not deleted behind everyone's back: `longrun stale n12 "staging moved to vla-07"` marks it, every session sees the mark, and the next cleanup takes marked entries first. `longrun mute n12` just takes one out of *your* digest and changes nothing for anybody else.
+
 Milestones (pushed, PR opened, tests green) go to the journal: `longrun log "PR opened"`. What outlives the task (who the user is, how they work) goes to Claude Code's auto memory, not to longrun.
 
 ## Commands
@@ -247,7 +249,7 @@ Full flags, file formats and the facts we verified about Claude Code: [docs/REFE
 ## Development
 
 ```bash
-bash tests/run.sh            # 222 regression checks, no API calls
+bash tests/run.sh            # 231 regression checks, no API calls
 bash tests/scenarios.sh      # 37 scenarios, one per goal
 bash tests/orchestrator.sh   # 69: the orchestrator layer
 bash tests/ask.sh            # 30: the dialog and the MCP server
