@@ -22,6 +22,8 @@ This session keeps its durable notes on disk and gets them back right after the 
   ok   S3.3 B's own shared write is not reported back to B
   ok   S3.4 ...but A hears about it on A's next turn
   ok   S3.5 a rewrite shows as ~ and a removal as removed
+  ok   S3.6 a delta over its slice shows the oldest first and says how many are still coming
+  ok   S3.7 the rest arrive on the next turns instead of being lost
 == S4: two sessions started in the same directory keep separate own notes
   ok   S4.1 each has its own notes file
   ok   S4.2 and the shared file is one
@@ -43,4 +45,4 @@ This session keeps its durable notes on disk and gets them back right after the 
   ok   S8.2 a running session gets it on its socket right away, as a user turn
   ok   S8.3 a watch registered by name fires into that session with the --then text
 
-PASS=30 FAIL=0  (tmp: /tmp/longrun-scen.uDPH8V)
+PASS=32 FAIL=0  (tmp: /tmp/longrun-scen.4sU4Il)

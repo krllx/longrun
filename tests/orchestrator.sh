@@ -68,6 +68,8 @@ LONGRUN_SESSION=$A "$LR" halt "5h usage at 45% after 1.5h" >/dev/null
 OUT="$(pre $B Bash "ls -la" t1)"; check "halt: PreToolUse denies with the reason" "echo \"\$OUT\" | grep -q '\"permissionDecision\": \"deny\"' && echo \"\$OUT\" | grep -q '45% after 1.5h'"
 OUT="$(pre $B Read "" t2)"; check "halt: every tool, not only Bash" "echo \"\$OUT\" | grep -q 'deny'"
 OUT="$(pre $B Bash "cd /tmp && longrun resume" t3)"; check "halt: the longrun CLI itself is exempt" "test -z \"\$OUT\""
+OUT="$(pre $B Bash "bash -c \\\"longrun resume\\\"" t3b)"; check "halt: longrun resume is exempt inside a wrapper too, not only as the first word" "test -z \"\$OUT\""
+OUT="$(pre $B Bash "make deploy && longrun resume" t3c)"; check "halt: ...and after a command that is not exempt" "test -z \"\$OUT\""
 OUT="$(turn $B)"; check "halt: the turn injection says so" "echo \"\$OUT\" | grep -q 'HALT in force'"
 D="$(LONGRUN_SESSION=$C "$LR" digest)"; check "halt: the digest says so" "echo \"\$D\" | grep -q 'HALT in force'"
 "$LR" resume >/dev/null; OUT="$(pre $B Bash "ls" t4)"; check "resume: tools run again (nothing printed)" "test -z \"\$OUT\" && ! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json'"

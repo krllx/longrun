@@ -37,10 +37,11 @@
   ok   replace s1
   ok   notes shows both files
   ok   40 read-only commands are not activity: no nudge, edits counter stays 0
-  ok   PostToolUse nudges at the window boundary only (call 80 yes, 81 no) once edits exist
+  ok   PostToolUse nudges once the window has passed AND edits exist (call 46 yes, 47 no)
   ok   UserPromptSubmit on turn 1: ledger items yes, nudge no (turn window not reached)
   ok   UserPromptSubmit nudges on turn 8 and stays quiet on turn 9 (once per window, not every turn)
   ok   no nudge right after a note
+  ok   a failed command stepping over the window boundary does not swallow the reminder
   ok   PostToolUseFailure -> FAIL line in journal
   ok   PreCompact prints the summariser instructions on stdout (this is what Claude Code appends to the compaction prompt)
   ok   the hint names the notes that come back by themselves, and is plain text (JSON stdout would be read as a decision object)
@@ -69,9 +70,14 @@
   ok   recall finds FAIL line in journal
   ok   recall miss exits 1
 == digest size cap
-  ok   digest respects inject_max_bytes (1491 B <= 1500)
+  ok   digest respects inject_max_bytes (1478 B <= 1500)
   ok   all budgets full: digest fits (8836 B <= 9000) and keeps the @user/DUE rows
   ok   all budgets full: neither notes file is what gives way
+  ok   over budget: the digest sheds the OLDEST entries and keeps the newest (1307 B <= 1400)
+  ok   over budget: a pin is never the entry that gives way
+  ok   PRUNE NEEDED is measured against what a digest can carry, not against the file cap
+  ok   config refuses notes budgets that cannot fit inject_max_bytes (exit 2)
+  ok   ...and accepts them once inject_max_bytes has room
 == recall ranking: curated notes are not crowded out by a noisy archive
   ok   recall shows the NOTES.md hit despite 15 noisier archive hits
 == status and concurrency
@@ -115,6 +121,7 @@
   ok   send to a session that is not running queues a file in the project inbox
   ok   the target's UserPromptSubmit delivers the message once and archives it
   ok   the target's PostToolUse delivers a message between tool calls as additionalContext
+  ok   a message longer than the injection limit says it was cut and where the whole text is
   ok   the target's SessionStart digest carries a queued message
   ok   --resume runs claude -p <text> --resume <sid> in the session's cwd with LONGRUN_* scrubbed
   ok   a message from another project lands where the TARGET's hooks look (its own project inbox)
@@ -223,4 +230,4 @@
   ok   the token comes from Claude Code's own credentials file when there is no keychain item
   ok   no credentials anywhere is an error, never an empty token
 
-PASS=202 FAIL=0  (tmp: /tmp/longrun-test.SsqT1k)
+PASS=209 FAIL=0  (tmp: /tmp/longrun-test.Y4kUJA)

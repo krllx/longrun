@@ -83,11 +83,12 @@ check "notes shows both files" "$LR notes | grep -q 'SHARED notes' && $LR notes 
 for i in $(seq 1 39); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls $i\"},\"tool_response\":{}}" >/dev/null; done
 N40="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls 40\"},\"tool_response\":{}}")"
 check "40 read-only commands are not activity: no nudge, edits counter stays 0" "test -z \"\$N40\" && grep -q '\"edit_tools_since_note\": 0' '$SD/meta.json'"
-for i in $(seq 1 6); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/f$i.go\"},\"tool_response\":{}}" >/dev/null; done
-for i in $(seq 47 79); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls $i\"},\"tool_response\":{}}" >/dev/null; done
-N80="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/g.go\"},\"tool_response\":{}}")"
-N81="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/h.go\"},\"tool_response\":{}}")"
-check "PostToolUse nudges at the window boundary only (call 80 yes, 81 no) once edits exist" "echo \"\$N80\" | grep -q 'additionalContext' && test -z \"\$N81\""
+# edits start arriving past the window: the reminder comes as soon as there is something to remind
+# about, not at the next exact multiple of nudge_tools (which is a whole window later)
+for i in $(seq 1 5); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/f$i.go\"},\"tool_response\":{}}" >/dev/null; done
+N46="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/f6.go\"},\"tool_response\":{}}")"
+N47="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/g.go\"},\"tool_response\":{}}")"
+check "PostToolUse nudges once the window has passed AND edits exist (call 46 yes, 47 no)" "echo \"\$N46\" | grep -q 'additionalContext' && test -z \"\$N47\""
 UPS="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"continue\"}")"
 check "UserPromptSubmit on turn 1: ledger items yes, nudge no (turn window not reached)" "echo \"\$UPS\" | grep -q '@user' && ! echo \"\$UPS\" | grep -q 'since the last note'"
 for i in 2 3 4 5 6 7; do hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"t$i\"}" >/dev/null; done
@@ -97,6 +98,13 @@ check "UserPromptSubmit nudges on turn 8 and stays quiet on turn 9 (once per win
 "$LR" add -t fact "note write resets the staleness counters" >/dev/null
 UPS2="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go on\"}")"
 check "no nudge right after a note" "! echo \"\$UPS2\" | grep -q 'since the last note' && grep -q '\"fails_since_note\": 0' '$SD/meta.json'"
+# PostToolUseFailure charges the tool counter without ever looking at the reminder, so it can step the
+# counter OVER the window boundary. With a modulo test that skipped the reminder for a whole window.
+for i in $(seq 1 6); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/b$i.go\"},\"tool_response\":{}}" >/dev/null; done
+for i in $(seq 7 39); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls $i\"},\"tool_response\":{}}" >/dev/null; done
+hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"make build\"},\"error\":\"Exit code 2\\nboom\",\"is_interrupt\":false}" >/dev/null
+NB="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls 41\"},\"tool_response\":{}}")"
+check "a failed command stepping over the window boundary does not swallow the reminder" "echo \"\$NB\" | grep -q 'since the last note'"
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./internal/services/screen/...\"},\"error\":\"Exit code 1\\n--- FAIL: TestScreen_NoPaymentMethods (0.00s)\\n    screen_test.go:41: expected 2 methods, got 0\",\"is_interrupt\":false}"
 check "PostToolUseFailure -> FAIL line in journal" "grep -q 'FAIL \`go test ./internal/services/screen/...\` -> Exit code 1' '$SD/journal.md'"
 # transcript for precompact snapshot + recall
@@ -199,6 +207,20 @@ printf '{"sid":"99990000-2222-4333-8444-555555555555","skey":"99990000","cwd":"%
 D2="$(cd "$BOTH" && LONGRUN_SESSION=99990000-2222-4333-8444-555555555555 "$LR" digest --source compact)"; D2B=$(printf '%s' "$D2" | wc -c | tr -d ' ')
 check "all budgets full: digest fits ($D2B B <= 9000) and keeps the @user/DUE rows" "test $D2B -le 9000 && echo \"\$D2\" | grep -q '@user' && echo \"\$D2\" | grep -q '<- DUE' && echo \"\$D2\" | grep -q 'other open items omitted'"
 check "all budgets full: neither notes file is what gives way" "echo \"\$D2\" | grep -q '\[n1\]' && echo \"\$D2\" | grep -q '\[s1\]' && ! echo \"\$D2\" | grep -q 'notes truncated'"
+# B1: when the notes DO have to give way, they shed their oldest entries, never their newest. A tail
+# clip (what this used to do) eats exactly what was written last, which is what a session needs most.
+SHED="$T/shed"; mkdir -p "$SHED"; ( cd "$SHED" && "$LR" init >/dev/null )
+python3 - "$SHED/.longrun/config.json" <<'PY'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["inject_max_bytes"]=1400; json.dump(d,open(p,"w"))
+PY
+( cd "$SHED" && "$LR" add --shared -t pin "PIN: PR 42 = branch feature/checkout" >/dev/null
+  for i in $(seq 1 12); do "$LR" add --shared -t fact "shed filler $i: a line long enough to push this file past what one digest can carry" >/dev/null; done )
+D3="$(cd "$SHED" && "$LR" digest --source compact)"; D3B=$(printf '%s' "$D3" | wc -c | tr -d ' ')
+check "over budget: the digest sheds the OLDEST entries and keeps the newest ($D3B B <= 1400)" "test $D3B -le 1400 && echo \"\$D3\" | grep -q 'shed filler 12' && ! echo \"\$D3\" | grep -q 'shed filler 1:' && echo \"\$D3\" | grep -q 'older entries left out to fit'"
+check "over budget: a pin is never the entry that gives way" "echo \"\$D3\" | grep -q 'PR 42 = branch feature/checkout'"
+check "PRUNE NEEDED is measured against what a digest can carry, not against the file cap" "echo \"\$D3\" | grep -q 'PRUNE NEEDED' && echo \"\$D3\" | grep -q 'fit a digest'"
+( cd "$SHED" && "$LR" config set notes_max_bytes 9000 >/dev/null 2>/tmp/lr-budget ); check "config refuses notes budgets that cannot fit inject_max_bytes (exit 2)" "test \$? -eq 2 && grep -q 'would never reach a session' /tmp/lr-budget"
+( cd "$SHED" && "$LR" config set inject_max_bytes 9000 >/dev/null && "$LR" config set notes_max_bytes 5000 >/dev/null ); check "...and accepts them once inject_max_bytes has room" "test \$? -eq 0"
 
 python3 - "$LOCAL/config.json" <<'PY'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["inject_max_bytes"]=9000; json.dump(d,open(p,"w"))
@@ -352,6 +374,9 @@ check "the target's UserPromptSubmit delivers the message once and archives it" 
 "$LR" send gone-worker "second: run the tests" >/dev/null 2>&1
 PTM="$(hook PostToolUse "{$G,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"tool_response\":{}}")"
 check "the target's PostToolUse delivers a message between tool calls as additionalContext" "echo \"\$PTM\" | grep -q 'additionalContext' && echo \"\$PTM\" | grep -q 'second: run the tests'"
+python3 -c "print('x' * 5000)" | "$LR" send gone-worker - >/dev/null 2>&1
+LONGM="$(hook PostToolUse "{$G,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"tool_response\":{}}")"
+check "a message longer than the injection limit says it was cut and where the whole text is" "echo \"\$LONGM\" | grep -q 'cut off here, 5000 chars in all' && echo \"\$LONGM\" | grep -q 'inbox/.archive/'"
 "$LR" send 66666666 "third: at start" >/dev/null 2>&1
 SSM="$(hook SessionStart "{$G,\"hook_event_name\":\"SessionStart\",\"source\":\"resume\"}")"
 check "the target's SessionStart digest carries a queued message" "echo \"\$SSM\" | grep -q 'MESSAGE to 66666666' && echo \"\$SSM\" | grep -q 'third: at start'"
