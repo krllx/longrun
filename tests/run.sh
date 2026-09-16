@@ -79,32 +79,43 @@ check "own note has no author label" "grep -q '\[s1\] [0-9-]* dead: own' '$SD/no
 "$LR" add -t todo "own todo" >/dev/null; "$LR" rm s2 >/dev/null; check "rm s2 removes an own note and archives it in the session dir" "! grep -q '\[s2\]' '$SD/notes.md' && grep -q 'rm | - \[s2\]' '$SD/archive/notes.md'"
 "$LR" replace s1 "own: personal v3 is 403, v4 works" >/dev/null; check "replace s1" "grep -q 's1\] .*v4 works' '$SD/notes.md'"
 check "notes shows both files" "$LR notes | grep -q 'SHARED notes' && $LR notes | grep -q 'OWN notes' && $LR notes --own | grep -q 'v4 works' && ! $LR notes --own | grep -q 'SHARED'"
-# 39 read-only commands: activity counters move, but no nudge, because nothing was edited and nothing failed
+# The turn card: what the turn actually did, asked once. 39 read-only commands are not activity, so
+# there is nothing to ask about however many of them there are.
 for i in $(seq 1 39); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls $i\"},\"tool_response\":{}}" >/dev/null; done
 N40="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls 40\"},\"tool_response\":{}}")"
-check "40 read-only commands are not activity: no nudge, edits counter stays 0" "test -z \"\$N40\" && grep -q '\"edit_tools_since_note\": 0' '$SD/meta.json'"
-# edits start arriving past the window: the reminder comes as soon as there is something to remind
-# about, not at the next exact multiple of nudge_tools (which is a whole window later)
+check "40 read-only commands are not activity: no card, edits counter stays 0" "test -z \"\$N40\" && grep -q '\"edit_tools_since_note\": 0' '$SD/meta.json'"
+# mid-turn, once a window of calls has passed and real edits exist, the card names the files
 for i in $(seq 1 5); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/f$i.go\"},\"tool_response\":{}}" >/dev/null; done
 N46="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/f6.go\"},\"tool_response\":{}}")"
 N47="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/g.go\"},\"tool_response\":{}}")"
-check "PostToolUse nudges once the window has passed AND edits exist (call 46 yes, 47 no)" "echo \"\$N46\" | grep -q 'additionalContext' && test -z \"\$N47\""
+check "mid-turn card names the files it edited, once per window (call 46 yes, 47 no)" "echo \"\$N46\" | grep -q 'this turn so far' && echo \"\$N46\" | grep -q '6 files (f1.go, f2.go, f3.go, +3 more)' && test -z \"\$N47\""
 UPS="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"continue\"}")"
-check "UserPromptSubmit on turn 1: ledger items yes, nudge no (turn window not reached)" "echo \"\$UPS\" | grep -q '@user' && ! echo \"\$UPS\" | grep -q 'since the last note'"
+check "UserPromptSubmit right after a card: ledger items yes, a second card no" "echo \"\$UPS\" | grep -q '@user' && ! echo \"\$UPS\" | grep -q 'your last turn'"
 for i in 2 3 4 5 6 7; do hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"t$i\"}" >/dev/null; done
+hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"edited the handler\"}" >/dev/null
+hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/card.go\"},\"tool_response\":{}}" >/dev/null
+hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go build ./...\"},\"error\":\"Exit code 2\\nundefined: Foo\",\"is_interrupt\":false}" >/dev/null
+hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"still broken\"}" >/dev/null
 UPS8="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"t8\"}")"
+check "the card of the turn that ended names its file and its failed command, not a bare counter" "echo \"\$UPS8\" | grep -q 'your last turn' && echo \"\$UPS8\" | grep -q 'card.go' && echo \"\$UPS8\" | grep -q 'go build ./...' && echo \"\$UPS8\" | grep -q '0 notes'"
+hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/card2.go\"},\"tool_response\":{}}" >/dev/null
+hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"more\"}" >/dev/null
 UPS9="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"t9\"}")"
-check "UserPromptSubmit nudges on turn 8 and stays quiet on turn 9 (once per window, not every turn)" "echo \"\$UPS8\" | grep -q 'since the last note' && ! echo \"\$UPS9\" | grep -q 'since the last note'"
+check "and the next turn is quiet: a rate limit, not a card after every turn" "! echo \"\$UPS9\" | grep -q 'your last turn'"
 "$LR" add -t fact "note write resets the staleness counters" >/dev/null
+hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"/x/read-only.go\"},\"tool_response\":{}}" >/dev/null
+hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"read it\"}" >/dev/null
 UPS2="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go on\"}")"
-check "no nudge right after a note" "! echo \"\$UPS2\" | grep -q 'since the last note' && grep -q '\"fails_since_note\": 0' '$SD/meta.json'"
-# PostToolUseFailure charges the tool counter without ever looking at the reminder, so it can step the
-# counter OVER the window boundary. With a modulo test that skipped the reminder for a whole window.
+check "a turn of pure reading gets no card, and a note write resets the counters" "! echo \"\$UPS2\" | grep -q 'your last turn' && grep -q '\"fails_since_note\": 0' '$SD/meta.json'"
+# PostToolUseFailure charges the tool counter without ever looking at the card, so it is the event that
+# steps the counter OVER the window boundary. With a modulo test that skipped the card for a whole window.
+"$LR" add -t fact "reset the counters before the window-boundary check" >/dev/null
 for i in $(seq 1 6); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/b$i.go\"},\"tool_response\":{}}" >/dev/null; done
-for i in $(seq 7 39); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls $i\"},\"tool_response\":{}}" >/dev/null; done
+for i in $(seq 7 38); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls $i\"},\"tool_response\":{}}" >/dev/null; done
+NB39="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls 39\"},\"tool_response\":{}}")"
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"make build\"},\"error\":\"Exit code 2\\nboom\",\"is_interrupt\":false}" >/dev/null
 NB="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls 41\"},\"tool_response\":{}}")"
-check "a failed command stepping over the window boundary does not swallow the reminder" "echo \"\$NB\" | grep -q 'since the last note'"
+check "a failed command stepping over the window boundary does not swallow the card" "test -z \"\$NB39\" && echo \"\$NB\" | grep -q 'this turn so far' && echo \"\$NB\" | grep -q 'make build'"
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./internal/services/screen/...\"},\"error\":\"Exit code 1\\n--- FAIL: TestScreen_NoPaymentMethods (0.00s)\\n    screen_test.go:41: expected 2 methods, got 0\",\"is_interrupt\":false}"
 check "PostToolUseFailure -> FAIL line in journal" "grep -q 'FAIL \`go test ./internal/services/screen/...\` -> Exit code 1' '$SD/journal.md'"
 # transcript for precompact snapshot + recall
@@ -145,10 +156,11 @@ check "SessionStart(compact) digest: own notes + journal tail + archive pointer"
 check "SessionStart(compact) digest carries the mechanical HANDOFF (failure + framing + files)" "echo \"\$OUT\" | grep -q 'HANDOFF (mechanical' && echo \"\$OUT\" | grep -q 'FAIL' && echo \"\$OUT\" | grep -q 'ASK: Make the /screen handler' && echo \"\$OUT\" | grep -q 'post_v_1_screen.go'"
 check "HANDOFF skips one-word replies and carries the /compact instructions as FOCUS" "! echo \"\$OUT\" | grep -q 'ASK: try again' && ! echo \"\$OUT\" | grep -q 'ASK: yes' && echo \"\$OUT\" | grep -q 'FOCUS: keep the EPMA decision'"
 "$LR" add -t fact "reset before the failure-as-activity check" >/dev/null
+for i in 1 2 3 4 5 6 7 8; do hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"u$i\"}" >/dev/null; done
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"make lint\"},\"error\":\"Exit code 2\\nlint failed\",\"is_interrupt\":false}"
-for i in 1 2 3 4 5 6 7; do hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"u$i\"}" >/dev/null; done
-UPSF="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"u8\"}")"
-check "a failed command counts as activity for the nudge (no edits needed)" "echo \"\$UPSF\" | grep -q '1 failed commands'"
+hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"lint is red\"}" >/dev/null
+UPSF="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"u9\"}")"
+check "a failed command alone is worth a card, with no edits in the turn at all" "echo \"\$UPSF\" | grep -q '1 failed command (make lint)' && echo \"\$UPSF\" | grep -q 'your last turn'"
 check "handoff appears only after a compaction, not on plain startup" "! $LR digest --source startup | grep -q 'HANDOFF'"
 check "compactions counted" "grep -q '\"compactions\": 1' '$SD/meta.json'"
 # the shell cd's out of the project (hook cwd follows the shell): counters, digest and FAILs must stay with the session
@@ -234,7 +246,7 @@ check "recall shows the NOTES.md hit despite 15 noisier archive hits" "echo \"\$
 
 echo "== status and concurrency"
 mkdir -p "$SESS/00000000"; printf '{"sid":"00000000-noise","skey":"00000000","cwd":"%s","tools":0,"turns":0,"last_seen":"2026-09-06 10:00"}\n' "$WT" > "$SESS/00000000/meta.json"
-S="$("$LR" status 2>&1)"; check "status lists the session with its state, own-note count and NEEDS USER" "echo \"\$S\" | grep -q '11111111 .* ended(clear)' && echo \"\$S\" | grep -q 'notes=3' && echo \"\$S\" | grep -q 'NEEDS USER'"
+S="$("$LR" status 2>&1)"; check "status lists the session with its state, own-note count and NEEDS USER" "echo \"\$S\" | grep -q '11111111 .* ended(clear)' && echo \"\$S\" | grep -q 'notes=4' && echo \"\$S\" | grep -q 'NEEDS USER'"
 check "status hides a session with no tool calls and no turns (app noise), --all shows it" "! echo \"\$S\" | grep -q '00000000' && echo \"\$S\" | grep -q '1 session(s) with no tool calls' && $LR status --all | grep -q '00000000'"
 python3 - "$LOCAL/config.json" <<'PY'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["notes_max_bytes"]=20000; d["session_notes_max_bytes"]=20000; json.dump(d,open(p,"w"))

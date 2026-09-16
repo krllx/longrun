@@ -1015,6 +1015,8 @@ def load_meta(store, sid):
     m.setdefault("fails", 0)
     m.setdefault("fails_since_note", 0)
     m.setdefault("files", [])
+    m.setdefault("turn_files", [])   # this turn only, for the turn card; `files` is the whole session
+    m.setdefault("turn_fails", [])
     return m
 
 
@@ -1058,8 +1060,8 @@ def touch_session_note(store, locked=False, seen=None, drop=None):
         m["turns_since_note"] = 0
         m["edit_tools_since_note"] = 0
         m["fails_since_note"] = 0
-        m["nudged_at_tools"] = 0
-        m["nudged_at_turns"] = 0
+        m["carded_at_tools"] = 0   # relative to tools_since_note, which is being reset here too
+        m["turn_files"], m["turn_fails"] = [], []   # a card after this describes what came AFTER the note
         m["last_note"] = ts()
         if seen or drop:
             mark_shared_seen(store, m, ids=seen, drop=drop)
@@ -2849,6 +2851,7 @@ def mcp_serve(args):
     return 0
 
 
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 RUNNING_TOOLS = ("Bash", "PowerShell", "Agent", "Task", "Workflow")  # tools that can run long; MCP tools too
 
 
@@ -5912,37 +5915,72 @@ def cmd_compact_hint(store, args):
     return 0
 
 
-def nudge_due(store, m):
-    """Has a whole window passed since the last reminder (or since the last note)? Counters are
-    compared against where they stood when the last reminder went out, not taken modulo the window:
-    a counter that steps OVER the boundary - which `PostToolUseFailure` does every time it charges a
-    failed command, without checking the reminder itself - would skip the window entirely."""
-    cfg = store.cfg
-    return (int(m.get("tools_since_note") or 0) - int(m.get("nudged_at_tools") or 0) >= max(1, int(cfg["nudge_tools"]))
-            or int(m.get("turns_since_note") or 0) - int(m.get("nudged_at_turns") or 0) >= max(1, int(cfg["nudge_turns"])))
+def card_due(store, m, unit):
+    """May a turn card be shown now?
+
+    At the end of a turn (`turns`) this is a rate limit and nothing more: the card is about the turn
+    that just happened, so the first one needs no waiting period - it only must not come more often
+    than once per `nudge_turns` turns. Mid-turn (`tools`) it IS a waiting period: a whole window of
+    tool calls since the last note or card, so a turn that is going fine is not interrupted early.
+
+    Either way the counter is compared against where it stood at the last card, never taken modulo the
+    window: a counter that steps OVER the boundary - which `PostToolUseFailure` does every time it
+    charges a failed command, without looking at the card itself - would skip the window entirely."""
+    n = max(1, int(store.cfg["nudge_tools" if unit == "tools" else "nudge_turns"]))
+    mark = m.get("carded_at_%s" % unit)
+    if unit == "tools":
+        return int(m.get("tools_since_note") or 0) - int(mark or 0) >= n
+    return mark is None or int(m.get("turns") or 0) - int(mark) >= n
 
 
-def nudge_mark(m):
-    """One reminder per window, whichever counter triggered it."""
-    m["nudged_at_tools"] = int(m.get("tools_since_note") or 0)
-    m["nudged_at_turns"] = int(m.get("turns_since_note") or 0)
+def card_mark(m):
+    """One card per window, whichever end of the turn it came from. The tool mark is relative to
+    `tools_since_note`, which a note write resets; the turn mark counts absolute turns."""
+    m["carded_at_tools"] = int(m.get("tools_since_note") or 0)
+    m["carded_at_turns"] = int(m.get("turns") or 0)
 
 
-def nudge_text(store, m):
-    """The reminder, or "" when it is not due. Reading around is not activity worth a note: it takes real
-    edits or a failed command since the last note, and then a window's worth of turns or tool calls.
-    Cadence (once per window, never every turn) is `nudge_due`'s job."""
-    cfg = store.cfg
-    if m["edit_tools_since_note"] < int(cfg["nudge_edit_tools"]) and not m.get("fails_since_note"):
+def turn_card_data(m, closed=False):
+    """What the card is made of: the files this turn changed, the commands that failed in it, and whether
+    anything was written down. `closed` reads the card the Stop hook froze (the turn that just ended);
+    otherwise the turn still in progress."""
+    if closed:
+        c = m.get("turn_card") or {}
+        return list(c.get("files") or []), list(c.get("fails") or []), int(c.get("notes") or 0)
+    wrote = 1 if (m.get("last_note") or "") >= (m.get("turn_started") or "9") else 0
+    return list(m.get("turn_files") or []), list(m.get("turn_fails") or []), wrote
+
+
+def turn_card(store, m, closed=False):
+    """The card, or "" when there is nothing to ask about.
+
+    This replaces the counter that used to say "40 tool calls since the last note": a number nobody can
+    act on, which invites filler notes written to silence it. The card names what the turn actually did -
+    these files, this command that failed - and asks the one question worth asking, which is the first
+    thing the skill is for: is any of this something the next session, or you after a compaction, could
+    not get back with one command? Reading around is still not activity worth a note, so it takes real
+    edits or a failure, and `card_due` keeps it to once per window."""
+    files, fails, wrote = turn_card_data(m, closed)
+    if not (files or fails):
         return ""
-    if m["turns_since_note"] >= int(cfg["nudge_turns"]) or m["tools_since_note"] >= int(cfg["nudge_tools"]):
-        where = "`longrun add -t dead|decision|fact \"...\"` (own; `--shared` if other sessions need it)" + \
-                (" or `longrun ledger add -o user \"...\"`" if store.hq() else "")
-        return ("longrun: %d tool calls (%d edits, %d failed commands) and %d turns since the last note. If something "
-                "non-rederivable happened (a dead end and why, a decision, a fact that cost effort, a human you are "
-                "waiting on), write it now: %s. If nothing did, ignore this."
-                % (m["tools_since_note"], m["edit_tools_since_note"], m.get("fails_since_note", 0), m["turns_since_note"], where))
-    return ""
+    if closed and wrote:   # the turn already wrote something down; mid-turn the counters below cover that,
+        return ""          # because a note write resets them (and clears what the card would describe)
+    if int(m.get("edit_tools_since_note") or 0) < int(store.cfg["nudge_edit_tools"]) and not int(m.get("fails_since_note") or 0):
+        return ""
+    bits = []
+    if files:
+        names = [os.path.basename(f) for f in files[:3]]
+        bits.append("%d file%s (%s%s)" % (len(files), "" if len(files) == 1 else "s", ", ".join(names),
+                                          ", +%d more" % (len(files) - 3) if len(files) > 3 else ""))
+    if fails:
+        bits.append("%d failed command%s (%s)" % (len(fails), "" if len(fails) == 1 else "s", clip(fails[-1], 60)))
+    bits.append("0 notes")
+    where = "`longrun add -t dead|decision|fact \"...\"` (own; `--shared` for what other sessions need)" + \
+            (", or `longrun ledger add -o user \"...\"` when a human has to do something" if store.hq() else "")
+    return ("longrun, %s: %s. Is there anything in it that another session, or you after a compaction, could not "
+            "get back with one command - an approach that failed and why, a decision, a fact that cost effort? "
+            "Then write that one line: %s. If there is not, go on."
+            % ("your last turn" if closed else "this turn so far", ", ".join(bits), where))
 
 
 def cmd_hook(args):
@@ -6049,9 +6087,11 @@ def cmd_hook(args):
             delta = shared_delta(store, m, int(store.cfg["shared_delta_max_bytes"]))
             bd = board_delta(store, m)
             cw = ctx_warning(store, m)
-            nt = nudge_text(store, m) if nudge_due(store, m) else ""
+            nt = turn_card(store, m, closed=True) if card_due(store, m, "turns") else ""
             if nt:
-                nudge_mark(m)
+                card_mark(m)
+            m["turn_card"] = {}                      # it belonged to the turn that ended, shown or not
+            m["turn_files"], m["turn_fails"] = [], []
             save_meta(store, sid, m)
         if cw:
             out.append(cw)
@@ -6082,12 +6122,14 @@ def cmd_hook(args):
             m = load_meta_stamped(sid)
             m["tools"] += 1
             m["tools_since_note"] += 1
-            if tool in ("Edit", "Write", "MultiEdit", "NotebookEdit"):  # a command is not an edit: 40 `ls` prove nothing
+            if tool in EDIT_TOOLS:  # a command is not an edit: 40 `ls` prove nothing
                 m["edit_tools_since_note"] += 1
             ti = inp.get("tool_input") or {}
             fp = ti.get("file_path") or ti.get("notebook_path")
             if fp and fp not in m["files"]:  # read back by the pre-compaction snapshot
                 m["files"] = (m["files"] + [fp])[-60:]
+            if fp and tool in EDIT_TOOLS and fp not in m["turn_files"]:   # what the turn card names
+                m["turn_files"] = (m["turn_files"] + [fp])[-20:]
             run = m.get("running") or {}
             tid = inp.get("tool_use_id") or ""
             if tid in run:
@@ -6104,9 +6146,9 @@ def cmd_hook(args):
             cw = ctx_warning(store, m)
             tell = ctx_warning(store, m, "ctx_told")
             bd = board_delta(store, m)
-            nt = nudge_text(store, m) if nudge_due(store, m) else ""
+            nt = turn_card(store, m) if card_due(store, m, "tools") else ""
             if nt:
-                nudge_mark(m)
+                card_mark(m)
             save_meta(store, sid, m)
         if tell:
             notify_orchestrator(store, "%s [%s]: %s" % (clip(session_display_name(sid, store), 30), session_key(sid)[:8], tell), wake=False, from_sid=sid)
@@ -6130,6 +6172,7 @@ def cmd_hook(args):
                 m["fails_since_note"] += 1
                 m["tools"] += 1
                 m["tools_since_note"] += 1
+                m["turn_fails"] = (m["turn_fails"] + [cmdl])[-10:]
                 run = m.get("running") or {}
                 run.pop(inp.get("tool_use_id") or "", None)
                 m["running"] = run
@@ -6227,6 +6270,8 @@ def cmd_hook(args):
             sample_ctx(store, m, tpath, force=True)
             tell = ctx_warning(store, m, "ctx_told")
             imp = consume_important(m)   # spends one turn of a counted flag, inside the same lock
+            files, fails, wrote = turn_card_data(m)   # freeze the turn; the next prompt gets the card
+            m["turn_card"] = {"at": ts(), "files": files, "fails": fails, "notes": wrote}
             save_meta(store, sid, m)
         if tell:
             notify_orchestrator(store, "%s [%s]: %s" % (clip(session_display_name(sid, store), 30), session_key(sid)[:8], tell), wake=False, from_sid=sid)
@@ -6236,7 +6281,7 @@ def cmd_hook(args):
             if imp:
                 journal(store, sid, "turn-end notification %s (%s)" % ("through " + used if used else "NOT sent: no notifier here", imp))
         if store.cfg.get("strict_stop") and not inp.get("stop_hook_active"):
-            nt = nudge_text(store, m)
+            nt = turn_card(store, m)
             if nt:
                 print(json.dumps({"decision": "block", "reason": nt + " Then stop."}))
         return 0

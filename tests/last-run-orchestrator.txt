@@ -54,7 +54,7 @@
   ok   three identical FAILs in a row are reported as a loop
 == interrupt: dry run, then kill with --yes (a child of this test shell stands in for the session)
   ok   dry run lists the process and refuses to kill without --yes
-tests/orchestrator.sh: line 127: 58727 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
+tests/orchestrator.sh: line 127: 63633 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
   ok   --yes kills it and tells the session why
   ok   the interruption is in the target's journal
 == orchestrate stop
@@ -78,4 +78,4 @@ tests/orchestrator.sh: line 127: 58727 Terminated: 15          bash -c 'sleep 12
   ok   a missing source is an error, not a halt
   ok   the watcher tick samples too
 
-PASS=69 FAIL=0  (tmp: /tmp/longrun-orch.tY6HkE)
+PASS=69 FAIL=0  (tmp: /tmp/longrun-orch.b3hGWQ)
