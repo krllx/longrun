@@ -148,4 +148,28 @@ touch "$T/flag"; "$LR" watch run --force >/dev/null
 T8b="$(cd "$WT_E" && turn $A3 "$WT_E")"
 check "S8.3 a watch registered by name fires into that session with the --then text" "echo \"\$T8b\" | grep -q 'CONDITION MET' && echo \"\$T8b\" | grep -q 'flag is up: run the tests'"
 
+echo "== S9: the picture of the other sessions stays live, and windows the user closed in the app go away"
+cd "$HQ"
+N=99999999-0000-4000-8000-00000000000e
+turn $C "$HQ" >/dev/null   # C's baseline: it has just been told who exists
+start $N "$HQ" startup >/dev/null
+stop $N "$HQ" "picked up the payments retry, reading the STQ config"
+T9="$(turn $C "$HQ")"
+check "S9.1 a session opened after C started shows up on C's next turn, with what it is doing" "echo \"\$T9\" | grep -q 'SESSIONS of project lottery-dev changed' && echo \"\$T9\" | grep -q '+ .*99999999' && echo \"\$T9\" | grep -q 'payments retry'"
+T9b="$(turn $C "$HQ")"; check "S9.2 nothing changed -> nothing injected" "! echo \"\$T9b\" | grep -q 'SESSIONS of project lottery-dev changed'"
+stop $N "$HQ" "STQ v2 queue created, PR opened"
+end $N "$HQ" other
+T9c="$(turn $C "$HQ")"
+check "S9.3 a new last reply and the session ending both reach C" "echo \"\$T9c\" | grep -q '~ .*99999999' && echo \"\$T9c\" | grep -q 'STQ v2 queue created'"
+# the user archives that window in the app: gc only reaps a directory after a week, but the row must go now
+printf '{"sessionId":"local_desk-N","cliSessionId":"%s","cwd":"%s","title":"payments retry","isArchived":false,"lastActivityAt":1788779365999}' $N "$HQ" > "$DSK/local_desk-N.json"
+turn $N "$HQ" >/dev/null   # the hook learns the app id for this session
+turn $C "$HQ" >/dev/null   # and C takes the current picture as its baseline
+python3 - "$DSK/local_desk-N.json" <<'PY'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["isArchived"]=True; json.dump(d,open(p,"w"))
+PY
+T9d="$(turn $C "$HQ")"
+check "S9.4 a window archived in the app disappears from the delta and from the block" "echo \"\$T9d\" | grep -q -- '- gone: 99999999' && ! (cd '$HQ' && as $C digest | grep -q '99999999')"
+check "S9.5 ...but longrun status --all still shows it, and says why it was hidden" "(cd '$HQ' && as $C status | grep -qv '99999999') && (cd '$HQ' && as $C status --all | grep '99999999' | grep -q 'archived in the app')"
+
 echo; echo "PASS=$PASS FAIL=$FAIL  (tmp: $T)"; test $FAIL -eq 0

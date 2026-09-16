@@ -69,6 +69,7 @@ DEFAULTS = {
     "inject_max_bytes": 9000,       # total digest size (Claude Code caps hook output at 10,000 chars)
     "sessions_block_bytes": 700,    # digest slice for "what the other sessions of this project are doing"
     "shared_delta_max_bytes": 1200, # per-turn slice for shared notes that changed since this session saw them
+    "sessions_delta_max_bytes": 500,  # per-turn slice for sessions that appeared, ended or said something new
     "handoff_max_bytes": 1100,      # slice of the pre-compaction snapshot re-injected on SessionStart(compact)
     "compact_hint": True,           # PreCompact prints instructions for the summariser on stdout; Claude Code appends a
                                     # hook's stdout to the compaction prompt as its "Additional Instructions" block, for
@@ -3289,19 +3290,54 @@ def desktop_dir():
     return os.path.join(base, "Claude", "claude-code-sessions")
 
 
-def desktop_sessions():
-    """Claude desktop app sessions as the sidebar shows them: title, the CLI session id behind it, cwd.
-    Read from the app's own metadata files (verified 2026-09-07, desktop 2.1.260 on macOS)."""
+_DESKTOP_CACHE = {}
+
+
+def desktop_entries(include_archived=False):
+    """Every session the Claude desktop app has written metadata for, newest first. Archived ones are
+    left out by default: they are gone from the sidebar, so their titles and ids are not what the user
+    is looking at. Read from the app's own files (verified 2026-09-07, desktop 2.1.260 on macOS).
+
+    Cached for the life of the process: a hook asks per session, and on a machine with 200 app entries
+    and 300 session directories re-reading every file each time is the difference between a hook that
+    costs nothing and one the user notices."""
+    if include_archived in _DESKTOP_CACHE:
+        return _DESKTOP_CACHE[include_archived]
     out = []
     for f in glob.glob(os.path.join(desktop_dir(), "*", "*", "local_*.json")):
         d = read_json(f)
         sid = d.get("cliSessionId")
-        if sid and not d.get("isArchived"):
+        archived = bool(d.get("isArchived"))
+        if sid and (include_archived or not archived):
             out.append({"sid": sid, "title": d.get("title") or "", "cwd": d.get("cwd") or "",
                         "last": int(d.get("lastActivityAt") or 0), "desktop_id": d.get("sessionId") or "",
-                        "priors": list(d.get("priorCliSessionIds") or []), "forked": d.get("forkedFromSessionId") or ""})
+                        "priors": list(d.get("priorCliSessionIds") or []), "forked": d.get("forkedFromSessionId") or "",
+                        "archived": archived})
     out.sort(key=lambda d: -d["last"])
+    _DESKTOP_CACHE[include_archived] = out
     return out
+
+
+def desktop_sessions():
+    return desktop_entries()
+
+
+def session_hidden(store, m):
+    """Has the user made this session go away in the app? "archived", "deleted", or "".
+
+    `gc` only archives a session directory after `session_dead_days` of silence, so without this a
+    window the user archived or deleted this morning keeps showing in the SESSIONS block and in
+    `longrun status` for a week. The app's own metadata decides: an entry marked `isArchived`, or a
+    session that HAD an entry (its `desktop_id` is on the meta) whose file is no longer there at all.
+    A session that never had an app entry - one running in a terminal - is never hidden: nothing ever
+    said it went away."""
+    did = m.get("desktop_id") or ""
+    if not did:
+        return ""
+    for d in desktop_entries(include_archived=True):
+        if d.get("desktop_id") == did:
+            return "archived" if d.get("archived") else ""
+    return "deleted"
 
 
 def desktop_entry_for(sid):
@@ -5156,7 +5192,7 @@ def sessions_block(store, sid, budget, limit=6):
     stale_min = int(store.cfg["session_stale_min"])
     rows = []
     for m in session_metas(store):
-        if m.get("skey") == me or session_is_noise(m):
+        if m.get("skey") == me or session_is_noise(m) or session_hidden(store, m):
             continue
         st = session_state(m, live, stale_min)
         rows.append((0 if st == "alive" else 1, m.get("last_seen", ""), m, st))
@@ -5179,6 +5215,66 @@ def sessions_block(store, sid, budget, limit=6):
         out.pop(-2 if len(rows) > limit else -1)
         text = "\n".join(out)
     return text if len(text.encode("utf-8")) <= budget else text.encode("utf-8")[: budget - 3].decode("utf-8", "ignore") + "..."
+
+
+def sessions_signature(store, sid):
+    """skey -> (state bucket, last reply) for every other session worth showing. Deliberately coarse:
+    a running tool or a context percentage changes constantly, and a per-turn line about that would be
+    noise. What is worth a line is a session appearing, ending, or saying something new."""
+    me = session_key(sid) if sid else ""
+    live = {r.get("sessionId") for r in peer_registry() if pid_alive(r.get("pid"))}
+    stale_min = int(store.cfg["session_stale_min"])
+    cur, rows = {}, {}
+    for m in session_metas(store):
+        skey = m.get("skey") or ""
+        if not skey or skey == me or session_is_noise(m) or session_hidden(store, m):
+            continue
+        st = session_state(m, live, stale_min)
+        bucket = "ended" if m.get("ended") else ("alive" if st == "alive" else "away")
+        cur[skey] = "%s|%s" % (bucket, clip(m.get("last_status") or "", 90))
+        rows[skey] = (m, st)
+    return cur, rows
+
+
+def sessions_delta(store, sid, m, budget):
+    """The per-turn half of the SESSIONS block. The one at SessionStart is a snapshot, so a window
+    opened after this session started never appeared in it at all, and a session that finished kept
+    showing as working. Only changes, only what fits; the rest comes on the following turn."""
+    cur, rows = sessions_signature(store, sid)
+    seen = m.get("sessions_seen")
+    if seen is None:
+        m["sessions_seen"] = cur
+        return ""
+    appeared = [k for k in cur if k not in seen]
+    changed = [k for k in cur if k in seen and seen[k] != cur[k]]
+    gone = [k for k in seen if k not in cur]
+    if not (appeared or changed or gone):
+        return ""
+    head = "SESSIONS of project %s changed (`longrun status`, `longrun send <name> \"...\"`):" % store.name
+    lines, used, shown, left = [head], len(head.encode("utf-8")), dict(seen), 0
+    for mark, k in [("+", k) for k in sorted(appeared)] + [("~", k) for k in sorted(changed)]:
+        mm, st = rows[k]
+        line = "  %s %s [%s] %s: %s" % (mark, clip(session_display_name(mm.get("sid", ""), store), 40), k[:8], st,
+                                        clip(mm.get("last_status") or "-", 90))
+        n = len(line.encode("utf-8")) + 1
+        if used + n > budget and len(lines) > 1:
+            left = len(appeared) + len(changed) - len(lines) + 1
+            break
+        lines.append(line)
+        used += n
+        shown[k] = cur[k]
+    if gone:
+        line = "  - gone: " + ", ".join(k[:8] for k in sorted(gone))
+        if used + len(line.encode("utf-8")) + 1 <= budget or len(lines) == 1:
+            lines.append(line)
+            for k in gone:
+                shown.pop(k, None)
+        else:
+            left += len(gone)
+    if left:
+        lines.append("  (+%d more on your next turn)" % left)
+    m["sessions_seen"] = shown
+    return "\n".join(lines)
 
 
 def ledger_block(store, budget, due_only=False):
@@ -5607,14 +5703,21 @@ def cmd_status(store, args):
     else:
         print("ledger/inbox: off (notes-only mode; `longrun init --hq` turns the multi-session layer on)")
     me = session_key(current_session(store))
+    show_all = "--all" in args
     print("sessions (* = this one):")
     metas = sorted(session_metas(store), key=lambda m: m.get("last_seen", ""), reverse=True)
-    hidden = 0
+    hidden, gone_n = 0, 0
     for m in metas:
-        if session_is_noise(m) and "--all" not in args:
+        if session_is_noise(m) and not show_all:
             hidden += 1
             continue
+        away = session_hidden(store, m)   # the user archived or deleted this window in the app
+        if away and not show_all:
+            gone_n += 1
+            continue
         state = session_state(m, live, stale_min)
+        if away:
+            state = "%s in the app, %s" % (away, state)
         if state == "alive" and m.get("sid") in socks:
             state = "alive+sock"
         fl = session_flags(store, m)
@@ -5627,6 +5730,8 @@ def cmd_status(store, args):
             m.get("last_seen", ""), clip(m.get("last_status", "") or "-", 140)))
     if hidden:
         print("  (%d session(s) with no tool calls and no turns hidden as app start/stop noise; --all shows them)" % hidden)
+    if gone_n:
+        print("  (%d session(s) archived or deleted in the desktop app; --all shows them)" % gone_n)
     return 0
 
 
@@ -5747,13 +5852,16 @@ def cmd_gc(store, args, quiet=False):
                 append(os.path.join(store.archive, "sessions", skey + ".journal.md"), "\n".join(cut))
                 write_atomic(jp, "\n".join(lines[-mx:]) + "\n")
                 report.append("journal %s: trimmed %d lines" % (skey[:8], len(cut)))
-            if age_days(mp) > int(cfg["session_dead_days"]):
+            # A session deleted in the desktop app is never coming back, so its directory need not sit
+            # in the live tree for session_dead_days. An ARCHIVED one is only hidden from the blocks:
+            # the user can unarchive it in the app, and it would then want its notes back.
+            if age_days(mp) > int(cfg["session_dead_days"]) or session_hidden(store, m) == "deleted":
                 dst = os.path.join(store.archive, "sessions", skey)
                 if os.path.isdir(dst):
                     shutil.rmtree(dst, ignore_errors=True)
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.move(d, dst)
-                report.append("session %s: archived (silent > %dd)" % (skey[:8], cfg["session_dead_days"]))
+                report.append("session %s: archived (%s)" % (skey[:8], "deleted in the app" if session_hidden(store, m) == "deleted" else "silent > %dd" % cfg["session_dead_days"]))
         for f in glob.glob(os.path.join(GLOBAL_DIR, "sessions", "_index", "*.json")):
             if age_days(f) > int(cfg["session_dead_days"]):
                 os.remove(f)
@@ -6058,6 +6166,7 @@ def cmd_hook(args):
             with store.shared_lock():  # everything shared that this digest showed counts as seen
                 m = load_meta(store, sid)
                 mark_shared_seen(store, m)
+                m["sessions_seen"] = sessions_signature(store, sid)[0]
                 try:
                     m["board_mtime"], m["board_seen"] = os.path.getmtime(board_path(store)), board_signature(load_board(store))
                 except OSError:
@@ -6085,6 +6194,7 @@ def cmd_hook(args):
             m.pop("waiting_since", None)
             m.pop("waiting_what", None)
             delta = shared_delta(store, m, int(store.cfg["shared_delta_max_bytes"]))
+            sdelta = sessions_delta(store, sid, m, int(store.cfg["sessions_delta_max_bytes"]))
             bd = board_delta(store, m)
             cw = ctx_warning(store, m)
             nt = turn_card(store, m, closed=True) if card_due(store, m, "turns") else ""
@@ -6107,6 +6217,8 @@ def cmd_hook(args):
             out.append(notes_block(notes_target(store, False, sid=sid), int(store.cfg["session_notes_max_bytes"]) + 400, own_note))
         if delta:
             out.append(delta)
+        if sdelta:
+            out.append(sdelta)
         if store.hq() and m["turns"] % 5 == 1:  # user-owned / due items every 5 turns, not every turn
             due = ledger_block(store, 1200, due_only=True)
             if due:
