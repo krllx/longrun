@@ -47,7 +47,7 @@
 <p>このskillは、人間がいつもどおりセッションで作業することを前提にしています。メモ、ダイジェスト、メッセージの配送はhookと、指示に従うモデルが引き受けます。以下が、手でやることのすべてです。</p>
 <ol>
 <li><b>1度だけインストール。</b>1行で済み、checkoutも要りません。インストーラーがソースを自分で取ってきます：
-<pre><code>curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash</code></pre>
+<pre><code>curl -fsSL https://krllx.github.io/longrun/install.sh | bash</code></pre>
 入るのはskill、<code>~/.claude/settings.json</code>の11個のhook、CLIの<code>~/.local/bin/longrun</code>、<code>longrun</code> MCPサーバー、そしてチェックと監視役を5分ごとに走らせるタイマーです。尋ねられるのは1つだけ、次の項目のデスクトップ通知です。cloneから入れる場合も同じ<code>install.sh</code>で、<code>--uninstall</code>が元に戻します。</li>
 <li><b>通知（任意）。</b><code>install.sh</code>は通知を設定するかを尋ね、この項目が必要かどうかは、その答えで決まります。longrunが通知に依存することはありません。全停止、予算による停止、発火したウォッチは、いずれにせよsocketか受信箱を通ってセッションに届くので、断っても他には何も変わりません（<code>--no-notify</code>で先に答えておけ、<code>longrun notify setup</code>で後から有効にできます）。macOSでは、<code>terminal-notifier</code>がなければインストーラーが<code>brew install terminal-notifier</code>を実行し（Homebrewが前提です。なければその旨を伝えて先へ進みます）、<code>~/.claude/longrun/notifier/longrun.app</code>を作り、テスト通知を1つ送ります。macOSは"longrun"からの通知を許可するかを1度だけ尋ねることがあるので、許可してください。macOS標準の手段でこの手順を置き換えることはできません。<code>osascript -e 'display notification'</code>はScript Editorの名義で通知を出しますが、Script Editorは通知権限を持たないため、システムは通知を記録するだけで何も表示せず、終了コードは0を返します（macOS 15で25回中25回。Script Editorを先に起動しても権限は付きません）。わざわざアプリのコピー(<code>longrun.app</code>)を作るのは、アイコンと送信者名が送信元のバンドルからしか来ないからで、このバンドルのアイコンはClaudeのもので、名前は<code>longrun</code>です。Linuxでは<code>notify-send</code> (<code>libnotify</code>)で、たいていのデスクトップ環境にはすでに入っています。どちらでも<code>longrun notify --test</code>で確かめられます。テスト通知を1つ送り、システムが実際に表示したかを読み返し、クリックするとどのセッションが開くかを出力します。絶対に見逃したくないセッションが1つあるなら<code>longrun important on</code>（または<code>next</code>、あるいは数字）です。そのセッションのターンの終わりは、<code>notify_turn_end</code>がどう設定されていようと、どのウィンドウが前面だろうと必ず通知されます。別のClaudeセッションで入力している間は、前面ウィンドウを見る通常の判定ではこの通知を出せません。</li>
 <li><b>フォルダをプロジェクトにする。</b>longrunにとってのプロジェクトは、Claude Codeで開くフォルダです。リポジトリのルートである必要はありません。複数のリポジトリを含むフォルダ、monorepoのサブディレクトリ、空の司令塔フォルダでもかまいません。そこで1度<code>longrun init</code>を実行します。ターミナルでも、Claude Codeのセッションの中でもよく、頼めばエージェントが代わりに実行します。<code>.longrun/</code>ディレクトリができます。そのフォルダがリポジトリの中にあるなら、ignoreファイルに追加してください（または<code>longrun init --external</code>で、ディレクトリを<code>~/.claude/longrun/</code>の下に置きます）。同じプロジェクトの各worktreeからは<code>longrun link &lt;path to the project&gt;</code>。確認は<code>longrun where</code>です。</li>
@@ -259,7 +259,7 @@ longrun config unset notes_max_bytes            # back to the default</code></pr
 <h2>チートシートと限界</h2>
 <div class="cheat">
 <pre><code># install
-curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+curl -fsSL https://krllx.github.io/longrun/install.sh | bash
                         # skill, 11 hooks, CLI, MCP server, the 5-minute timer, notifications
 longrun watch install   # the timer alone (the installer already did it)
 longrun notify setup    # optional, macOS: the bundle notifications are sent from

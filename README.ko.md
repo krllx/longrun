@@ -42,7 +42,7 @@
 ## 빠른 시작
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+curl -fsSL https://krllx.github.io/longrun/install.sh | bash
 ```
 
 > [!NOTE]

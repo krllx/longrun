@@ -27,7 +27,7 @@ for a in "$@"; do
 Without either notify flag the installer asks, and skips the step when nothing can answer.
 
 Run it from a checkout, or without one:
-  curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+  curl -fsSL https://krllx.github.io/longrun/install.sh | bash
 The sources then come from the same repository as a tarball (LONGRUN_REPO, LONGRUN_REF override it)."; exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac

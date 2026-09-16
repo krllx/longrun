@@ -40,7 +40,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
 ## Quick start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+curl -fsSL https://krllx.github.io/longrun/install.sh | bash
 ```
 
 > [!NOTE]
