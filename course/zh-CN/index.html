@@ -47,7 +47,7 @@
 <p>这个 skill 假定人还是照常在会话里干活，而笔记、摘要和消息投递由 hook 以及照着指示走的模型负责。下面是你需要亲手做的全部事情。</p>
 <ol>
 <li><b>装一次就好。</b>一行命令，不需要 checkout，安装脚本自己去取源码：
-<pre><code>curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash</code></pre>
+<pre><code>curl -fsSL https://krllx.github.io/longrun/install.sh | bash</code></pre>
 它装上 skill、<code>~/.claude/settings.json</code> 里的 11 个 hook、CLI <code>~/.local/bin/longrun</code>、<code>longrun</code> MCP 服务器，以及一个定时器，每五分钟跑一次检查和监视器。它只问你一件事：桌面通知，也就是下一步。从 clone 下来的仓库安装，用的也是同一个 <code>install.sh</code>；<code>--uninstall</code> 撤销一切。</li>
 <li><b>通知，想要就装。</b><code>install.sh</code> 会问要不要配置通知，装不装取决于你当时的回答。longrun 从不依赖通知：全部停止、预算停止和触发的事件监听，本来就会经由 socket 或收件箱到达会话，所以拒绝了也不会有别的影响（<code>--no-notify</code> 提前替你回答，<code>longrun notify setup</code> 以后再打开）。在 macOS 上，缺少 <code>terminal-notifier</code> 时安装脚本会执行 <code>brew install terminal-notifier</code>（前提是有 Homebrew；没有就直说一声然后跳过），构建 <code>~/.claude/longrun/notifier/longrun.app</code> 并发一条测试通知；macOS 可能会问一次是否允许来自 "longrun" 的通知，允许它。macOS 自带的手段替代不了这一步：<code>osascript -e 'display notification'</code> 是以 Script Editor 的身份发出的，而它没有通知权限，于是系统把通知归档、什么都不画，还返回 0（在 macOS 15 上 25 次全是如此；就算先打开过 Script Editor 也拿不到权限）。之所以要复制一个 bundle，是因为图标和发送者名字只能来自发送它的那个 bundle，而这一个带着 Claude 的图标和 <code>longrun</code> 这个名字。在 Linux 上用的是 <code>notify-send</code> (<code>libnotify</code>)，大多数桌面环境已经有了。两种系统都可以用 <code>longrun notify --test</code> 检查：它发一条探针，再回头读一次，确认系统真的把它画了出来，并打印点一下会打开哪个会话。如果有一个会话你绝对不能错过：<code>longrun important on</code>（或者 <code>next</code>，或者一个数字）让它每轮结束时一定发通知，不管 <code>notify_turn_end</code> 设成了什么，也不管当前前台是哪个窗口；你在另一个 Claude 会话里打字时，Claude 窗口就在前台，按前台窗口判断的那条规则就不会发通知。</li>
 <li><b>把文件夹变成项目。</b>对 longrun 来说，项目就是你在 Claude Code 里打开的那个文件夹。不一定是仓库根目录：可以是装着好几个仓库的文件夹、monorepo 的一个子目录，或者一个空的指挥部 (hq) 文件夹。在那里跑一次 <code>longrun init</code>：在终端里跑，或者直接在 Claude Code 会话里说一声，agent 会替你跑。一个 <code>.longrun/</code> 目录会出现；如果这个文件夹在仓库里，把它加进 ignore 文件（或者用 <code>longrun init --external</code>，它把目录放到 <code>~/.claude/longrun/</code> 下）。同一个项目的每个 worktree 里：<code>longrun link &lt;project&gt;</code>。检查一下：<code>longrun where</code>。</li>
@@ -259,7 +259,7 @@ longrun config unset notes_max_bytes            # back to the default</code></pr
 <h2>速查表和边界</h2>
 <div class="cheat">
 <pre><code># install
-curl -fsSL https://raw.githubusercontent.com/krllx/longrun/main/install.sh | bash
+curl -fsSL https://krllx.github.io/longrun/install.sh | bash
                         # skill, 11 hooks, CLI, MCP server, the 5-minute timer, notifications
 longrun watch install   # the timer alone (the installer already did it)
 longrun notify setup    # optional, macOS: the bundle notifications are sent from
