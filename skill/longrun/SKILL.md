@@ -60,6 +60,7 @@ Claude Code's auto memory (`MEMORY.md`) is a different store with a different li
    - `longrun add -t ctx "..."` task framing from the user that must not drift (goal, hard constraints, corrections)
    - `longrun add -t pin "..."` a fact exempt from age-based archiving (PR numbers, branches, hosts)
    - `longrun log "..."` one milestone line in this session's journal (pushed, PR opened, tests green)
+   - **Too long for one line?** Then it is a file, not a note: write it under the project and point at it with `longrun doc add <path> "<what is in it>"`. Every session sees that one line at every start and opens the file only when it needs it - which is the whole of lazy loading here. The digest marks the pointer when the file has changed since the line was written, or gone missing.
 2. **Own by default, `--shared` when another session needs it.** Shared = what another session would need or must not contradict: identity facts (`PR 42 = branch feature/checkout`), decisions that bind everyone, dead ends anyone could walk into again, facts about the environment. Own = the state of your task. The shared budget belongs to everyone: one line per fact, `replace` instead of a second line.
 3. **Criterion: would ONE Read, Grep or command get this back?** If yes, do not write it: paths, signatures, git status, a value you can re-run for. Progress narration is already kept by the journal and the archived summaries; anything in CLAUDE.md, the auto memory or the project boards is already kept there.
 4. **Delete as a habit.** `longrun rm s3` / `longrun rm n12` when a note is done or wrong; `longrun replace n12 "..."` instead of appending a correction; `longrun prune` (own) or `longrun prune --shared` when the digest says PRUNE NEEDED. The budgets are hard: `add` refuses when full and names the cheapest entries to drop.
@@ -124,6 +125,7 @@ Then stop. The watcher (the timer, every 5 minutes) and the workers' board moves
 - `link <project>`: run it, then `longrun where` to confirm.
 - `status`: run `longrun status` and report: which sessions are alive/stale/ended, what each did last, own-note counts, budgets, what needs the user.
 - `notes`: `longrun notes` (both files), `--shared`, `--own`, `--session <name>` for another session's own notes.
+- `doc`: `longrun doc add <path> "<what is in it>"` for material too long to be a note, `doc ls`, `doc touch n12 "<new line>"`, `doc rm n12`. The file stays where it is; only the pointer lives in the notes.
 - `recall <term>`: run `longrun recall <term>` and use the hits; only then read code.
 - `compact-hint`: `longrun compact-hint` shows what the `PreCompact` hook will tell the summariser to keep (it runs for automatic compactions too, so nobody has to time a `/compact`); `--set "..."` adds one line for this session, `--clear` drops it, `longrun config set compact_instructions "..."` sets the project-wide one.
 - `send <session> <text>`: `longrun send --list` to see who is reachable, then send. `--resume` wakes a stopped session headless.

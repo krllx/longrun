@@ -123,7 +123,7 @@ DEFAULTS = {
     # "hq": True/False              # opt-in multi-session layer (ledger, inbox, ask, report, status).
     #                               # Unset = inferred: on when a hub is linked or a ledger already exists.
 }
-TAGS = ("dead", "decision", "fact", "todo", "ctx", "pin")
+TAGS = ("dead", "decision", "fact", "todo", "ctx", "pin", "doc")
 TAG_HELP = {
     "dead": "an approach that was tried and did not work, with the reason",
     "decision": "a choice that was made and why (so it is not re-litigated)",
@@ -131,6 +131,7 @@ TAG_HELP = {
     "todo": "a follow-up the agent owes (short-lived; move to ledger if a human is involved)",
     "ctx": "task framing that must survive: goal, constraints, what the user said",
     "pin": "like fact but exempt from age-based archiving",
+    "doc": "a pointer to a file in the project that is too long for a note (`longrun doc add`)",
 }
 LEDGER_STATUS = ("open", "waiting", "blocked", "done")
 
@@ -323,6 +324,17 @@ class Store:
                 return os.path.basename(d.rstrip("/")) or "root"
         return os.path.basename(self.local)
 
+    def root(self):
+        """The directory the project is about: the parent of `.longrun`, or the directory registered for
+        an external store. Doc pointers are stored relative to it, so they mean the same thing in every
+        worktree and in every session."""
+        if os.path.basename(self.local) == ".longrun":
+            return os.path.dirname(self.local)
+        for d, target in registry().get("links", {}).items():
+            if os.path.realpath(target) == os.path.realpath(self.local):
+                return d.rstrip("/")
+        return os.path.dirname(self.local)
+
     def hq(self):
         """Is the multi-session layer (ledger, inbox, ask, report) in use here?
         Explicit config wins; otherwise infer, so projects set up before the flag existed keep working."""
@@ -419,7 +431,7 @@ def notes_target(store, shared, sid=None, skey=None):
         return {"shared": True, "path": store.notes, "prefix": "n", "cap": int(store.cfg["notes_max_bytes"]),
                 "lock": store.lock(), "archive": os.path.join(store.archive, "notes.md"), "state": store.state,
                 "header": NOTES_HEADER, "label": "SHARED notes (project %s)" % store.name, "cmd": "--shared",
-                "cfg": store.cfg}
+                "cfg": store.cfg, "store": store}
     if not skey:
         sid = sid or current_session(store)
         if not sid:
@@ -429,7 +441,7 @@ def notes_target(store, shared, sid=None, skey=None):
     d = os.path.join(store.sessions, skey)
     return {"shared": False, "path": os.path.join(d, "notes.md"), "prefix": "s", "cap": int(store.cfg["session_notes_max_bytes"]),
             "lock": Lock(d, ".lock"), "archive": os.path.join(d, "archive", "notes.md"), "state": os.path.join(d, "state.json"),
-            "header": OWN_HEADER, "label": "OWN notes (this session)", "cmd": "", "skey": skey, "cfg": store.cfg}
+            "header": OWN_HEADER, "label": "OWN notes (this session)", "cmd": "", "skey": skey, "cfg": store.cfg, "store": store}
 
 
 def _tgt(x):
@@ -453,7 +465,7 @@ def archive_notes(t, entries, why):
 
 def prune_candidates(entries, n=5):
     """Oldest, non-pinned, todo/ctx first: the cheapest entries to lose."""
-    weight = {"todo": 0, "ctx": 1, "fact": 2, "decision": 3, "dead": 3, "pin": 9}
+    weight = {"todo": 0, "ctx": 1, "fact": 2, "decision": 3, "dead": 3, "doc": 8, "pin": 9}
     return sorted(entries, key=lambda e: (weight.get(e["tag"], 2), e["date"], e["id"]))[:n]
 
 
@@ -505,8 +517,9 @@ def cmd_add(store, args):
         die("empty note", 2)
     max_chars = int(store.cfg.get("note_max_chars", 400))
     if len(text) > max_chars:
-        die("note is %d chars; keep entries under %d chars (one fact, one line; `longrun config set note_max_chars N` changes the cap). "
-            "Put long material in a file and reference it." % (len(text), max_chars), 2)
+        die("note is %d chars; keep entries under %d chars (one fact, one line; `longrun config set note_max_chars N` changes the cap).\n"
+            "Long material belongs in a file the project points at: write it, then `longrun doc add <path> \"<what is in it>\"`. "
+            "Every session then sees the pointer and reads the file only when it needs it." % (len(text), max_chars), 2)
     t = notes_target(store, shared)
     if shared and not scope:
         scope = author_label(store)
@@ -630,6 +643,110 @@ def cmd_notes(store, args):
         for e in entries:
             print(fmt_note(e, t["prefix"]))
     return 0
+
+
+DOC_SEP = " - "          # "<path relative to the project root>" + this + "<what is in it>"
+DOC_STALE_DAYS = 1       # a file newer than its line by this much makes the line suspect
+
+
+def doc_parts(e):
+    """A doc entry as (path, description). A line without the separator is all path and no description."""
+    path, _, desc = (e.get("text") or "").partition(DOC_SEP)
+    return path.strip(), desc.strip()
+
+
+def doc_entries(store):
+    return [e for e in load_notes(notes_target(store, True)) if e["tag"] == "doc"]
+
+
+def doc_path(store, e):
+    return os.path.join(store.root(), doc_parts(e)[0])
+
+
+def entry_date(e):
+    """The MM-DD on an entry as a date. Entries carry no year; December seen in January is last year."""
+    try:
+        d = _dt.datetime.strptime("%d-%s" % (now().year, e["date"]), "%Y-%m-%d")
+    except ValueError:
+        return now()
+    return d.replace(year=d.year - 1) if d > now() + _dt.timedelta(days=1) else d
+
+
+def doc_suffix(store, e):
+    """What the digest adds after a doc line: the file is gone, or it has changed since the line was
+    written and the description may no longer be what is in it. Cheap: one stat per doc entry."""
+    p = doc_path(store, e)
+    try:
+        mt = _dt.datetime.fromtimestamp(os.path.getmtime(p))
+    except OSError:
+        return "  (MISSING: no such file now)"
+    if (mt - entry_date(e)).days >= DOC_STALE_DAYS:
+        return "  (file changed %s, this line may be stale)" % mt.strftime("%m-%d")
+    return ""
+
+
+def cmd_doc(store, args):
+    """longrun doc add <path> "<what is in it>" | doc ls | doc touch n12 "<new line>" | doc rm n12
+
+    The lazy half of the memory: long material stays in a file, and the shared notes carry one line
+    saying where it is and what is in it. Every session sees that line at every start and reads the
+    file only when it needs it."""
+    sub = args[0] if args else "ls"
+    rest = args[1:]
+    if sub in ("ls", "list"):
+        docs = doc_entries(store)
+        if not docs:
+            print("no docs yet. `longrun doc add <path> \"<what is in it>\"` points the project at a file "
+                  "that is too long for a note; every session then sees the pointer and reads the file on demand.")
+            return 0
+        for e in docs:
+            path, desc = doc_parts(e)
+            p = doc_path(store, e)
+            try:
+                size, mt = os.path.getsize(p), _dt.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%m-%d %H:%M")
+                state = "%d B, changed %s" % (size, mt)
+            except OSError:
+                state = "MISSING"
+            print("n%-4d %-44s %s\n      %s" % (e["id"], path, state, desc))
+        print("(%d doc%s; the file itself is read only when you need it)" % (len(docs), "" if len(docs) == 1 else "s"))
+        return 0
+    if sub == "add":
+        if not rest:
+            die("usage: longrun doc add <path> \"<what is in it, one line>\"", 2)
+        raw = rest[0]
+        desc = " ".join(" ".join(rest[1:]).split())
+        p = os.path.abspath(os.path.expanduser(raw))
+        if not os.path.isfile(p):
+            die("no such file: %s. A doc points at a file that exists; write the file first." % raw, 2)
+        try:
+            rel = os.path.relpath(p, store.root())
+        except ValueError:
+            rel = p
+        if rel.startswith(".."):
+            die("%s is outside the project (%s). Keep long material inside the project, so every session "
+                "and every worktree resolves the same path." % (raw, store.root()), 2)
+        if not desc:
+            die("say in one line what is in it: `longrun doc add %s \"<what is in it>\"`. A path with no "
+                "description makes a session open the file to find out whether it needs it." % rel, 2)
+        for e in doc_entries(store):
+            if doc_parts(e)[0] == rel:
+                die("%s is already n%d: `longrun doc touch n%d \"<new line>\"` rewrites its description."
+                    % (rel, e["id"], e["id"]), 2)
+        return cmd_add(store, ["--shared", "-t", "doc", rel + DOC_SEP + desc])
+    if sub in ("touch", "edit"):
+        if len(rest) < 2:
+            die("usage: longrun doc touch n12 \"<what is in it now>\"", 2)
+        ids = parse_ids(rest[:1], "n")
+        if not ids:
+            die("usage: longrun doc touch n12 \"<what is in it now>\"", 2)
+        e = next((x for x in doc_entries(store) if x["id"] == ids[0][1]), None)
+        if not e:
+            die("n%d is not a doc entry (`longrun doc ls`)" % ids[0][1], 2)
+        rel = doc_parts(e)[0]
+        return cmd_replace(store, ["n%d" % e["id"], rel + DOC_SEP + " ".join(rest[1:])])
+    if sub == "rm":
+        return cmd_rm(store, ["n" + str(i) for _, i in parse_ids(rest, "n")] or rest)
+    die("usage: longrun doc [ls | add <path> \"<what is in it>\" | touch n12 \"<new line>\" | rm n12]", 2)
 
 
 def cmd_prune(store, args):
@@ -5094,7 +5211,9 @@ def notes_block(t, budget, label="", drop_oldest=0):
         lines.append("  (%d older entr%s left out to fit; still on disk: `longrun notes%s`)"
                      % (len(entries) - len(body), "y" if len(entries) - len(body) == 1 else "ies",
                         (" " + t["cmd"]) if t["cmd"] else " --own"))
-    text = "\n".join(lines + [fmt_note(e, t["prefix"]) for e in body])
+    store = t.get("store")
+    text = "\n".join(lines + [fmt_note(e, t["prefix"]) + (doc_suffix(store, e) if (e["tag"] == "doc" and store is not None) else "")
+                              for e in body])
     if len(text.encode("utf-8")) > budget:  # only a hand-edited file over its own cap gets here
         text = text.encode("utf-8")[: budget - 40].decode("utf-8", "ignore") + "\n…(notes truncated: over budget, run `longrun prune`)"
     return text
@@ -5162,6 +5281,48 @@ def shared_delta(store, m, budget):
     if left:
         lines.append("  (+%d more on your next turn; all of them: `longrun notes --shared`)" % left)
     m["shared_seen"] = shown
+    return "\n".join(lines)
+
+
+def docs_delta(store, m, budget):
+    """A file a doc entry points at has changed since this session last looked.
+
+    Derived from the file's own mtime rather than from who edited it: that way a change made by another
+    session, by the user in an editor, or by a script all count the same, and it costs one stat per doc
+    entry with nothing to write down anywhere."""
+    docs = doc_entries(store)
+    if not docs:
+        return ""
+    cur = {}
+    for e in docs:
+        try:
+            cur[str(e["id"])] = int(os.path.getmtime(doc_path(store, e)))
+        except OSError:
+            continue
+    seen = m.get("docs_seen")
+    if seen is None:
+        m["docs_seen"] = cur
+        return ""
+    changed = [e for e in docs if str(e["id"]) in cur and str(e["id"]) in seen and cur[str(e["id"])] != seen[str(e["id"])]]
+    if not changed:
+        m["docs_seen"] = cur
+        return ""
+    head = "DOCS changed since you last looked (read one only if you need it):"
+    lines, used, shown = [head], len(head.encode("utf-8")), dict(seen)
+    for e in changed:
+        path, desc = doc_parts(e)
+        line = "  ~ n%d %s - %s" % (e["id"], path, clip(desc, 110))
+        n = len(line.encode("utf-8")) + 1
+        if used + n > budget and len(lines) > 1:
+            break
+        lines.append(line)
+        used += n
+        shown[str(e["id"])] = cur[str(e["id"])]
+    for k, v in cur.items():          # a doc that did not change, or is new, needs no line
+        shown.setdefault(k, v)
+    for k in [k for k in shown if k not in cur]:
+        shown.pop(k)
+    m["docs_seen"] = shown
     return "\n".join(lines)
 
 
@@ -5625,13 +5786,17 @@ def cmd_recall(store, args):
     others = [f for f in sorted(glob.glob(os.path.join(store.sessions, "*", "notes.md"))) if f != own]
     own_archives = sorted(glob.glob(os.path.join(store.sessions, "*", "archive", "*.md")), reverse=True)
     # ranked groups, curated first: a noisy archive must not crowd the notes out of the output
-    groups = [(0, [store.notes, own]), (1, [store.ledger]), (2, others + session_files(store, "*.md")),
+    docs = [doc_path(store, e) for e in doc_entries(store)]   # the long material itself, not only its pointer
+    groups = [(0, [store.notes, own]), (1, docs + [store.ledger]), (2, others + session_files(store, "*.md")),
               (3, sorted(glob.glob(os.path.join(store.inbox, "*.md"))) +
                   sorted(glob.glob(os.path.join(store.inbox, ".archive", "*.md")))),
               (4, archives + own_archives)]  # newest archives first inside the group
     def label(f):  # session files live outside the project dir, so a relpath there is all ../.. noise
-        return "sessions/" + os.path.relpath(f, store.sessions) if f.startswith(store.sessions + os.sep) \
-            else os.path.relpath(f, store.local)
+        if f.startswith(store.sessions + os.sep):
+            return "sessions/" + os.path.relpath(f, store.sessions)
+        if f in docs:
+            return os.path.relpath(f, store.root())
+        return os.path.relpath(f, store.local)
     hits, seen = [], set()
     for rank, files in groups:
         for f in files:
@@ -5666,7 +5831,7 @@ def cmd_recall(store, args):
     shown, tr_shown = hits[:n], tr_hits[-n:]  # curated first; from the transcripts, the most recent
     out = [(w, l) for _, w, l in shown] + tr_shown
     if not out:
-        print("no hits for %s (searched notes, ledger, journals, inbox, archives%s)"
+        print("no hits for %s (searched notes, the files they point at, ledger, journals, inbox, archives%s)"
               % (" ".join(terms), " and %d transcript(s)" % len(scanned) if use_transcript else ""))
         return 1
     for where, line in out:
@@ -5773,7 +5938,7 @@ def age_notes(t, cfg, report, what):
                     d = d.replace(year=d.year - 1)
             except ValueError:
                 d = now()
-            (gone if (e["tag"] != "pin" and d < cutoff) else keep).append(e)
+            (gone if (e["tag"] not in ("pin", "doc") and d < cutoff) else keep).append(e)
         if gone:
             archive_notes(t, gone, "expired")
             report.append("%s: archived %d expired entries" % (what, len(gone)))
@@ -5802,9 +5967,32 @@ def age_notes(t, cfg, report, what):
             report.append("%s: dropped %d old archive lines" % (what, aged))
 
 
+DOC_MISSING_DAYS = 7   # a pointer whose file has been gone this long is archived
+
+
+def age_docs(store, report):
+    """A doc entry whose file disappeared is first shown as MISSING in the digest, and archived once it
+    has been gone for DOC_MISSING_DAYS - long enough to survive a branch switch or a rename in progress."""
+    t = notes_target(store, True)
+    with t["lock"]:
+        entries = load_notes(t)
+        gone = []
+        for e in entries:
+            if e["tag"] != "doc" or os.path.exists(doc_path(store, e)):
+                continue
+            if (now() - entry_date(e)).days >= DOC_MISSING_DAYS:
+                gone.append(e)
+        if gone:
+            archive_notes(t, gone, "doc file gone")
+            save_notes(t, [e for e in entries if e not in gone])
+            report.append("docs: archived %d pointer(s) whose file has been missing for %d days"
+                          % (len(gone), DOC_MISSING_DAYS))
+
+
 def cmd_gc(store, args, quiet=False):
     cfg = store.cfg
     report = []
+    age_docs(store, report)
     age_notes(notes_target(store, True), cfg, report, "shared notes")
     with store.lock():
         comp = sorted(glob.glob(os.path.join(store.archive, "compact", "*.md")), key=os.path.getmtime)
@@ -6167,6 +6355,8 @@ def cmd_hook(args):
                 m = load_meta(store, sid)
                 mark_shared_seen(store, m)
                 m["sessions_seen"] = sessions_signature(store, sid)[0]
+                m["docs_seen"] = None          # the digest showed the doc lines; the next turn takes the baseline
+                docs_delta(store, m, 1)
                 try:
                     m["board_mtime"], m["board_seen"] = os.path.getmtime(board_path(store)), board_signature(load_board(store))
                 except OSError:
@@ -6195,6 +6385,7 @@ def cmd_hook(args):
             m.pop("waiting_what", None)
             delta = shared_delta(store, m, int(store.cfg["shared_delta_max_bytes"]))
             sdelta = sessions_delta(store, sid, m, int(store.cfg["sessions_delta_max_bytes"]))
+            ddelta = docs_delta(store, m, int(store.cfg["shared_delta_max_bytes"]) // 2)
             bd = board_delta(store, m)
             cw = ctx_warning(store, m)
             nt = turn_card(store, m, closed=True) if card_due(store, m, "turns") else ""
@@ -6219,6 +6410,8 @@ def cmd_hook(args):
             out.append(delta)
         if sdelta:
             out.append(sdelta)
+        if ddelta:
+            out.append(ddelta)
         if store.hq() and m["turns"] % 5 == 1:  # user-owned / due items every 5 turns, not every turn
             due = ledger_block(store, 1200, due_only=True)
             if due:
@@ -6759,9 +6952,11 @@ SETUP
   where                       which project, which session, where the files are
 
 NOTES (own = this session's, [s<id>]; shared = the project's, [n<id>], seen by every session)
-  add [--shared] -t TAG "text"  one line. TAG: dead | decision | fact | ctx | todo | pin
+  add [--shared] -t TAG "text"  one line. TAG: dead | decision | fact | ctx | todo | pin | doc
   rm s3 n12 ... | replace s3|n12 "text"   delete / rewrite (deleted lines go to archive/notes.md)
   notes [--shared|--own|--session WHO] | prune [--auto] [--shared]   show / archive the cheapest until 60%% of the budget
+  doc add PATH "what is in it" | doc ls | doc touch n12 "..." | doc rm n12
+                              long material stays in a file; the notes carry one line saying where it is and what is in it
   log "text"                  one milestone line in this session's journal
   compact-hint [--set "text"|--clear]   what the PreCompact hook tells the summariser to keep (automatic compactions too)
   recall TERM...              search shared + own notes of every session, journals, archived summaries, transcripts
@@ -6808,6 +7003,8 @@ RULES = """TWO FILES  own notes (this session, `longrun add`) and shared notes (
            that bind everyone, dead ends anyone could walk into again. Own = the state of your task. Both are shown
            at every start and after every compaction; shared changes made by others arrive on your next turn.
 WHAT       The test is one question: would ONE Read/Grep/command get this back? If yes, do not write it.
+  long:    too long for one line -> it is a file: write it under the project, then `longrun doc add <path> "<what is
+           in it>"`. The pointer costs one line, the file is read only when it is needed.
   write:   dead ends WITH the reason (`-t dead`), decisions with why (`-t decision`), facts that cost real effort and
            are not in the repo (`-t fact`), the task framing the user gave that must not drift (`-t ctx`), identity
            facts exempt from ageing (`-t pin`), anything a human must do -> ledger (HQ) or wherever the project tracks it.
@@ -6871,7 +7068,7 @@ def main(argv):
     table = {"add": cmd_add, "rm": cmd_rm, "replace": cmd_replace, "notes": cmd_notes, "prune": cmd_prune,
              "ledger": cmd_ledger, "ask": cmd_ask, "log": cmd_log, "report": cmd_report, "inbox": cmd_inbox,
              "recall": cmd_recall, "status": cmd_status, "digest": cmd_digest, "gc": cmd_gc, "send": cmd_send,
-             "board": cmd_board, "fact": cmd_fact, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,
+             "doc": cmd_doc, "board": cmd_board, "fact": cmd_fact, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,
              "interrupt": cmd_interrupt, "budget": cmd_budget, "compact-hint": cmd_compact_hint, "important": cmd_important}
     if cmd not in table:
         die("unknown command %s (longrun help)" % cmd, 2)

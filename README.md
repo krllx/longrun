@@ -28,7 +28,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-346_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-358_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -204,7 +204,7 @@ A worktree is attached with `longrun link <project>` and has no note store of it
 
 ## What to write
 
-One test: **would one command, one file read or grep get this back?** If yes, do not write it.
+One test: **would one command, one file read or grep get this back?** If yes, do not write it. Too long for one line? Then it is a file, and the notes carry a pointer to it: `longrun doc add research/plan.md "the rollout plan and what is still open"`. Every session sees the pointer at every start and opens the file only when it needs it.
 
 | Tag | What | Where |
 |---|---|---|
@@ -213,6 +213,7 @@ One test: **would one command, one file read or grep get this back?** If yes, do
 | `fact` | a fact about the environment that cost effort | shared |
 | `pin` | a fact with no expiry: PR number, branch, host | shared |
 | `ctx` | task framing from the human | own |
+| `doc` | a pointer to a file too long for a note: `longrun doc add <path> "what is in it"` | shared |
 | `todo` | a small thing the agent still has to do | own |
 
 Milestones (pushed, PR opened, tests green) go to the journal: `longrun log "PR opened"`. What outlives the task (who the user is, how they work) goes to Claude Code's auto memory, not to longrun.
@@ -246,7 +247,7 @@ Full flags, file formats and the facts we verified about Claude Code: [docs/REFE
 ## Development
 
 ```bash
-bash tests/run.sh            # 210 regression checks, no API calls
+bash tests/run.sh            # 222 regression checks, no API calls
 bash tests/scenarios.sh      # 37 scenarios, one per goal
 bash tests/orchestrator.sh   # 69: the orchestrator layer
 bash tests/ask.sh            # 30: the dialog and the MCP server
