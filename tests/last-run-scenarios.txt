@@ -6,6 +6,12 @@
   ok   S1.5 its own notes start empty
   ok   S1.6 but it can pull a detail from another session's own notes on demand
 == S2: own notes survive compaction and stay own
+This session keeps its durable notes on disk and gets them back right after the compaction, so the summary is what carries everything that is NOT written down yet.
+- Keep every approach that was tried and did not work, each with the reason it failed, even where that makes the summary longer: without them the next turns repeat work already known to be wrong.
+- Keep exact strings instead of descriptions of them: file paths, command lines, error text, identifiers, urls, numbers.
+- Drop what one Read or one command brings back: file contents, long tool output, diffs already applied. A path plus one line of why it matters replaces them.
+- Keep the user's own wording for what they asked for and for every correction they made.
+- Already on disk and re-injected automatically after the compaction, so the summary does not need to restate them: longrun notes n1, n2, s1
   ok   S2.1 after compaction the session gets its own notes and its journal back
   ok   S2.2 and the shared picture
   ok   S2.3 the compaction summary is archived under the project, named by the session
@@ -37,4 +43,4 @@
   ok   S8.2 a running session gets it on its socket right away, as a user turn
   ok   S8.3 a watch registered by name fires into that session with the --then text
 
-PASS=30 FAIL=0  (tmp: /tmp/longrun-scen.wEJ4Ik)
+PASS=30 FAIL=0  (tmp: /tmp/longrun-scen.sF1k4d)

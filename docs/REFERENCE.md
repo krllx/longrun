@@ -212,7 +212,7 @@ What changes in habits: `longrun add` without `--shared` now writes to own notes
 
 `bash tests/scenarios.sh` - 30 checks in eight scenarios, one per task from the README: orientation of a new session, own notes through compaction, the shared notes delta per turn, two sessions in one folder, resume under a new CLI id (immediately and with delayed app metadata), `/clear`, fork, handing over work (inbox, socket, watch by name). Output of the last runs: [tests/last-run.txt](../tests/last-run.txt), [tests/last-run-scenarios.txt](../tests/last-run-scenarios.txt).
 
-`bash tests/orchestrator.sh` - 64 checks of the orchestrator layer (lock and mirror, board, facts, halt via PreToolUse, telemetry, stuck detection by the watcher, interrupt, budget on a fixture). `bash tests/ask.sh` - 30 checks of the dialog and the MCP server on a fixture (answer inline and by a turn, cancel/expire/failure, ledger under HQ, exclusion from halt, the stop dialog, the flag at the watcher, JSON-RPC over stdio). All suites run with `LONGRUN_NO_UI=1`: the tests show no real dialogs or notifications.
+`bash tests/orchestrator.sh` - 67 checks of the orchestrator layer (lock and mirror, board, facts, halt via PreToolUse, telemetry, stuck detection by the watcher, interrupt, the budget rule on a fixture including its off-by-default switch). `bash tests/ask.sh` - 30 checks of the dialog and the MCP server on a fixture (answer inline and by a turn, cancel/expire/failure, ledger under HQ, exclusion from halt, the stop dialog, the flag at the watcher, JSON-RPC over stdio). All suites run with `LONGRUN_NO_UI=1`: the tests show no real dialogs or notifications.
 
 A live run on `claude -p` (costs money): [tests/e2e-claude.md](../tests/e2e-claude.md).
 

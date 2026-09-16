@@ -223,4 +223,4 @@
   ok   the token comes from Claude Code's own credentials file when there is no keychain item
   ok   no credentials anywhere is an error, never an empty token
 
-PASS=202 FAIL=0  (tmp: /tmp/longrun-test.EWErGX)
+PASS=202 FAIL=0  (tmp: /tmp/longrun-test.2GLsM4)

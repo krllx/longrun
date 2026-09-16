@@ -52,7 +52,7 @@
   ok   three identical FAILs in a row are reported as a loop
 == interrupt: dry run, then kill with --yes (a child of this test shell stands in for the session)
   ok   dry run lists the process and refuses to kill without --yes
-tests/orchestrator.sh: line 125: 58484 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
+tests/orchestrator.sh: line 125: 19938 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
   ok   --yes kills it and tells the session why
   ok   the interruption is in the target's journal
 == orchestrate stop
@@ -60,6 +60,9 @@ tests/orchestrator.sh: line 125: 58484 Terminated: 15          bash -c 'sleep 12
   ok   stop clears the lock and its mirror
   ok   digest without an orchestrator still shows the board
 == budget: the 5-hour pace rule (endpoint replaced by a fixture)
+  ok   the rule is off by default
+  ok   orchestrate start with the rule off says so and names the switch
+  ok   budget on flips the global key
   ok   12 minutes into the window: quiet period, no halt
   ok   20% after 1.5h (expected 30%): no halt, ratio shown
   ok   50% after 1.5h (x1.67): BUDGET STOP printed, halt.json kind=budget
@@ -73,4 +76,4 @@ tests/orchestrator.sh: line 125: 58484 Terminated: 15          bash -c 'sleep 12
   ok   a missing source is an error, not a halt
   ok   the watcher tick samples too
 
-PASS=64 FAIL=0  (tmp: /tmp/longrun-orch.zRxc4y)
+PASS=67 FAIL=0  (tmp: /tmp/longrun-orch.Oa8EOK)
