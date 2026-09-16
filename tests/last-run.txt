@@ -36,12 +36,13 @@
   ok   rm s2 removes an own note and archives it in the session dir
   ok   replace s1
   ok   notes shows both files
-  ok   40 read-only commands are not activity: no nudge, edits counter stays 0
-  ok   PostToolUse nudges once the window has passed AND edits exist (call 46 yes, 47 no)
-  ok   UserPromptSubmit on turn 1: ledger items yes, nudge no (turn window not reached)
-  ok   UserPromptSubmit nudges on turn 8 and stays quiet on turn 9 (once per window, not every turn)
-  ok   no nudge right after a note
-  ok   a failed command stepping over the window boundary does not swallow the reminder
+  ok   40 read-only commands are not activity: no card, edits counter stays 0
+  ok   mid-turn card names the files it edited, once per window (call 46 yes, 47 no)
+  ok   UserPromptSubmit right after a card: ledger items yes, a second card no
+  ok   the card of the turn that ended names its file and its failed command, not a bare counter
+  ok   and the next turn is quiet: a rate limit, not a card after every turn
+  ok   a turn of pure reading gets no card, and a note write resets the counters
+  ok   a failed command stepping over the window boundary does not swallow the card
   ok   PostToolUseFailure -> FAIL line in journal
   ok   PreCompact prints the summariser instructions on stdout (this is what Claude Code appends to the compaction prompt)
   ok   the hint names the notes that come back by themselves, and is plain text (JSON stdout would be read as a decision object)
@@ -55,7 +56,7 @@
   ok   SessionStart(compact) digest: own notes + journal tail + archive pointer
   ok   SessionStart(compact) digest carries the mechanical HANDOFF (failure + framing + files)
   ok   HANDOFF skips one-word replies and carries the /compact instructions as FOCUS
-  ok   a failed command counts as activity for the nudge (no edits needed)
+  ok   a failed command alone is worth a card, with no edits in the turn at all
   ok   handoff appears only after a compaction, not on plain startup
   ok   compactions counted
   ok   PostToolUse with the shell cwd outside the project still counts in the session's dir
@@ -230,4 +231,4 @@
   ok   the token comes from Claude Code's own credentials file when there is no keychain item
   ok   no credentials anywhere is an error, never an empty token
 
-PASS=209 FAIL=0  (tmp: /tmp/longrun-test.Y4kUJA)
+PASS=210 FAIL=0  (tmp: /tmp/longrun-test.lq49cd)
