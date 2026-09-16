@@ -44,6 +44,31 @@ check "budget refuses with exit 2 and candidates" "test $RC -eq 2 && grep -q 'do
 SIZE=$(size "$LOCAL/NOTES.md"); check "NOTES.md never exceeds cap ($SIZE B)" "test $SIZE -le 780"
 "$LR" prune --auto --shared >/dev/null; SIZE2=$(size "$LOCAL/NOTES.md"); check "prune --auto --shared shrinks to <=60% ($SIZE2 B) and archives" "test $SIZE2 -le 480 && test -s '$LOCAL/archive/notes.md'"
 check "prune keeps dead/decision over fact" "grep -q 'dead' '$LOCAL/NOTES.md' && grep -q 'decision' '$LOCAL/NOTES.md'"
+# stale: a session says an entry stopped being true. Not a delete - the entry may still be right, or the
+# session may be wrong - but everybody sees the mark and the next sweep takes the marked ones first.
+STP="$T/staleproj"; mkdir -p "$STP"; ( cd "$STP" && "$LR" init >/dev/null )
+( cd "$STP" && "$LR" add --shared -t dead "retry on 429 does not help: the limit is per org, not per key" >/dev/null
+  "$LR" add --shared -t pin "PR 42 = branch feature/checkout" >/dev/null
+  "$LR" add --shared -t fact "staging is sas-01, reachable only from the VPN" >/dev/null )
+( cd "$STP" && "$LR" stale n3 >/dev/null 2>/tmp/lr-stale ); check "a stale mark without a reason is refused" "test \$? -eq 2 && grep -q 'say why' /tmp/lr-stale"
+( cd "$STP" && "$LR" stale n3 "staging moved to vla-07 on 09-16" >/dev/null )
+SD1="$(cd "$STP" && "$LR" digest)"
+check "a marked entry still shows, with the mark and the reason, so other sessions see it too" "echo \"\$SD1\" | grep -q 'STALE since' && echo \"\$SD1\" | grep -q 'staging moved to vla-07' && echo \"\$SD1\" | grep -q 'sas-01'"
+SP="$(cd "$STP" && "$LR" prune --shared)"; check "prune offers the marked entry first, before the cheap tags" "echo \"\$SP\" | head -2 | grep -q 'sas-01'"
+( cd "$STP" && "$LR" stale ls | grep -q 'staging moved' ); check "stale ls lists the marks with who made them and when" "test \$? -eq 0"
+( cd "$STP" && "$LR" stale --clear n3 >/dev/null ); check "stale --clear takes the mark back" "! (cd '$STP' && '$LR' digest | grep -q 'STALE since')"
+( cd "$STP" && "$LR" stale n3 "gone for good" >/dev/null && "$LR" rm n3 >/dev/null )
+check "a mark does not outlive its entry" "! grep -q 'gone for good' '$STP/.longrun/stale.json'"
+# mute: take an entry out of MY digest, change nothing on disk and nothing for anyone else
+MU=eeeeeeee-2222-4333-8444-555555555555; MV=ffffffff-2222-4333-8444-555555555555
+for m in $MU $MV; do ( cd "$STP" && hook SessionStart "{\"session_id\":\"$m\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$STP\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null ); done
+( cd "$STP" && LONGRUN_SESSION=$MU "$LR" mute n1 >/dev/null )
+MD="$(cd "$STP" && LONGRUN_SESSION=$MU "$LR" digest)"
+MD2="$(cd "$STP" && LONGRUN_SESSION=$MV "$LR" digest)"
+check "a muted entry leaves this session's digest, and the head says how many are hidden" "! echo \"\$MD\" | grep -q 'retry on 429' && echo \"\$MD\" | grep -q '1 muted here' && echo \"\$MD\" | grep -q 'PR 42'"
+check "muting changes nothing on disk and nothing for another session" "grep -q 'retry on 429' '$STP/.longrun/NOTES.md' && echo \"\$MD2\" | grep -q 'retry on 429' && ! echo \"\$MD2\" | grep -q 'muted here'"
+( cd "$STP" && LONGRUN_SESSION=$MU "$LR" unmute --all >/dev/null )
+check "unmute --all brings them back" "(cd '$STP' && LONGRUN_SESSION=$MU '$LR' digest | grep -q 'retry on 429')"
 "$LR" rm n1 >/dev/null; check "rm n1 archives" "! grep -q '\[n1\]' '$LOCAL/NOTES.md' && grep -q 'rm | - \[n1\]' '$LOCAL/archive/notes.md'"
 "$LR" replace n2 "STQ v2 chosen (self-serve queues)" >/dev/null; check "replace n2" "grep -q 'n2\] .*STQ v2 chosen' '$LOCAL/NOTES.md'"
 "$LR" add --shared -t pin "never rm this" >/dev/null; check "add after prune fits" "grep -q 'pin (.*): never rm this' '$LOCAL/NOTES.md'"
