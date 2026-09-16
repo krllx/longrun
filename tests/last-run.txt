@@ -79,6 +79,19 @@
   ok   PRUNE NEEDED is measured against what a digest can carry, not against the file cap
   ok   config refuses notes budgets that cannot fit inject_max_bytes (exit 2)
   ok   ...and accepts them once inject_max_bytes has room
+== docs layer: long material in a file, one line in the notes pointing at it
+  ok   doc add writes one shared line with the path relative to the project root
+  ok   the same file twice is refused, and points at doc touch
+  ok   a doc must point at a file that exists
+  ok   a file outside the project is refused (it would not resolve in another worktree)
+  ok   the pointer is in the digest, the file's contents are not
+  ok   recall reaches inside the file the pointer names
+  ok   a file newer than its line is marked, so nobody trusts a stale description
+  ok   doc touch rewrites the description and keeps the path
+  ok   doc ls shows the path, the size and when it last changed
+  ok   a file changed under a pointer is reported once, on the next turn
+  ok   a pointer whose file is gone says so instead of going quiet
+  ok   gc archives a pointer whose file has been missing for a week
 == recall ranking: curated notes are not crowded out by a noisy archive
   ok   recall shows the NOTES.md hit despite 15 noisier archive hits
 == status and concurrency
@@ -231,4 +244,4 @@
   ok   the token comes from Claude Code's own credentials file when there is no keychain item
   ok   no credentials anywhere is an error, never an empty token
 
-PASS=210 FAIL=0  (tmp: /tmp/longrun-test.nVVjuh)
+PASS=222 FAIL=0  (tmp: /tmp/longrun-test.6v1WtH)

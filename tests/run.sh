@@ -238,6 +238,44 @@ python3 - "$LOCAL/config.json" <<'PY'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["inject_max_bytes"]=9000; json.dump(d,open(p,"w"))
 PY
 
+echo "== docs layer: long material in a file, one line in the notes pointing at it"
+DOCP="$T/docproj"; mkdir -p "$DOCP/research"; ( cd "$DOCP" && "$LR" init >/dev/null )
+printf 'The manifesto.\nPoint 4: the notes carry the paths of the long files.\nA word only in here: zanzibar.\n' > "$DOCP/research/M.md"
+( cd "$DOCP" && "$LR" doc add research/M.md "the original intent of the project, in the author's words; positioning follows it" >/dev/null )
+check "doc add writes one shared line with the path relative to the project root" "grep -q '\[n1\] .* doc .*: research/M.md - the original intent' '$DOCP/.longrun/NOTES.md'"
+( cd "$DOCP" && "$LR" doc add research/M.md "again" >/dev/null 2>/tmp/lr-doc ); check "the same file twice is refused, and points at doc touch" "test \$? -eq 2 && grep -q 'doc touch n1' /tmp/lr-doc"
+( cd "$DOCP" && "$LR" doc add research/nope.md "not written yet" >/dev/null 2>/tmp/lr-doc2 ); check "a doc must point at a file that exists" "test \$? -eq 2 && grep -q 'no such file' /tmp/lr-doc2"
+( cd "$DOCP" && "$LR" doc add /etc/hosts "outside" >/dev/null 2>/tmp/lr-doc3 ); check "a file outside the project is refused (it would not resolve in another worktree)" "test \$? -eq 2 && grep -q 'outside the project' /tmp/lr-doc3"
+DD="$(cd "$DOCP" && "$LR" digest)"; check "the pointer is in the digest, the file's contents are not" "echo \"\$DD\" | grep -q 'research/M.md - the original intent' && ! echo \"\$DD\" | grep -q 'zanzibar'"
+RD="$(cd "$DOCP" && "$LR" recall zanzibar --no-transcript)"; check "recall reaches inside the file the pointer names" "echo \"\$RD\" | grep -q 'research/M.md:3'"
+python3 - "$DOCP/.longrun/NOTES.md" <<'PY'
+import re,sys,datetime
+p=sys.argv[1]; s=open(p).read()
+old=(datetime.date.today()-datetime.timedelta(days=3)).strftime("%m-%d")
+open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
+PY
+DD2="$(cd "$DOCP" && "$LR" digest)"; check "a file newer than its line is marked, so nobody trusts a stale description" "echo \"\$DD2\" | grep -q 'this line may be stale'"
+( cd "$DOCP" && "$LR" doc touch n1 "what is in it now, after the rewrite" >/dev/null )
+check "doc touch rewrites the description and keeps the path" "grep -q 'research/M.md - what is in it now' '$DOCP/.longrun/NOTES.md'"
+DL="$(cd "$DOCP" && "$LR" doc ls)"; check "doc ls shows the path, the size and when it last changed" "echo \"\$DL\" | grep -q 'research/M.md' && echo \"\$DL\" | grep -q 'changed '"
+DG="\"session_id\":\"dddddddd-2222-4333-8444-555555555555\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$DOCP\""
+( cd "$DOCP" && hook SessionStart "{$DG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+  hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"a\"}" >/dev/null )
+sleep 1; printf 'a line another session added\n' >> "$DOCP/research/M.md"
+DTURN="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"b\"}")"
+DTURN2="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"c\"}")"
+check "a file changed under a pointer is reported once, on the next turn" "echo \"\$DTURN\" | grep -q 'DOCS changed' && echo \"\$DTURN\" | grep -q 'n1 research/M.md' && ! echo \"\$DTURN2\" | grep -q 'DOCS changed'"
+rm "$DOCP/research/M.md"
+DD3="$(cd "$DOCP" && "$LR" digest)"; check "a pointer whose file is gone says so instead of going quiet" "echo \"\$DD3\" | grep -q 'MISSING'"
+python3 - "$DOCP/.longrun/NOTES.md" <<'PY'
+import re,sys,datetime
+p=sys.argv[1]; s=open(p).read()
+old=(datetime.date.today()-datetime.timedelta(days=9)).strftime("%m-%d")
+open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
+PY
+( cd "$DOCP" && "$LR" gc >/dev/null )
+check "gc archives a pointer whose file has been missing for a week" "! grep -q 'research/M.md' '$DOCP/.longrun/NOTES.md' && grep -q 'doc file gone' '$DOCP/.longrun/archive/notes.md'"
+
 echo "== recall ranking: curated notes are not crowded out by a noisy archive"
 for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do echo "old summary $k mentioning pgx pool deadlock again" > "$LOCAL/archive/compact/11111111-2026010$((k%9))-$k.md"; done
 "$LR" add --shared -t dead "go test -race hangs: pgx pool deadlock, run without -race" >/dev/null 2>&1
