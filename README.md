@@ -27,7 +27,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-329_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-340_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -228,9 +228,9 @@ Full flags, file formats and the facts we verified about Claude Code: [docs/REFE
 ## Development
 
 ```bash
-bash tests/run.sh            # 202 regression checks, no API calls
-bash tests/scenarios.sh      # 30 scenarios, one per goal
-bash tests/orchestrator.sh   # 67: the orchestrator layer
+bash tests/run.sh            # 209 regression checks, no API calls
+bash tests/scenarios.sh      # 32 scenarios, one per goal
+bash tests/orchestrator.sh   # 69: the orchestrator layer
 bash tests/ask.sh            # 30: the dialog and the MCP server
 ```
 

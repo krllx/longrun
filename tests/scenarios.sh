@@ -70,6 +70,18 @@ TB3="$(turn $B "$WT_C")"; check "S3.3 B's own shared write is not reported back 
 TA="$(cd "$WT_E" && turn $A "$WT_E")"; check "S3.4 ...but A hears about it on A's next turn" "echo \"\$TA\" | grep -q '+ - \[n4\] .*PR C = 15473925'"
 ( cd "$WT_E" && as $A replace n1 "PR E = 15526210, branch EDAINAPP-1375-screen, merged r21056999 2026-09-08" >/dev/null && as $A rm n2 >/dev/null )
 TB4="$(turn $B "$WT_C")"; check "S3.5 a rewrite shows as ~ and a removal as removed" "echo \"\$TB4\" | grep -q '~ - \[n1\] .*merged r21056999' && echo \"\$TB4\" | grep -q 'removed: n2'"
+# More changed at once than one turn's slice can carry: the rest must come on the following turns.
+# Clipping the text and marking everything seen - what this used to do - hid them from B for good.
+python3 - "$HQ/.longrun/config.json" <<'PY'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["shared_delta_max_bytes"]=260; json.dump(d,open(p,"w"))
+PY
+for i in 1 2 3; do ( cd "$WT_E" && as $A add --shared -t fact "burst entry $i: a line long enough that three of them do not fit one turn's delta slice" >/dev/null ); done
+TB5="$(turn $B "$WT_C")"; TB6="$(turn $B "$WT_C")"; TB7="$(turn $B "$WT_C")"; TB8="$(turn $B "$WT_C")"
+check "S3.6 a delta over its slice shows the oldest first and says how many are still coming" "echo \"\$TB5\" | grep -q 'burst entry 1' && ! echo \"\$TB5\" | grep -q 'burst entry 2' && echo \"\$TB5\" | grep -q 'more on your next turn'"
+check "S3.7 the rest arrive on the next turns instead of being lost" "echo \"\$TB6\" | grep -q 'burst entry 2' && echo \"\$TB7\" | grep -q 'burst entry 3' && test -z \"\$TB8\""
+python3 - "$HQ/.longrun/config.json" <<'PY'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.pop("shared_delta_max_bytes",None); json.dump(d,open(p,"w"))
+PY
 
 echo "== S4: two sessions started in the same directory keep separate own notes"
 cd "$HQ"; start $C "$HQ" startup >/dev/null

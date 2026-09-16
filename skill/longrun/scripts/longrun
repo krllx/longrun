@@ -417,7 +417,8 @@ def notes_target(store, shared, sid=None, skey=None):
     if shared:
         return {"shared": True, "path": store.notes, "prefix": "n", "cap": int(store.cfg["notes_max_bytes"]),
                 "lock": store.lock(), "archive": os.path.join(store.archive, "notes.md"), "state": store.state,
-                "header": NOTES_HEADER, "label": "SHARED notes (project %s)" % store.name, "cmd": "--shared"}
+                "header": NOTES_HEADER, "label": "SHARED notes (project %s)" % store.name, "cmd": "--shared",
+                "cfg": store.cfg}
     if not skey:
         sid = sid or current_session(store)
         if not sid:
@@ -427,7 +428,7 @@ def notes_target(store, shared, sid=None, skey=None):
     d = os.path.join(store.sessions, skey)
     return {"shared": False, "path": os.path.join(d, "notes.md"), "prefix": "s", "cap": int(store.cfg["session_notes_max_bytes"]),
             "lock": Lock(d, ".lock"), "archive": os.path.join(d, "archive", "notes.md"), "state": os.path.join(d, "state.json"),
-            "header": OWN_HEADER, "label": "OWN notes (this session)", "cmd": "", "skey": skey}
+            "header": OWN_HEADER, "label": "OWN notes (this session)", "cmd": "", "skey": skey, "cfg": store.cfg}
 
 
 def _tgt(x):
@@ -1057,6 +1058,8 @@ def touch_session_note(store, locked=False, seen=None, drop=None):
         m["turns_since_note"] = 0
         m["edit_tools_since_note"] = 0
         m["fails_since_note"] = 0
+        m["nudged_at_tools"] = 0
+        m["nudged_at_turns"] = 0
         m["last_note"] = ts()
         if seen or drop:
             mark_shared_seen(store, m, ids=seen, drop=drop)
@@ -2849,14 +2852,24 @@ def mcp_serve(args):
 RUNNING_TOOLS = ("Bash", "PowerShell", "Agent", "Task", "Workflow")  # tools that can run long; MCP tools too
 
 
+RESUME_RE = re.compile(r"(?:^|[\s;&|(\"'])(?:[\w./-]*/)?longrun\s+resume\b")
+
+
 def halt_exempt(tool, ti):
     """During a halt only the longrun CLI itself may run (so the user can say `longrun resume` in a chat), and the
-    longrun MCP tools: asking the user is how a halt gets lifted."""
+    longrun MCP tools: asking the user is how a halt gets lifted.
+
+    `longrun resume` is let through wherever it appears in the command, not only as its first word, so
+    that the wrappers people actually type (`bash -c "longrun resume"`, `... && longrun resume`) are not
+    the one thing a halt makes impossible. This is convenience, not a security boundary: a halt is a
+    brake the user asked for, and anything at all can be run once they lift it."""
     if tool.startswith("mcp__longrun__"):
         return True
     if tool not in ("Bash", "PowerShell"):
         return False
     cmd = (ti.get("command") or "").strip()
+    if RESUME_RE.search(cmd):
+        return True
     cmd = re.sub(r"^(cd\s+\S+\s*(&&|;)\s*)+", "", cmd)
     cmd = re.sub(r"^(env\s+(-u\s+\S+\s+|\S+=\S*\s+)*)", "", cmd)
     first = cmd.split()[0] if cmd.split() else ""
@@ -3092,6 +3105,9 @@ def session_title(store, sid):
     return ""
 
 
+INBOX_BODY_MAX = 4000  # of one queued message; past this the body is cut and the file named
+
+
 def deliver_inbox(store, sid):
     """Messages queued for this session by `longrun send` (files inbox/*-msg-to-<sid8>-*.md): return them
     as text for the hook to inject and move them to inbox/.archive/, so each is delivered once."""
@@ -3110,8 +3126,12 @@ def deliver_inbox(store, sid):
         os.makedirs(arch, exist_ok=True)
         for f in files:
             head, _, body = read(f).strip().partition("\n\n")
-            out.append("MESSAGE %s\n%s" % (head.lstrip("# ").strip(), body.strip()[:4000]))
-            shutil.move(f, os.path.join(arch, os.path.basename(f)))
+            body = body.strip()
+            dst = os.path.join(arch, os.path.basename(f))
+            if len(body) > INBOX_BODY_MAX:  # say so: a message cut off mid-sentence reads like a complete one
+                body = body[:INBOX_BODY_MAX] + "\n... (cut off here, %d chars in all; the whole message: %s)" % (len(body), dst)
+            out.append("MESSAGE %s\n%s" % (head.lstrip("# ").strip(), body))
+            shutil.move(f, dst)
     return "\n".join(out)
 
 
@@ -4982,16 +5002,61 @@ def watch_block(sid, budget=700):
 
 
 # ----------------------------------------------------------------------------- digest (what hooks inject)
-def notes_block(t, budget, label=""):
+DIGEST_FIXED_BYTES = 600  # head + the write hint + the closing tag: what a digest carries before any block
+
+
+def digest_caps(cfg):
+    """(shared, own): how many bytes of each notes file the digest can really inject.
+
+    `notes_max_bytes` is the hard cap of the FILE - what `add` refuses to go past. What reaches a
+    session is bounded by `inject_max_bytes` instead, and when the two caps together ask for more
+    than that, the room is split between them in proportion. Everything that judges whether a file
+    has grown too big (the PRUNE NEEDED line, the autoprune) measures against these numbers, not
+    against the file cap: measured against the file cap, a project with notes_max_bytes 15000 and
+    inject_max_bytes 9800 would warn at 12000 B, thousands of bytes after entries stopped arriving."""
+    shared_cap, own_cap = int(cfg["notes_max_bytes"]), int(cfg["session_notes_max_bytes"])
+    room = max(1000, int(cfg["inject_max_bytes"]) - DIGEST_FIXED_BYTES)
+    total = shared_cap + own_cap
+    if total <= room or total <= 0:
+        return shared_cap, own_cap
+    return max(1, shared_cap * room // total), max(1, own_cap * room // total)
+
+
+def digest_cap(cfg, shared):
+    return digest_caps(cfg)[0 if shared else 1]
+
+
+def sheddable(entries):
+    """The entries a digest may leave out to fit, oldest first. `pin` is exempt, as everywhere else."""
+    return [e for e in entries if e["tag"] != "pin"]
+
+
+def notes_block(t, budget, label="", drop_oldest=0):
+    """One notes block of the digest. `drop_oldest` leaves out that many of the oldest non-pin
+    entries: that is how the notes give way when everything together is over `inject_max_bytes`.
+    Clipping the rendered text instead would eat the tail, and the tail is the NEWEST entries."""
     entries = load_notes(t)
+    cfg = t.get("cfg") or load_config(None)
     cap = t["cap"]
     used = notes_bytes(entries)
-    pct = int(100 * used / cap) if cap else 0
-    warn = int(load_config(None).get("notes_warn_pct", DEFAULTS["notes_warn_pct"]))
-    head = "%s %d entries %d/%d B (~%d tok)%s" % (label or t["label"], len(entries), used, cap, est_tokens(notes_body(entries)),
-                                                 ("  PRUNE NEEDED: `longrun prune%s`" % ((" " + t["cmd"]) if t["cmd"] else "")) if pct >= warn else "")
-    text = "\n".join([head] + [fmt_note(e, t["prefix"]) for e in entries])
-    if len(text.encode("utf-8")) > budget:  # should not happen (cap < budget) unless hand-edited
+    eff = digest_cap(cfg, t["shared"])
+    pct = int(100 * used / eff) if eff else 0
+    warn = int(cfg.get("notes_warn_pct", DEFAULTS["notes_warn_pct"]))
+    prune = ("  PRUNE NEEDED: `longrun prune%s`%s" % ((" " + t["cmd"]) if t["cmd"] else "",
+             (" (only ~%d B of these fit a digest)" % eff) if eff < used else "")) if pct >= warn else ""
+    head = "%s %d entries %d/%d B (~%d tok)%s" % (label or t["label"], len(entries), used, cap,
+                                                  est_tokens(notes_body(entries)), prune)
+    body = list(entries)
+    if drop_oldest > 0:
+        for e in sheddable(entries)[:drop_oldest]:
+            body.remove(e)
+    lines = [head]
+    if len(body) != len(entries):
+        lines.append("  (%d older entr%s left out to fit; still on disk: `longrun notes%s`)"
+                     % (len(entries) - len(body), "y" if len(entries) - len(body) == 1 else "ies",
+                        (" " + t["cmd"]) if t["cmd"] else " --own"))
+    text = "\n".join(lines + [fmt_note(e, t["prefix"]) for e in body])
+    if len(text.encode("utf-8")) > budget:  # only a hand-edited file over its own cap gets here
         text = text.encode("utf-8")[: budget - 40].decode("utf-8", "ignore") + "\n…(notes truncated: over budget, run `longrun prune`)"
     return text
 
@@ -5018,27 +5083,47 @@ def mark_shared_seen(store, m, ids=None, drop=None):
 
 def shared_delta(store, m, budget):
     """Shared notes that changed since this session last saw them: what other sessions added, rewrote or
-    removed. Empty the first time (baseline only) and when nothing changed."""
+    removed. Empty the first time (baseline only) and when nothing changed.
+
+    Only what actually fits in `budget` is marked as seen. Marking everything and then clipping the
+    text, which is what this used to do, meant the entries past the budget were never shown to this
+    session at all - not now, not on any later turn."""
     entries = {str(e["id"]): e for e in load_notes(notes_target(store, True))}
     cur = {k: hashlib.md5(e["text"].encode("utf-8")).hexdigest()[:8] for k, e in entries.items()}
     seen = m.get("shared_seen")
-    m["shared_seen"] = cur
     if seen is None:
+        m["shared_seen"] = cur
         return ""
-    added = [entries[k] for k in entries if k not in seen]
-    changed = [entries[k] for k in entries if k in seen and seen[k] != cur[k]]
-    removed = [k for k in seen if k not in cur]
-    if not (added or changed or removed):
+    ids = sorted(entries, key=int)
+    todo = [("+", entries[k]) for k in ids if k not in seen] + \
+           [("~", entries[k]) for k in ids if k in seen and seen[k] != cur[k]]
+    removed = sorted([k for k in seen if k not in cur], key=int)
+    if not (todo or removed):
         return ""
-    lines = ["SHARED notes of project %s changed since you last saw them:" % store.name]
-    lines += ["  + " + fmt_note(e) for e in added]
-    lines += ["  ~ " + fmt_note(e) for e in changed]
+    head = "SHARED notes of project %s changed since you last saw them:" % store.name
+    lines, used, left = [head], len(head.encode("utf-8")), 0
+    shown = dict(seen)
+    for mark, e in todo:
+        line = "  %s %s" % (mark, fmt_note(e))
+        n = len(line.encode("utf-8")) + 1
+        if used + n > budget and len(lines) > 1:  # the first entry always goes, or nothing ever would
+            left = len(todo) - len(lines) + 1
+            break
+        lines.append(line)
+        used += n
+        shown[str(e["id"])] = cur[str(e["id"])]
     if removed:
-        lines.append("  - removed: " + ", ".join("n" + k for k in sorted(removed, key=int)))
-    text = "\n".join(lines)
-    if len(text.encode("utf-8")) > budget:
-        text = text.encode("utf-8")[: budget - 30].decode("utf-8", "ignore") + "\n  …(more: `longrun notes --shared`)"
-    return text
+        line = "  - removed: " + ", ".join("n" + k for k in removed)
+        if used + len(line.encode("utf-8")) + 1 <= budget or len(lines) == 1:
+            lines.append(line)
+            for k in removed:
+                shown.pop(k, None)
+        else:
+            left += len(removed)
+    if left:
+        lines.append("  (+%d more on your next turn; all of them: `longrun notes --shared`)" % left)
+    m["shared_seen"] = shown
+    return "\n".join(lines)
 
 
 def session_is_noise(m):
@@ -5215,11 +5300,14 @@ def build_digest(store, sid, source="manual", cwd=None, continued=False):
     msgs = deliver_inbox(store, sid)
     if msgs:
         parts.append(["messages", msgs])
-    parts.append(["shared", notes_block(notes_target(store, True), int(cfg["notes_max_bytes"]) + 400)])
+    note_blocks = {}  # key -> (target, budget, label), so the shedding pass below can re-render them
+    note_blocks["shared"] = (notes_target(store, True), int(cfg["notes_max_bytes"]) + 400, "")
+    parts.append(["shared", notes_block(*note_blocks["shared"])])
     if sid:
         own = notes_target(store, False, sid=sid)
         label = own["label"] if not continued else "OWN notes (this session, continued from an earlier CLI id)"
-        parts.append(["own", notes_block(own, int(cfg["session_notes_max_bytes"]) + 400, label)])
+        note_blocks["own"] = (own, int(cfg["session_notes_max_bytes"]) + 400, label)
+        parts.append(["own", notes_block(*note_blocks["own"])])
     bb = board_block(store, sid, int(cfg["board_block_bytes"]))
     if bb:
         parts.append(["board", bb])
@@ -5294,6 +5382,23 @@ def build_digest(store, sid, source="manual", cwd=None, continued=False):
                 break
     if over() and drop("ledger"):
         parts.insert(2, ["ledger", "LEDGER omitted (over budget): `longrun ledger`"])
+    # Still over: now the notes give way too, but by shedding their OLDEST non-pin entries one at a
+    # time (oldest first across both files), never by clipping the rendered text - a clip removes the
+    # tail, and the tail is what was written last, which is the part a session is most likely to need.
+    if over():
+        pools = {k: sheddable(load_notes(v[0])) for k, v in note_blocks.items()}
+        shed = {k: 0 for k in note_blocks}
+        while over():
+            cands = [(k, pools[k][shed[k]]) for k in note_blocks if shed[k] < len(pools[k])]
+            if not cands:
+                break
+            key = min(cands, key=lambda c: (c[1]["date"], c[1]["id"]))[0]
+            shed[key] += 1
+            t_, b_, l_ = note_blocks[key]
+            for i, (pk, _) in enumerate(parts):
+                if pk == key:
+                    parts[i] = [key, notes_block(t_, b_, l_, drop_oldest=shed[key])]
+                    break
     text = render()
     if len(text.encode("utf-8")) > total:
         text = text.encode("utf-8")[: total - 20].decode("utf-8", "ignore") + "\n</longrun>"
@@ -5566,8 +5671,10 @@ def age_notes(t, cfg, report, what):
             report.append("%s: archived %d expired entries" % (what, len(gone)))
         # Age alone never frees the budget: in real use it fills in a day or two, long before anything is
         # old. Without this, the steady state is "add refuses until the model prunes". Only todo/ctx are
-        # eligible, so a dead end or a decision is never dropped behind the model's back.
-        cap, pct = t["cap"], int(cfg.get("notes_autoprune_pct") or 0)
+        # eligible, so a dead end or a decision is never dropped behind the model's back. The percentages
+        # are of what a digest can actually inject (digest_caps), not of the file cap: measured against
+        # the file cap they fire long after entries have started being left out of the digest.
+        cap, pct = digest_cap(cfg, t["shared"]), int(cfg.get("notes_autoprune_pct") or 0)
         target = int(cfg["notes_warn_pct"])
         cheap = 0
         if pct and cap and notes_bytes(keep) > cap * pct / 100.0:
@@ -5805,10 +5912,26 @@ def cmd_compact_hint(store, args):
     return 0
 
 
+def nudge_due(store, m):
+    """Has a whole window passed since the last reminder (or since the last note)? Counters are
+    compared against where they stood when the last reminder went out, not taken modulo the window:
+    a counter that steps OVER the boundary - which `PostToolUseFailure` does every time it charges a
+    failed command, without checking the reminder itself - would skip the window entirely."""
+    cfg = store.cfg
+    return (int(m.get("tools_since_note") or 0) - int(m.get("nudged_at_tools") or 0) >= max(1, int(cfg["nudge_tools"]))
+            or int(m.get("turns_since_note") or 0) - int(m.get("nudged_at_turns") or 0) >= max(1, int(cfg["nudge_turns"])))
+
+
+def nudge_mark(m):
+    """One reminder per window, whichever counter triggered it."""
+    m["nudged_at_tools"] = int(m.get("tools_since_note") or 0)
+    m["nudged_at_turns"] = int(m.get("turns_since_note") or 0)
+
+
 def nudge_text(store, m):
     """The reminder, or "" when it is not due. Reading around is not activity worth a note: it takes real
     edits or a failed command since the last note, and then a window's worth of turns or tool calls.
-    Cadence (once per window, never every turn) is the caller's job."""
+    Cadence (once per window, never every turn) is `nudge_due`'s job."""
     cfg = store.cfg
     if m["edit_tools_since_note"] < int(cfg["nudge_edit_tools"]) and not m.get("fails_since_note"):
         return ""
@@ -5926,6 +6049,9 @@ def cmd_hook(args):
             delta = shared_delta(store, m, int(store.cfg["shared_delta_max_bytes"]))
             bd = board_delta(store, m)
             cw = ctx_warning(store, m)
+            nt = nudge_text(store, m) if nudge_due(store, m) else ""
+            if nt:
+                nudge_mark(m)
             save_meta(store, sid, m)
         if cw:
             out.append(cw)
@@ -5945,8 +6071,7 @@ def cmd_hook(args):
             due = ledger_block(store, 1200, due_only=True)
             if due:
                 out.append(due)
-        nt = nudge_text(store, m)
-        if nt and m["turns_since_note"] % int(store.cfg["nudge_turns"]) == 0:  # once per window, not every turn
+        if nt:
             out.append(nt)
         if out:
             sys.stdout.write("\n".join(out) + "\n")
@@ -5979,13 +6104,13 @@ def cmd_hook(args):
             cw = ctx_warning(store, m)
             tell = ctx_warning(store, m, "ctx_told")
             bd = board_delta(store, m)
+            nt = nudge_text(store, m) if nudge_due(store, m) else ""
+            if nt:
+                nudge_mark(m)
             save_meta(store, sid, m)
         if tell:
             notify_orchestrator(store, "%s [%s]: %s" % (clip(session_display_name(sid, store), 30), session_key(sid)[:8], tell), wake=False, from_sid=sid)
-        ctx = [deliver_inbox(store, sid), bd, cw]  # a message from another session lands between tool calls, like a socket one
-        nt = nudge_text(store, m)
-        if nt and m["tools_since_note"] % int(store.cfg["nudge_tools"]) == 0:  # once per window, not every call
-            ctx.append(nt)
+        ctx = [deliver_inbox(store, sid), bd, cw, nt]  # a message from another session lands between tool calls, like a socket one
         ctx = [c for c in ctx if c]
         if ctx:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n".join(ctx)}}))
@@ -6269,6 +6394,31 @@ def config_coerce(key, raw):
         die("%s takes %s, got %r" % (key, kind.__name__, raw), 2)
 
 
+BUDGET_KEYS = ("notes_max_bytes", "session_notes_max_bytes", "inject_max_bytes")
+
+
+def check_budget_keys(local, key, value):
+    """Refuse a set that puts the two notes budgets past what a hook may inject. Entries above that
+    line are not a preference to be honoured later: they are entries no session will ever be shown,
+    because `inject_max_bytes` is the hard end of a digest (Claude Code caps hook output at 10,000
+    characters). Raise `inject_max_bytes` first, or keep the notes below it.
+
+    Judged on the values this project would end up with, whichever file each of them comes from."""
+    if key not in BUDGET_KEYS:
+        return
+    eff = dict(load_config(local))
+    eff[key] = value
+    need = int(eff["notes_max_bytes"]) + int(eff["session_notes_max_bytes"]) + DIGEST_FIXED_BYTES
+    have = int(eff["inject_max_bytes"])
+    if need > have:
+        die("notes_max_bytes %d + session_notes_max_bytes %d + %d B of head and hints = %d B, but a digest stops at "
+            "inject_max_bytes = %d B.\nThe %d B above that line would never reach a session: the digest would shed the "
+            "oldest entries to fit.\nRaise inject_max_bytes first (Claude Code drops hook output past 10000 characters), "
+            "or keep the two notes budgets under %d B together."
+            % (int(eff["notes_max_bytes"]), int(eff["session_notes_max_bytes"]), DIGEST_FIXED_BYTES, need, have,
+               need - have, have - DIGEST_FIXED_BYTES), 2)
+
+
 def cmd_config(args):
     """longrun config                      effective values, and where each comes from
     longrun config set KEY VALUE [--global]   project config.json (or ~/.claude/longrun/config.json)
@@ -6292,6 +6442,7 @@ def cmd_config(args):
             print("%s unset in %s (now %s)" % (key, path, json.dumps(load_config(local).get(key))))
             return 0
         cur[key] = config_coerce(key, rest[2])
+        check_budget_keys(local, key, cur[key])
         write_json(path, cur)
         print("%s = %s (%s: %s)" % (key, json.dumps(cur[key]), "global" if glob else "project", path))
         return 0

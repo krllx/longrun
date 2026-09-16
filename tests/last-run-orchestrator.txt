@@ -27,6 +27,8 @@
   ok   halt: PreToolUse denies with the reason
   ok   halt: every tool, not only Bash
   ok   halt: the longrun CLI itself is exempt
+  ok   halt: longrun resume is exempt inside a wrapper too, not only as the first word
+  ok   halt: ...and after a command that is not exempt
   ok   halt: the turn injection says so
   ok   halt: the digest says so
   ok   resume: tools run again (nothing printed)
@@ -52,7 +54,7 @@
   ok   three identical FAILs in a row are reported as a loop
 == interrupt: dry run, then kill with --yes (a child of this test shell stands in for the session)
   ok   dry run lists the process and refuses to kill without --yes
-tests/orchestrator.sh: line 125: 19938 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
+tests/orchestrator.sh: line 127: 46458 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
   ok   --yes kills it and tells the session why
   ok   the interruption is in the target's journal
 == orchestrate stop
@@ -76,4 +78,4 @@ tests/orchestrator.sh: line 125: 19938 Terminated: 15          bash -c 'sleep 12
   ok   a missing source is an error, not a halt
   ok   the watcher tick samples too
 
-PASS=67 FAIL=0  (tmp: /tmp/longrun-orch.Oa8EOK)
+PASS=69 FAIL=0  (tmp: /tmp/longrun-orch.uUd7mC)
