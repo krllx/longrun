@@ -1,16 +1,17 @@
 English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
 <p align="center">
-  <img src="assets/hero.jpg" alt="longrun: memory that survives compaction" width="820">
+  <img src="assets/hero.jpg" alt="longrun: memory and coordination for Claude Code sessions" width="820">
 </p>
 
 <h1 align="center">longrun</h1>
 
 <p align="center">
   Memory and coordination for Claude Code sessions.<br>
-  Notes that survive compaction. Sessions that message each other and hand out tasks.<br>
-  Waiting that never misses the event: no polling loop, the session wakes when it fires.<br>
-  One session that drives the others to the goal you set.
+  A project that keeps its own state on disk, written and kept in order by the agents themselves.<br>
+  Every session sees what the project knows and who else is working on it.<br>
+  Work goes to the session that has the context; waiting is reliable and costs nothing.<br>
+  One session can drive the rest - and reach you when only you can decide.
 </p>
 
 <p align="center">
@@ -82,20 +83,33 @@ From there, nothing to call: *"write that down"*, *"what have we tried"*, *"tell
 
 ## In short
 
-**By itself, from the first session:** the agent keeps notes on disk - dead ends, decisions, facts - and the hooks bring them back after every compaction, `/clear` and resume; the hooks tell the summariser what to keep; every turn shows what other sessions of the project changed.
+**By itself, from the first session:** the project keeps a set of notes on disk that the agents write, re-read and prune themselves - dead ends, decisions, facts. Every session starts knowing what is in them, which other sessions exist and what each one did last, and every turn shows what the others changed since.
 
-**When you ask, or the agent sees the need:** "tell me when the PR merges" (a watch that spends no tokens waiting), messages and tasks between sessions, a notification when the session you care about finishes a turn, one session driving the others to the goal you set.
+**When you ask, or the agent sees the need:** work is handed to the session that already has the context; "tell me when the PR merges" becomes a watch that spends no tokens waiting and cannot be slept through; a notification reaches you for the session you must not miss; one session coordinates the others toward the goal you set and puts a dialog in front of you when only you can unblock it.
+
+**And along the way:** notes on disk do not degrade, so the hooks bring them back after every compaction, `/clear` and resume. That part matters less than it used to - the same hooks now tell the summariser what to keep, so an ordinary compaction already loses less than it did.
 
 ## Why
 
 | Without longrun | With longrun |
 |---|---|
-| Compaction squeezes the history into a summary, and the reasons behind its decisions go first: why an approach was dropped, why this path was taken. Half an hour later the agent proposes the fix it already reverted. | **Notes on disk.** One line per dead end, decision and fact. Shared ones every session sees, own ones that come back after every compaction, `/clear` and resume. |
-| A second session does not know the first one exists. One opened a PR, the other says "the PR is not created yet". | **Messages and tasks.** A session sends a message or hands out a task, and it arrives in the other session as a user turn. |
+| Everything a session worked out lives inside that one conversation. The next one - tomorrow's, or the one in the other window - starts from nothing and asks you what is going on. | **A project that remembers.** One `.longrun/` per project: notes the agents write, re-read and prune themselves. Every session starts with them, plus who else is working and what each did last. |
+| A second session does not know the first one exists. One opened a PR, the other says "the PR is not created yet". | **Messages and tasks.** Work goes to the session that already has the context, and arrives there as a user turn. A stopped session too: it waits in the project inbox. |
 | "Tell me when the PR merges" turns into a polling loop that burns tokens, or into a fixed sleep that ends long after the event, or before it. | **Watches.** A background timer checks the condition every five minutes without a model and wakes the session when it holds. Reliable, reactive, free. |
-| Five sessions on one project, and the human is the only one who knows what is done, stuck and next. | **An orchestrator.** One session keeps the board, hands out tasks, spots stuck peers, and asks the human through a dialog only when it must. |
+| Five sessions on one project, and you are the only one who knows what is done, stuck and next - and the only one who notices when one of them is waiting for you. | **An orchestrator.** One session keeps the board for the others, spots a peer that is stuck, and puts a dialog in front of every window when only you can decide. |
+| Compaction squeezes the history into a summary, and the reasons go first: why an approach was dropped, why this path was taken. | **Notes on disk do not degrade,** and the hooks re-inject them afterwards. They also tell the summariser what to keep, so the compaction itself loses less. |
 
 One python file, no dependencies.
+
+## Claude Code already does some of this
+
+longrun is for what outlives a turn and a session. Reach for the built-in thing first:
+
+- **One session working toward one checkable condition** -> `/goal`: it keeps that session going until a separate evaluator confirms the condition holds. longrun has a board and persuasion, not an evaluator.
+- **Splitting work inside a single turn** -> subagents and workflows: parallel, joined, and gone when the turn ends.
+- **What outlives the task itself** - who you are, how you work, standing conventions -> Claude Code's auto memory.
+- **A message to a session that is running right now** -> the built-in `SendMessage`; `ListAgents` lists what is running.
+- **Several windows, over hours and days** -> longrun: state that outlives every turn, a stopped session you can still write to, waiting that costs no tokens, and one session coordinating the rest.
 
 ## Four ways sessions coordinate
 
@@ -116,6 +130,8 @@ longrun recall 429                                                  # search eve
 
 A message to another session arrives as a user turn. A running session gets it right away through its socket. A stopped one gets it from the project inbox on its next turn; only when you pass `--resume` is it woken right away, as a `claude -p` run in the background, which spends tokens. A session is addressed by the title you see in the sidebar.
 
+Claude Code can do the first half of this on its own: `SendMessage` writes to a session that is **running**, and `ListAgents` lists the ones that are. What `longrun send` adds is the rest - a session that is stopped (the message waits in the inbox), addressing by the sidebar title rather than a session id, `--resume` to wake one headless, and the same path used by a fired watch and by the board, neither of which has a model to call a tool for them.
+
 ```bash
 longrun send "PR 43: payments" "PR 42 merged, rebase onto main"
 longrun board assign T8 "PR 43: payments"      # a task instead of a message
@@ -132,9 +148,11 @@ longrun watch add --then "check the deploy" -- at 10:00
 
 Checks: `pr-merged` (GitHub via `gh`), `pr-status`, `at`, `file`, `http`, `cmd`.
 
-### 4. Autonomy you switch on: one session drives the others
+### 4. One session coordinates the rest - and reaches you when it has to
 
 One session takes the orchestrator role and keeps a board: the goal, tasks, facts from outside. Workers take, finish and flag tasks as blocked. Each change on the board wakes the orchestrator, which hands out the next task, resolves blocks, or asks you through a dialog in front of every window. It does not poll and does not start sessions by itself: in the desktop app it leaves a chip that opens one when you click it, in the terminal it gives you the first line to paste.
+
+This is coordination across several windows plus a line to you, not autonomy: driving **one** session to a condition an evaluator can check is what `/goal` is for.
 
 ```bash
 longrun orchestrate start --goal "ship the checkout drawer"    # in the driving session
