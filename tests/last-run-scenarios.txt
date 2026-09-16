@@ -43,4 +43,4 @@ This session keeps its durable notes on disk and gets them back right after the 
   ok   S8.2 a running session gets it on its socket right away, as a user turn
   ok   S8.3 a watch registered by name fires into that session with the --then text
 
-PASS=30 FAIL=0  (tmp: /tmp/longrun-scen.sF1k4d)
+PASS=30 FAIL=0  (tmp: /tmp/longrun-scen.uDPH8V)
