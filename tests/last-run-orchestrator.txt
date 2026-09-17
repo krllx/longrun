@@ -52,30 +52,9 @@
   ok   second tick: nothing new
   ok   flags clear when the condition does
   ok   three identical FAILs in a row are reported as a loop
-== interrupt: dry run, then kill with --yes (a child of this test shell stands in for the session)
-  ok   dry run lists the process and refuses to kill without --yes
-tests/orchestrator.sh: line 127: 26609 Terminated: 15          bash -c 'sleep 120; echo shell-snapshots-stand-in'
-  ok   --yes kills it and tells the session why
-  ok   the interruption is in the target's journal
 == orchestrate stop
   ok   only the holder (or --force) stops
   ok   stop clears the lock and its mirror
   ok   digest without an orchestrator still shows the board
-== budget: the 5-hour pace rule (endpoint replaced by a fixture)
-  ok   the rule is off by default
-  ok   orchestrate start with the rule off says so and names the switch
-  ok   budget on flips the global key
-  ok   12 minutes into the window: quiet period, no halt
-  ok   20% after 1.5h (expected 30%): no halt, ratio shown
-  ok   50% after 1.5h (x1.67): BUDGET STOP printed, halt.json kind=budget
-  ok   report file and a wake for the orchestrator (inbox here: no socket in tests)
-  ok   tools are refused with the usage reason
-  ok   budget status shows the stop
-  ok   resume lifts the halt and snoozes the rule until the window resets
-  ok   snoozed: a worse sample does not halt again
-  ok   budget off: samples but never halts
-  ok   pace 25/factor 2: 60% after 2h (limit 100%) is fine
-  ok   a missing source is an error, not a halt
-  ok   the watcher tick samples too
 
-PASS=69 FAIL=0  (tmp: /tmp/longrun-orch.FYkleR)
+PASS=51 FAIL=0  (tmp: /tmp/longrun-orch.58vjcU)

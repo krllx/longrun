@@ -1,5 +1,5 @@
 == init (project) and a linked worktree
-  ok   project init --hq
+  ok   project init makes NOTES.md and the message inbox
   ok   worktree link -> registry entry, nothing written into the worktree
   ok   where in the worktree resolves to the project
   ok   session state lives outside the project and the worktree
@@ -26,18 +26,8 @@
   ok   replace n2
   ok   add after prune fits
   ok   shared entries carry the author label
-== ledger + ask + inbox
-  ok   ledger in the project
-  ok   ledger DUE shown
-  ok   ledger done with outcome
-  ok   ask --ledger -> ledger @user + inbox file
-  ok   hand-edited ledger line survives a rewrite
-  ok   hand-edited line is listed but not addressable as L0
-  ok   report from stdin
-  ok   inbox ls counts 2
-  ok   inbox ack archives
 == hooks with real payload shapes
-  ok   SessionStart prints digest with shared notes, own notes, ledger and the commands
+  ok   SessionStart prints digest with shared notes, own notes and the commands
   ok   SessionStart exports env for Bash
   ok   SessionStart creates the session dir with meta + journal
   ok   session index records project and key
@@ -48,7 +38,7 @@
   ok   notes shows both files
   ok   40 read-only commands are not activity: no card, edits counter stays 0
   ok   mid-turn card names the files it edited, once per window (call 46 yes, 47 no)
-  ok   UserPromptSubmit right after a card: ledger items yes, a second card no
+  ok   UserPromptSubmit right after a card: no second card
   ok   the card of the turn that ended names its file and its failed command, not a bare counter
   ok   and the next turn is quiet: a rate limit, not a card after every turn
   ok   a turn of pure reading gets no card, and a note write resets the counters
@@ -81,10 +71,10 @@
   ok   recall finds FAIL line in journal
   ok   recall miss exits 1
 == digest size cap
-  ok   digest respects inject_max_bytes (1478 B <= 1500)
-  ok   all budgets full: digest fits (8836 B <= 9000) and keeps the @user/DUE rows
+  ok   digest respects inject_max_bytes (1365 B <= 1500)
+  ok   all budgets full: the digest still fits (8610 B <= 9000)
   ok   all budgets full: neither notes file is what gives way
-  ok   over budget: the digest sheds the OLDEST entries and keeps the newest (1307 B <= 1400)
+  ok   over budget: the digest sheds the OLDEST entries and keeps the newest (1292 B <= 1400)
   ok   over budget: a pin is never the entry that gives way
   ok   PRUNE NEEDED is measured against what a digest can carry, not against the file cap
   ok   config refuses notes budgets that cannot fit inject_max_bytes (exit 2)
@@ -105,7 +95,7 @@
 == recall ranking: curated notes are not crowded out by a noisy archive
   ok   recall shows the NOTES.md hit despite 15 noisier archive hits
 == status and concurrency
-  ok   status lists the session with its state, own-note count and NEEDS USER
+  ok   status lists the session with its state, own-note count and last status
   ok   status hides a session with no tool calls and no turns (app noise), --all shows it
   ok   20 parallel shared adds, none lost (20)
   ok   ids unique under concurrency
@@ -121,17 +111,13 @@
   ok   migrated history stays visible to status and recall
   ok   a 0.2 worktree store resolves to its hub as the project
   ok   the notes it held are parked in the project archive and recall finds them
-== notes-only mode (the HQ layer is opt-in)
-  ok   plain init creates no ledger and no inbox
-  ok   where reports notes-only
-  ok   shared notes/recall work in notes-only mode
-  ok   HQ command refused with exit 4 and a way out
-  ok   digest has no LEDGER block in notes-only mode
-  ok   a worktree of a notes-only project is notes-only too (no ledger/report hints)
+== a project made by plain init, and hand edits to its notes
+  ok   shared notes and recall work in a plain project
+  ok   the ledger layer is gone: no file, no command, no digest block
+  ok   the old --hq flag is accepted and ignored, so an old command line still works
   ok   a hand-written heading in NOTES.md is kept, not silently dropped
-  ok   --hq turns the layer on afterwards
 == gc auto-prunes cheap entries so writing never simply stops
-  ok   gc auto-archived cheap todo entries (797 -> 488 B)
+  ok   gc auto-archived cheap todo entries (791 -> 485 B)
   ok   gc never auto-archives a dead end
 == recall reaches earlier sessions' transcripts and other sessions' own notes
   ok   recall finds a detail from a previous session's transcript
@@ -224,14 +210,8 @@
   ok   each notifier gets its own argv, and only terminal-notifier is asked for a sound
   ok   LONGRUN_NO_UI sends nothing and says that is why (exit 1)
   ok   notify_user reports the program it used, so a caller can log how it notified
-  ok   the presented flag is unreadable without the macOS database, and that is not a failure
-  ok   no macOS database means no records, not a crash
   ok   a click target is built only from a real app session id (local_<uuid>), never from a CLI id
   ok   a missing notifier is never an error: notify_user returns a string for every kind and raises nothing
-  ok   notifications go through our own sender bundle as soon as it exists, and fall back to PATH when it does not
-  ok   the bundle keeps terminal-notifier's own id prefix, so the copy is recognisably a copy
-  ok   notify setup refuses politely off macOS instead of building a broken bundle
-  ok   notify setup with a missing icon file is an argument error, and nothing is built
   ok   notify_turn_end is off by default, and refuses anything but off/unfocused/always (exit 2)
   ok   unfocused notifies only while the Claude app is not the one in front
   ok   always ignores the front app, off never fires, and an unknown value is treated as off
@@ -251,7 +231,5 @@
   ok   an unknown argument is refused (exit 2), not silently taken as on
   ok   the flag beats both gates: notify_turn_end off and the Claude app in front
   ok   consume_important spends a counted flag and never goes below zero
-  ok   the token comes from Claude Code's own credentials file when there is no keychain item
-  ok   no credentials anywhere is an error, never an empty token
 
-PASS=232 FAIL=0  (tmp: /tmp/longrun-test.T1SNYy)
+PASS=211 FAIL=0  (tmp: /tmp/longrun-test.0bFrWh)

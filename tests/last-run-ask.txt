@@ -16,16 +16,13 @@
   ok   no dialog possible: FAILED, ask in the chat
   ok   ask answer records the chat answer, no message
   ok   no question: usage, exit 2
-== ask: an unanswered question goes to the HQ ledger
+== ask: a question nobody answered says so, and does not quietly disappear
   ok   PENDING first
-  ok   then the ledger item owned by the user
-  ok   ask --ledger is the old shortcut (ledger + report)
-== halt: the MCP tools stay allowed; the stop dialog lifts the halt
+  ok   then EXPIRED reaches the asker as a message, with the question quoted
+== halt: the MCP tools stay allowed, resume lifts it
   ok   mcp__longrun__ask is not refused during a halt
   ok   Bash still is
-  ok   Keep stopped keeps it
-  ok   Resume all lifts the halt, snoozes the budget rule, tells the orchestrator
-  ok   the watcher log records the dialog
+  ok   resume lifts the halt and tells the orchestrator who did it
 == watcher: a question the user ignores is a stuck report to the orchestrator
   ok   stuck scan names the question and its age
 == mcp: the stdio server finds its session by the parent pid
@@ -36,4 +33,4 @@
   ok   nothing but JSON-RPC on stdout, nothing on stderr
   ok   no session behind the server: the dialog alone, inline
 
-PASS=30 FAIL=0  (tmp: /tmp/longrun-ask.55CLER)
+PASS=27 FAIL=0  (tmp: /tmp/longrun-ask.tKtpfs)

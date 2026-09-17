@@ -1,5 +1,5 @@
 #!/bin/bash
-# The dialog layer: `longrun ask` (inline answer, late answer as a message, cancelled/expired/failed, the HQ ledger
+# The dialog layer: `longrun ask` (inline answer, late answer as a message, cancelled/expired/failed
 # fallback), the session flags and the digest block, the halt exemption, the watcher's stop dialog and the stdio MCP
 # server. The dialog itself is replaced by LONGRUN_ASK_FIXTURE; LONGRUN_NO_UI keeps notifications off. No API calls.
 set -u
@@ -53,27 +53,20 @@ OUT="$(LONGRUN_SESSION=$B "$LR" ask answer Q7 "yes, go")"
 check "ask answer records the chat answer, no message" "echo \"\$OUT\" | grep -q '^ANSWER Q7: yes, go' && ! ls '$L'/inbox/ | grep -q 'Q7'"
 OUT="$(LONGRUN_SESSION=$B "$LR" ask 2>&1)"; RC=$?; check "no question: usage, exit 2" "test $RC -eq 2 && echo \"\$OUT\" | grep -q 'usage: longrun ask'"
 
-echo "== ask: an unanswered question goes to the HQ ledger"
-P2="$T/hq"; mkdir -p "$P2"; cd "$P2"; "$LR" init --hq >/dev/null; C=cccc3333-0000-4000-8000-000000000003; start $C "$P2"
+echo "== ask: a question nobody answered says so, and does not quietly disappear"
+P2="$T/other"; mkdir -p "$P2"; cd "$P2"; "$LR" init >/dev/null; C=cccc3333-0000-4000-8000-000000000003; start $C "$P2"
 fixture "" "" expired; OUT="$(LONGRUN_ASK_FIXTURE_DELAY=1 LONGRUN_SESSION=$C "$LR" ask "Approve the release?" --wait 0)"
 check "PENDING first" "echo \"\$OUT\" | grep -q '^PENDING Q1'"
-check "then the ledger item owned by the user" "waitfor \"grep -q 'Approve the release?' '$P2/.longrun/ledger.md'\" 40 && grep 'Approve the release?' '$P2/.longrun/ledger.md' | grep -q 'user'"
-OUT="$(LONGRUN_SESSION=$C "$LR" ask --ledger "Need the token from you")"; check "ask --ledger is the old shortcut (ledger + report)" "grep -q 'Need the token from you' '$P2/.longrun/ledger.md' && ls '$P2/.longrun/inbox/' | grep -q 'ask\|report'"
+check "then EXPIRED reaches the asker as a message, with the question quoted" "waitfor \"ls '$P2/.longrun/inbox/' 2>/dev/null | grep -q 'msg-to-cccc3333'\" 40 && grep -l 'EXPIRED Q1' '$P2/.longrun/inbox/'*msg-to-cccc3333* >/dev/null && grep -l 'Approve the release?' '$P2/.longrun/inbox/'*msg-to-cccc3333* >/dev/null"
 cd "$P"
 
-echo "== halt: the MCP tools stay allowed; the stop dialog lifts the halt"
+echo "== halt: the MCP tools stay allowed, resume lifts it"
 LONGRUN_SESSION=$A "$LR" halt "manual stop" >/dev/null
 check "mcp__longrun__ask is not refused during a halt" "test -z \"\$(pre $B mcp__longrun__ask t1)\""
 check "Bash still is" "pre $B Bash t2 | grep -q '\"permissionDecision\": \"deny\"'"
-fixture "Keep stopped"; "$LR" ask _halt_dialog "manual stop" >/dev/null; check "Keep stopped keeps it" "test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json'"
-python3 - "$CLAUDE_CONFIG_DIR/longrun/halt.json" <<'PY'
-import json, sys, time
-p = sys.argv[1]; h = json.load(open(p)); h["kind"] = "budget"; h["resets_at"] = time.time() + 3600; json.dump(h, open(p, "w"))
-PY
 LONGRUN_SESSION=$A "$LR" orchestrate start --goal g >/dev/null 2>&1; rm -f "$L"/inbox/*msg-to-aaaa1111*
-fixture "Resume all"; "$LR" ask _halt_dialog "budget stop" /tmp/report.md >/dev/null
-check "Resume all lifts the halt, snoozes the budget rule, tells the orchestrator" "! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json' && grep -q 'snoozed_until' '$CLAUDE_CONFIG_DIR/longrun/budget.json' && grep -l 'RESUMED by the user (stop dialog)' '$L'/inbox/*msg-to-aaaa1111* >/dev/null"
-check "the watcher log records the dialog" "grep -q 'stop dialog: answered Resume all' '$CLAUDE_CONFIG_DIR/longrun/watch/log.txt' 2>/dev/null || grep -rq 'stop dialog: answered Resume all' '$CLAUDE_CONFIG_DIR/longrun/watch/'"
+LONGRUN_SESSION=$B "$LR" resume >/dev/null
+check "resume lifts the halt and tells the orchestrator who did it" "! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json' && grep -l 'RESUMED by' '$L'/inbox/*msg-to-aaaa1111* >/dev/null"
 
 echo "== watcher: a question the user ignores is a stuck report to the orchestrator"
 fixture Later; OUT="$(LONGRUN_ASK_FIXTURE_DELAY=20 LONGRUN_SESSION=$B "$LR" ask "Ignored for long?" --wait 0)"

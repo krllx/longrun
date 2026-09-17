@@ -119,57 +119,10 @@ check "flags clear when the condition does" "! python3 -c \"import json;print(js
 for i in 1 2 3; do printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{"command":"ya make -tt"},"error":"Exit code 1\\nboom","tool_use_id":"f%s"}' "$C" "$P" "$i" | "$LR" hook PostToolUseFailure; done
 "$LR" watch run --quiet; check "three identical FAILs in a row are reported as a loop" "grep -l 'failed 3 times in a row' '$L'/inbox/*watch* >/dev/null"
 
-echo "== interrupt: dry run, then kill with --yes (a child of this test shell stands in for the session)"
-bash -c 'sleep 120; echo shell-snapshots-stand-in' & SLEEPER=$!
-printf '{"pid":%d,"sessionId":"%s","cwd":"%s","name":"worker-c","messagingSocketPath":""}' $$ "$C" "$P" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
-LONGRUN_SESSION=$A "$LR" interrupt worker-c --match "sleep 120" > /tmp/lo-out 2>&1; RC=$?
-check "dry run lists the process and refuses to kill without --yes" "test $RC -eq 0 && grep -q 'would interrupt' /tmp/lo-out && grep -q 'sleep 120' /tmp/lo-out && kill -0 $SLEEPER 2>/dev/null"
-LONGRUN_SESSION=$A "$LR" interrupt worker-c --match "sleep 120" --yes --why "test" > /tmp/lo-out 2>&1
-sleep 0.5; check "--yes kills it and tells the session why" "! kill -0 $SLEEPER 2>/dev/null && grep -q 'SIGTERM' /tmp/lo-out && grep -l 'interrupted by' '$L'/inbox/*msg-to-cccc3333* >/dev/null"
-check "the interruption is in the target's journal" "grep -q 'interrupted by' '$SESS'/*/cccc3333/journal.md"
-wait $SLEEPER 2>/dev/null
-rm -f "$CLAUDE_CONFIG_DIR/sessions/$$.json"
-
 echo "== orchestrate stop"
 LONGRUN_SESSION=$B "$LR" orchestrate stop >/tmp/lo-out 2>&1; RC=$?; check "only the holder (or --force) stops" "test $RC -eq 2"
 LONGRUN_SESSION=$A "$LR" orchestrate stop >/dev/null; check "stop clears the lock and its mirror" "! test -f '$L/orchestrator.json' && ! ls '$CLAUDE_CONFIG_DIR'/longrun/projects/*/orchestrator.json >/dev/null 2>&1"
 D="$(LONGRUN_SESSION=$C "$LR" digest)"; check "digest without an orchestrator still shows the board" "echo \"\$D\" | grep -q 'ORCHESTRATOR: none' && echo \"\$D\" | grep -q 'BOARD ('"
-
-echo "== budget: the 5-hour pace rule (endpoint replaced by a fixture)"
-check "the rule is off by default" "'$LR' budget | grep -q 'budget rule: off'"
-LONGRUN_SESSION=$A "$LR" orchestrate start --force >/tmp/lo-out 2>&1
-check "orchestrate start with the rule off says so and names the switch" "grep -q 'budget rule: off' /tmp/lo-out && grep -q 'longrun budget on' /tmp/lo-out"
-"$LR" budget on >/dev/null; check "budget on flips the global key" "grep -q '\"budget_on\": true' '$CLAUDE_CONFIG_DIR/longrun/config.json'"
-FX="$T/usage.json"; export LONGRUN_BUDGET_FIXTURE="$FX"
-fixture(){ python3 - "$FX" "$1" "$2" <<'PY'
-import json,sys,datetime
-util, hours_left = float(sys.argv[2]), float(sys.argv[3])
-ra = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=hours_left)).isoformat()
-json.dump({"five_hour": {"utilization": util, "resets_at": ra}, "seven_day": {"utilization": 42.0, "resets_at": ra}}, open(sys.argv[1], "w"))
-PY
-}
-fixture 30 4.8; "$LR" budget check >/tmp/lo-out 2>&1; RC=$?
-check "12 minutes into the window: quiet period, no halt" "test $RC -eq 0 && grep -q 'quiet period' /tmp/lo-out && ! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json'"
-fixture 20 3.5; "$LR" budget check >/tmp/lo-out 2>&1
-check "20% after 1.5h (expected 30%): no halt, ratio shown" "grep -q 'ratio x0.67' /tmp/lo-out && ! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json'"
-rm -f "$L"/inbox/*msg-to-aaaa1111*
-fixture 50 3.5; "$LR" budget check >/tmp/lo-out 2>&1
-check "50% after 1.5h (x1.67): BUDGET STOP printed, halt.json kind=budget" "grep -q 'BUDGET STOP' /tmp/lo-out && grep -q '\"kind\": \"budget\"' '$CLAUDE_CONFIG_DIR/longrun/halt.json'"
-check "report file and a wake for the orchestrator (inbox here: no socket in tests)" "ls '$CLAUDE_CONFIG_DIR'/longrun/budget-report-*.md >/dev/null 2>&1 && grep -l 'BUDGET STOP' '$L'/inbox/*msg-to-aaaa1111* >/dev/null"
-OUT="$(pre $B Bash "ls" t20)"; check "tools are refused with the usage reason" "echo \"\$OUT\" | grep -q 'usage pace: 5h window 50% used'"
-check "budget status shows the stop" "'$LR' budget | grep -q 'last budget stop'"
-"$LR" resume >/dev/null; check "resume lifts the halt and snoozes the rule until the window resets" "! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json' && grep -q 'snoozed_until' '$CLAUDE_CONFIG_DIR/longrun/budget.json'"
-fixture 60 3.0; "$LR" budget check >/tmp/lo-out 2>&1; check "snoozed: a worse sample does not halt again" "! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json' && '$LR' budget | grep -q 'rule snoozed until'"
-python3 -c "import json;p='$CLAUDE_CONFIG_DIR/longrun/budget.json';b=json.load(open(p));b['snoozed_until']=0;json.dump(b,open(p,'w'))"
-"$LR" budget off >/dev/null; "$LR" budget check >/tmp/lo-out 2>&1; check "budget off: samples but never halts" "grep -q 'budget rule: off' /tmp/lo-out && ! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json'"
-"$LR" budget on >/dev/null; "$LR" budget set pace 25 >/dev/null; "$LR" budget set factor 2 >/dev/null
-"$LR" budget check >/tmp/lo-out 2>&1; check "pace 25/factor 2: 60% after 2h (limit 100%) is fine" "grep -q 'plan 25%/h, breach at x2.0' /tmp/lo-out && ! test -f '$CLAUDE_CONFIG_DIR/longrun/halt.json'"
-"$LR" budget set pace 20 >/dev/null; "$LR" budget set factor 1.5 >/dev/null
-rm -f "$FX"; "$LR" budget check >/tmp/lo-out 2>&1; RC=$?; check "a missing source is an error, not a halt" "test $RC -eq 1 && grep -q 'fixture missing' /tmp/lo-out && '$LR' budget | grep -q 'FAILED'"
-fixture 10 4.0; python3 -c "import json;p='$CLAUDE_CONFIG_DIR/longrun/budget.json';b=json.load(open(p));b['sampled_at_epoch']=0;json.dump(b,open(p,'w'))"
-"$LR" watch run --quiet; check "the watcher tick samples too" "'$LR' budget | grep -q '5h window 10% used'"
-unset LONGRUN_BUDGET_FIXTURE
-LONGRUN_SESSION=$A "$LR" orchestrate stop >/dev/null 2>&1
 
 echo; echo "PASS=$PASS FAIL=$FAIL  (tmp: $T)"
 [ $FAIL -eq 0 ] && rm -rf "$T"
