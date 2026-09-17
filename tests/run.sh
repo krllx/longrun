@@ -386,24 +386,38 @@ check "the same command three times over is a poll loop even with no sleep in it
 
 echo "== the recall hint: a session searching for something already written down, outside its context"
 # Manifesto point 2 is the one direction nothing mechanical covered: the digest OFFERS the saved material
-# at every start, but nothing noticed a session working out again what a file or an archived note already
-# answers. The signal is the session's own search term - a Grep pattern, a Glob, a subagent's description.
+# at every start, but nothing noticed a session working out again what a note or a file already answers.
+# The signal is the session's own search term - a Grep pattern, a Glob, a subagent's description.
 RCP="$T/recallhint"; mkdir -p "$RCP/research"; ( cd "$RCP" && "$LR" init >/dev/null )
-RLOCAL="$RCP/.longrun"
+RLOCAL="$RCP/.longrun"; RSESS="$CLAUDE_CONFIG_DIR/longrun/sessions"
 printf 'The retry path.\nEPMA rejects a retry when the idempotency key is reused after a decline; use a fresh key.\nUnrelated prose about deployment.\n' > "$RCP/research/R.md"
 ( cd "$RCP" && "$LR" doc add research/R.md "how the retry path behaves, in detail" >/dev/null )
 RG="\"session_id\":\"rrrrrrrr-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$RCP\""
 ( cd "$RCP" && hook SessionStart "{$RG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
 ptu(){ hook PostToolUse "{$RG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$1\",\"tool_input\":$2,\"tool_response\":{}}"; }
+# Another session's own notes: the commonest place an answer hides, since they are never injected here.
+RPEER="$(ls -d "$RSESS"/*recallhint*/ 2>/dev/null | head -1)peer"; mkdir -p "$RPEER"
+printf -- '- [s1] 09-17 dead: retrying through EPMA with a reused idempotency key is refused after a decline\n- [s2] 09-17 ctx: my own scratch note about the idempotency ticket\n' > "$RPEER/notes.md"
 RH1="$(cd "$RCP" && ptu Grep '{"pattern":"idempotency"}')"
-check "a Grep for a term a doc file already answers is met with the line and with recall" "echo \"\$RH1\" | grep -q 'already written down in this project' && echo \"\$RH1\" | grep -q 'research/R.md:2' && echo \"\$RH1\" | grep -q 'longrun recall idempotency'"
+check "a Grep for what another session recorded as a dead end is met with that line and with recall" "echo \"\$RH1\" | grep -q 'already written down in this project' && echo \"\$RH1\" | grep -q 'sessions/peer/notes.md:1' && echo \"\$RH1\" | grep -q 'longrun recall idempotency'"
+check "a ctx note is that conversation's own bookkeeping and is never offered to another session" "! echo \"\$RH1\" | grep -q 'my own scratch note'"
 RH2="$(cd "$RCP" && ptu Grep '{"pattern":"idempotency"}')"
 check "...and not again for the same term and file: one pointer, not a nag" "test -z \"\$RH2\""
 RH3="$(cd "$RCP" && ptu Grep '{"pattern":"the"}')"
 check "a short word is not a search term: no hint" "test -z \"\$RH3\""
-printf 'deployment\ndeployment\ndeployment\ndeployment\ndeployment\ndeployment\ndeployment\n' >> "$RCP/research/R.md"
+printf -- '- [s3] 09-17 fact: deployment one\n- [s4] 09-17 fact: deployment two\n- [s5] 09-17 fact: deployment three\n- [s6] 09-17 fact: deployment four\n- [s7] 09-17 fact: deployment five\n- [s8] 09-17 fact: deployment six\n- [s9] 09-17 fact: deployment seven\n' >> "$RPEER/notes.md"
 RH4="$(cd "$RCP" && ptu Grep '{"pattern":"deployment"}')"
 check "a term on too many lines is a word, not a term: no hint" "test -z \"\$RH4\""
+# Prose is not a note: one word lands on a line of it by accident, so a doc file needs two of them.
+rturn(){ hook UserPromptSubmit "{$RG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null; }
+printf 'The widget drawer keeps its promocode slot in a separate layout branch.\n' >> "$RCP/research/R.md"
+( cd "$RCP" && rturn )
+RH4B="$(cd "$RCP" && ptu Grep '{"pattern":"promocode"}')"
+check "one word hitting a line of prose in a doc file is a collision, not an answer" "test -z \"\$RH4B\""
+( cd "$RCP" && rturn )
+RH4C="$(cd "$RCP" && ptu Grep '{"pattern":"promocode layout"}')"
+check "...two of them on the same line of it is not" "echo \"\$RH4C\" | grep -q 'research/R.md:4'"
+( cd "$RCP" && rturn )
 RH5="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}}]}")"
 check "a Read carries no question, so it is never guessed at from the path" "test -z \"\$RH5\""
 RMETA="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*recallhint*/rrrrrrrr/meta.json 2>/dev/null | head -1)"
@@ -413,19 +427,21 @@ RH6="$(cd "$RCP" && ptu Grep '{"pattern":"nothing_here_at_all"}')"
 check "a term nothing answers stays silent" "test -z \"\$RH6\""
 # PostToolBatch: one event for a whole batch, no matcher, and it sees the Reads too - so a file the
 # session already has open is not offered back to it.
-echo "supersede: the checkout drawer was moved to widget v3 in PR 41" > "$RLOCAL/archive/notes.md"
+printf -- '2026-09-10 11:00 pruned | - [n9] 09-10 decision: the checkout drawer was superseded by widget v3 in PR 41\n' > "$RLOCAL/archive/notes.md"
 RB1="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}},{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"supersede\"},\"tool_response\":{}}]}")"
 check "PostToolBatch reads the whole batch and finds the archived answer" "echo \"\$RB1\" | grep -q 'additionalContext' && echo \"\$RB1\" | grep -q 'widget v3 in PR 41'"
-printf 'the drawer also owns the promocode slot\n' >> "$RCP/research/R.md"
-RB2="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"promocode\"},\"tool_response\":{}}]}")"
+printf 'the drawer also owns a promocode layout slot\n' >> "$RCP/research/R.md"
+RB2="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"promocode layout\"},\"tool_response\":{}}]}")"
 check "a file this session has already opened is not offered back to it" "test -z \"\$RB2\""
 # Two pointers in a turn is help; five is a lecture. The budget refills at the turn boundary.
-echo "the kassa callback signature is checked against the merchant key, not the shop key" >> "$RLOCAL/archive/notes.md"
-RB3="$(cd "$RCP" && ptu Grep '{"pattern":"merchant"}')"
-check "a third hint in the same turn is held back, however many terms are searched" "test -z \"\$RB3\""
-( cd "$RCP" && hook UserPromptSubmit "{$RG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"next\"}" >/dev/null )
-RB4="$(cd "$RCP" && ptu Grep '{"pattern":"merchant"}')"
-check "...and the next turn gets it, instead of it being lost" "echo \"\$RB4\" | grep -q 'merchant key'"
+printf -- '2026-09-10 11:00 pruned | - [n8] 09-10 fact: the kassa callback signature is checked against the merchant key\n2026-09-10 11:00 pruned | - [n7] 09-10 dead: the courier eta endpoint answers 404 for a cancelled order\n2026-09-10 11:00 pruned | - [n6] 09-10 decision: the tariff matrix is rebuilt nightly, never on request\n' >> "$RLOCAL/archive/notes.md"
+( cd "$RCP" && rturn )
+RB3A="$(cd "$RCP" && ptu Grep '{"pattern":"merchant"}')"; RB3B="$(cd "$RCP" && ptu Grep '{"pattern":"courier"}')"
+RB3="$(cd "$RCP" && ptu Grep '{"pattern":"tariff"}')"
+check "two pointers in a turn are help; the third is held back" "echo \"\$RB3A\" | grep -q 'merchant key' && echo \"\$RB3B\" | grep -q 'cancelled order' && test -z \"\$RB3\""
+( cd "$RCP" && rturn )
+RB4="$(cd "$RCP" && ptu Grep '{"pattern":"tariff"}')"
+check "...and the next turn gets it, instead of it being lost" "echo \"\$RB4\" | grep -q 'rebuilt nightly'"
 
 echo "== recall ranking: curated notes are not crowded out by a noisy archive"
 for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do echo "old summary $k mentioning pgx pool deadlock again" > "$LOCAL/archive/compact/11111111-2026010$((k%9))-$k.md"; done

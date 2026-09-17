@@ -4859,6 +4859,8 @@ RECALL_PER_TURN = 2        # hints per turn, counted from the turn boundary. The
                            # stops the same pointer twice; this stops a wide search turning into a lecture
 RECALL_HINT_LINES = 2      # lines quoted per hint; the rest is what `longrun recall` is for
 RECALL_SCAN_BYTES = 600000  # hard ceiling on what one hint may read, whatever the project holds
+RECALL_TAGS = ("dead", "decision", "fact", "pin", "doc")   # what another session is owed; `ctx` and `todo`
+RECALL_TAG_RE = re.compile(r"\[[ns]\d+\]\s+\d\d-\d\d\s+(\w+)")   # are one conversation's own bookkeeping
 MIDTURN_DELTA_TOOLS = 5   # tool calls between two mid-turn checks of what the other sessions changed
 
 
@@ -4891,30 +4893,37 @@ def search_terms(calls):
 
 
 def recall_scan_files(store, m):
-    """Everything `recall` would search EXCEPT what this session already carries.
+    """The CURATED material `recall` would search, minus what this session already carries.
 
-    The shared notes and this session's own notes are injected whole at every start, so a hit in them is
-    not news - it is the digest read back. What is worth pointing at is the material deliberately kept
-    out of the context: the files behind doc pointers, other sessions' notes and journals, and the
-    archive (pruned entries, pre-compaction snapshots, compaction summaries). Files this session has
-    already opened are skipped for the same reason - `files` is what it edited, `opened` is what it merely
-    looked at, which only `PostToolBatch` can see (the PostToolUse matcher does not pay a process per Read)."""
+    Two exclusions, and the second was measured rather than guessed.
+
+    What this session carries: the shared notes and its own notes are injected whole at every start, so a
+    hit in them is not news, it is the digest read back. Files it has already opened go the same way -
+    `files` is what it edited, `opened` is what it merely looked at, which only `PostToolBatch` can see
+    (the PostToolUse matcher does not pay a process per Read).
+
+    What is not knowledge: journals, pre-compaction snapshots and compaction summaries. `recall` searches
+    those, and should - a human asked, and can judge what came back. An unprompted hint cannot, and a
+    replay of this project's real searches through the first version of it said so plainly: it fired on
+    half of all searches, and two thirds of the hits were journal lines like "PR #8 opened" or an archived
+    `ctx` note about a branch. Mechanical logs match words without answering questions. What is left is
+    what somebody wrote down on purpose: the files behind doc pointers, other sessions' notes, and the
+    notes the archive kept when they were pruned."""
     read_here = {os.path.realpath(p) for p in ((m.get("files") or []) + (m.get("opened") or []))}
     me = m.get("skey") or ""
-    files = [doc_path(store, e) for e in doc_entries(store)]
+    files = [(doc_path(store, e), "prose") for e in doc_entries(store)]
     for d in sorted(glob.glob(os.path.join(store.sessions, "*"))):
         if os.path.basename(d) == me:
             continue
-        files += [os.path.join(d, "notes.md"), os.path.join(d, "journal.md")]
-        files += sorted(glob.glob(os.path.join(d, "archive", "*.md")), reverse=True)
-    files += sorted(glob.glob(os.path.join(store.archive, "**", "*.md"), recursive=True), reverse=True)
+        files += [(os.path.join(d, "notes.md"), "notes"), (os.path.join(d, "archive", "notes.md"), "notes")]
+    files.append((os.path.join(store.archive, "notes.md"), "notes"))
     seen, out = set(), []
-    for f in files:
+    for f, kind in files:
         rp = os.path.realpath(f) if os.path.exists(f) else f
         if rp in seen or rp in read_here or not os.path.isfile(f):
             continue
         seen.add(rp)
-        out.append(f)
+        out.append((f, kind))
     return out
 
 
@@ -4949,7 +4958,7 @@ def recall_hint(store, m, calls):
         return ""
     pat = re.compile("|".join(re.escape(t) for t in terms), re.I)
     per_term, budget = {}, RECALL_SCAN_BYTES
-    for f in files:
+    for f, kind in files:
         if budget < 4096:     # out of room; one oversized file must not cost the rest their turn
             break
         try:
@@ -4963,9 +4972,18 @@ def recall_hint(store, m, calls):
         if not pat.search(body):     # one pass over the whole file before paying for splitlines()
             continue
         for i, line in enumerate(body.splitlines(), 1):
-            for t in terms:
-                if t in line.lower():
-                    per_term.setdefault(t, []).append((recall_label(store, f), i, line.strip()))
+            low = line.lower()
+            hit = [t for t in terms if t in low]
+            if not hit:
+                continue
+            if kind == "notes":
+                tag = RECALL_TAG_RE.search(line)
+                if not tag or tag.group(1) not in RECALL_TAGS:
+                    continue     # ctx and todo are one conversation's bookkeeping, not the project's knowledge
+            elif len(hit) < 2:
+                continue         # prose: one word lands by accident, two on the same line much less often
+            for t in hit:
+                per_term.setdefault(t, []).append((recall_label(store, f), i, line.strip()))
     prior = list(m.get("recalled") or [])
     done = set(prior)
     for t in terms:

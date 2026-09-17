@@ -170,9 +170,16 @@ Everything else offers the saved material **before** the fact: the digest at eve
 
 The signal is the session naming its own question: a `Grep` or `Glob` `pattern`, a `WebSearch` query, a subagent's one-line `description`. A `Read` carries no question and a path is not one either - guessing intent from a path is how a hint like this turns into noise, and by then the session is already looking in the right place.
 
-What it searches is what `recall` searches **minus what is already in the context**: the files behind doc pointers, other sessions' notes and journals, and the archive (pruned entries, pre-compaction snapshots, compaction summaries). The shared notes and this session's own notes are injected whole at every start, so a hit in them is the digest read back, not news. Files the session has already opened are skipped for the same reason; on a CLI with `PostToolBatch` that includes the ones it merely Read.
+What it searches is the **curated** part of what `recall` searches, minus what is already in the context: the files behind doc pointers, other sessions' notes, and the notes the archive kept when they were pruned. The shared notes and this session's own notes are injected whole at every start, so a hit in them is the digest read back, not news. Files the session has already opened are skipped for the same reason; on a CLI with `PostToolBatch` that includes the ones it merely Read.
 
-Four things keep it quiet: a term must be at least 5 characters; a term found on more than 6 lines is a word rather than a term and is dropped; the same (term, file) pair is never pointed at twice; and at most two hints fire per turn, the budget refilling at the turn boundary. One pass over the material is capped at 600 kB whatever the project holds. The hint quotes at most two lines and hands over to `longrun recall <term>` for the rest.
+Journals, pre-compaction snapshots and compaction summaries are **not** searched, and that boundary was measured rather than guessed. `recall` does search them, and should: a human asked and can judge what came back. An unprompted hint cannot. Replaying this project's real search history (`research/measure-recall.py`) through the first version showed it firing on half of all searches with two thirds of the hits being journal lines like "PR #8 opened" or an archived `ctx` note about a branch - words matched, no question answered.
+
+Two rules do the rest of the filtering, and both came from the same replay:
+
+- **In a notes file, only the tags another session is owed count**: `dead`, `decision`, `fact`, `pin`, `doc`. `ctx` and `todo` are one conversation's own bookkeeping - a single archived `ctx` note was the source of a third of all the noise in the first version.
+- **In a doc file, one word is not enough.** Prose matches an ordinary word by accident; two distinct search terms on the same line much less often. So a single-word `Grep` never points into prose, while a subagent's description or a multi-word query can.
+
+Four more things keep the volume down: a term must be at least 5 characters; a term found on more than 6 lines is a word rather than a term; the same (term, file) pair is never pointed at twice; and at most two hints fire per turn, the budget refilling at the turn boundary. One pass over the material is capped at 600 kB whatever the project holds. The hint quotes at most two lines and hands over to `longrun recall <term>` for the rest. On the replay corpus that comes to about 1.5 hints per session.
 
 ## 5b. The poll hint
 
