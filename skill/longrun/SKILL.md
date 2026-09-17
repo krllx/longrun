@@ -41,7 +41,7 @@ Everything on disk is written **in English** whatever the conversation is in: th
 
 ## When the digest shows a board
 
-One session is coordinating this project. As a worker: `board take T7` for a task handed to you, `board done T7 "outcome"` or `board block T7 "why"` to report back, `longrun fact "..."` for something learned outside. `longrun ask "..." --options "Yes,No"` (or the MCP `ask` tool) only for what cannot wait - it is a dialog in front of every window; goals and priorities go on the board. Whole protocol: `longrun orchestrate help`. `HALT in force` = every tool call refused until the user lifts it: answer in words and wait. On `context Nk of the Mk window`: write what must survive, then go on.
+One session is coordinating several windows and calling the user when only they can decide - that is what this layer is, not autonomous driving (one session toward one checkable condition is `/goal`). As a worker: `board take T7` for a task handed to you, `board done T7 "outcome"` or `board block T7 "why"` to report back, `board add --fact "..."` for something learned outside. `longrun ask "..." --options "Yes,No"` (or the MCP `ask` tool) only for what cannot wait - it is a dialog in front of every window; goals and priorities go on the board. Whole protocol: `longrun orchestrate help`. `HALT in force` = every tool call refused until the user lifts it: answer in words and wait. On `context Nk of the Mk window`: write what must survive, then go on.
 
 ## Subcommands
 

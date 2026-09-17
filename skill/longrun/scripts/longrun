@@ -75,9 +75,8 @@ DEFAULTS = {
                                     # CLAUDE_CODE_AUTO_COMPACT_WINDOW, then autoCompactWindow in settings.json, then the
                                     # model's window). `longrun onboard` recommends 300k on 1M models
     "stuck_tool_min": 30,           # a tool call running longer than this is reported to the orchestrator
-    "stuck_turn_min": 60,           # a turn running longer than this, too
     "stuck_wait_min": 10,           # waiting for a permission answer longer than this, too
-    "stuck_fail_streak": 3,         # the same command failing this many times in a row, too
+    "stuck_fail_streak": 3,         # the same command failing this many times in a row: shown as a SESSIONS flag
     "wake_on_stuck": True,          # a stuck report starts a turn in the orchestrator (else: its inbox)
     "ask_wait_sec": 90,             # `ask` blocks this long for the answer; a later answer arrives as a message
     "ask_expire_min": 360,          # the dialog closes by itself after this (0 = never)
@@ -1387,7 +1386,7 @@ def session_flags(store, m):
         if m.get("turn_started"):
             a = age_min(m["turn_started"])
             if a >= 5:
-                flags.append("turn %dm" % a)
+                flags.append("turn %dm" % a)   # shown, never reported: most long turns are just long
         if m.get("waiting_since"):
             a = age_min(m["waiting_since"])
             if a >= 1:
@@ -1407,7 +1406,16 @@ def session_flags(store, m):
 
 
 def stuck_reasons(store, m):
-    """[(key, text)] of thresholds a live session exceeds (the watcher reports each key once per episode)."""
+    """[(key, text)] of the thresholds a live session exceeds (the watcher reports each key once per
+    episode). Two rules only, and both mean the same thing: this session is not moving and nobody in it
+    can tell. A long tool call is a hang or a build; an unanswered permission or dialog is a session
+    waiting for a human who is not looking.
+
+    Three rules were dropped in 0.6.0. "Turn over an hour" fires on any long normal turn - the common
+    case, not the stuck one. "The same command failed three times" is what the turn card already puts in
+    front of the session itself, with the command in it. "Context near the window" already goes to the
+    session as `ctx_warning` and to the orchestrator through `ctx_told`; reporting it a third time as a
+    hang made a routine event look like a fault. The SESSIONS flags still show all three."""
     cfg, out = store.cfg, []
     if m.get("ended"):
         return out
@@ -1416,22 +1424,13 @@ def stuck_reasons(store, m):
         if a >= int(cfg["stuck_tool_min"]):
             out.append(("tool", "tool `%s` running %dm" % (clip(cmd or tool, 80), a)))
             break
-    a = age_min(m.get("turn_started", ""))
-    if m.get("turn_started") and a >= int(cfg["stuck_turn_min"]):
-        out.append(("turn", "turn running %dm" % a))
     a = age_min(m.get("waiting_since", ""))
     if m.get("waiting_since") and a >= int(cfg["stuck_wait_min"]):
         out.append(("wait", "waiting for a %s answer %dm" % (m.get("waiting_what") or "permission", a)))
-    n, cmd = fail_streak(store, m.get("sid", ""))
-    if n >= int(cfg["stuck_fail_streak"]):
-        out.append(("fail", "the same command failed %d times in a row: `%s`" % (n, clip(cmd, 80))))
     for it in pending_asks(store, m.get("sid", ""))[-1:]:
         a = age_min(it.get("asked", ""))
         if a >= int(cfg["stuck_wait_min"]):
             out.append(("ask", "waiting %dm for the user's answer to %s: %s" % (a, it["id"], clip(it.get("q", ""), 80))))
-    tok, win = int(m.get("ctx_tokens") or 0), int(m.get("ctx_window") or 0)
-    if tok and win and tok >= win - int(cfg["ctx_warn_before"]):
-        out.append(("ctx", "context %dk of the %dk auto-compact window" % (tok // 1000, win // 1000)))
     return out
 
 
@@ -1670,6 +1669,11 @@ def cmd_board(store, args):
     me, skey, myname = _me(store, need=False)
     if sub in ("ls", "list", "show"):
         b = load_board(store)
+        if "--facts" in rest:
+            for f in board_facts(b, None if "--all" in rest else False):
+                print(fmt_fact(f))
+            print("(%d unhandled)" % len(board_facts(b, handled=False)))
+            return 0
         for l in board_summary_lines(store, b, skey, limit_todo=100):
             print(l)
         if "--all" in rest:
@@ -1688,6 +1692,56 @@ def cmd_board(store, args):
         if me:
             journal(store, me, "board goal: %s" % clip(text, 160))
         print("goal set")
+        return 0
+    if sub == "add" and "--fact" in rest:
+        # A fact is a board item like a task is, kept in the same board.json. It used to have its own
+        # command; that only doubled the surface for something a worker does with `board` anyway.
+        _f, rest = _flag(rest, "--fact", False, takes_value=False)
+        task, rest = _flag(rest, "--task", "")
+        source, rest = _flag(rest, "--source", "session")
+        wake, rest = _flag(rest, "--wake", False, takes_value=False)
+        text = " ".join(rest).strip()
+        if text == "-" or not text:
+            text = sys.stdin.read().strip() if not sys.stdin.isatty() else ""
+        if not text:
+            die("usage: longrun board add --fact \"what happened\" [--task T7] [--source user|review|msngr|watch|session] [--wake]", 2)
+        if source not in FACT_SOURCES:
+            die("source must be one of %s" % ", ".join(FACT_SOURCES), 2)
+        with board_lock(store):
+            b = load_board(store)
+            if task and not board_item(b, task):
+                die("no task %s" % task.upper(), 2)
+            f = {"id": "F%d" % b["next_f"], "kind": "fact", "text": clip(text, 600), "source": source,
+                 "created": ts(), "by": myname, "handled": False}
+            b["next_f"] += 1
+            if task:
+                f["task"] = task.upper()
+            b["items"].append(f)
+            save_board(store, b)
+        if me:
+            journal(store, me, "fact %s (%s%s): %s" % (f["id"], source, (" " + f["task"]) if task else "", clip(text, 160)))
+            touch_session_note(store)
+            board_mark_seen(store, me)
+        how = notify_orchestrator(store, "NEW FACT %s: %s" % (fmt_fact(f), "" if not task else " (task %s)" % f["task"]) +
+                                  "\nRecord what you decide: `longrun board ack %s \"...\"` (relay, re-plan, ask the user, or 'noted, no action')." % f["id"],
+                                  wake=bool(wake), from_sid=me)
+        print("%s recorded%s" % (f["id"], (" -> orchestrator via %s" % how.split(":")[0]) if how else " (no orchestrator to tell)"))
+        return 0
+    if sub == "ack":
+        if not rest:
+            die("usage: longrun board ack <F-id> [\"what was decided\"]", 2)
+        fid, text = rest[0].upper(), " ".join(rest[1:]).strip()
+        with board_lock(store):
+            b = load_board(store)
+            f = board_item(b, fid)
+            if not f or f.get("kind") != "fact":
+                die("no fact %s (`longrun board --facts`)" % fid, 2)
+            f.update({"handled": True, "ack": text, "ack_at": ts(), "ack_by": myname})
+            save_board(store, b)
+        if me:
+            journal(store, me, "fact ack %s: %s" % (fid, clip(text, 160)))
+            board_mark_seen(store, me)
+        print("%s handled" % fid)
         return 0
     if sub == "add":
         after, rest = _flag(rest, "--after", "")
@@ -1806,7 +1860,9 @@ def cmd_board(store, args):
                                       wake=(bool(wake) if wake is not None else sub in ("done", "block")), from_sid=me)
         print("%s%s" % (note, (" -> %s" % how.split(":")[0]) if how else ""))
         return 0
-    die("usage: longrun board [ls [--all] | goal \"...\" | add \"...\" [--after T3] [--for WHO] | take|done|block|drop|release|edit|rm T7 [...] | assign T7 WHO [--wake|--quiet]]", 2)
+    die("usage: longrun board [ls [--all] [--facts] | goal \"...\" | add \"...\" [--after T3] [--for WHO] | "
+        "add --fact \"...\" [--task T7] [--source ...] | ack F3 [\"decision\"] | "
+        "take|done|block|drop|release|edit|rm T7 [...] | assign T7 WHO [--wake|--quiet]]", 2)
 
 
 def task_handoff_text(store, t, by):
@@ -1824,69 +1880,13 @@ def task_handoff_text(store, t, by):
     return "\n".join(lines)
 
 
-def cmd_fact(store, args):
-    me, skey, myname = _me(store, need=False)
-    if args and args[0] in ("ls", "list"):
-        b = load_board(store)
-        for f in board_facts(b, None if "--all" in args else False):
-            print(fmt_fact(f))
-        print("(%d unhandled)" % len(board_facts(b, handled=False)))
-        return 0
-    if args and args[0] == "ack":
-        if len(args) < 2:
-            die("usage: longrun fact ack <F-id> [\"what was decided\"]", 2)
-        fid, text = args[1].upper(), " ".join(args[2:]).strip()
-        with board_lock(store):
-            b = load_board(store)
-            f = board_item(b, fid)
-            if not f or f.get("kind") != "fact":
-                die("no fact %s (`longrun fact ls`)" % fid, 2)
-            f.update({"handled": True, "ack": text, "ack_at": ts(), "ack_by": myname})
-            save_board(store, b)
-        if me:
-            journal(store, me, "fact ack %s: %s" % (fid, clip(text, 160)))
-            board_mark_seen(store, me)
-        print("%s handled" % fid)
-        return 0
-    task, rest = _flag(args, "--task", "")
-    source, rest = _flag(rest, "--source", "session")
-    wake, rest = _flag(rest, "--wake", False, takes_value=False)
-    text = " ".join(rest).strip()
-    if text == "-" or not text:
-        text = sys.stdin.read().strip() if not sys.stdin.isatty() else ""
-    if not text:
-        die("usage: longrun fact \"what happened\" [--task T7] [--source user|review|msngr|watch|session] [--wake] | fact ls [--all] | fact ack F3 [\"decision\"]", 2)
-    if source not in FACT_SOURCES:
-        die("source must be one of %s" % ", ".join(FACT_SOURCES), 2)
-    with board_lock(store):
-        b = load_board(store)
-        if task and not board_item(b, task):
-            die("no task %s" % task.upper(), 2)
-        f = {"id": "F%d" % b["next_f"], "kind": "fact", "text": clip(text, 600), "source": source, "created": ts(), "by": myname, "handled": False}
-        b["next_f"] += 1
-        if task:
-            f["task"] = task.upper()
-        b["items"].append(f)
-        save_board(store, b)
-    if me:
-        journal(store, me, "fact %s (%s%s): %s" % (f["id"], source, (" " + f["task"]) if task else "", clip(text, 160)))
-        touch_session_note(store)
-        board_mark_seen(store, me)
-    how = notify_orchestrator(store, "NEW FACT %s: %s" % (fmt_fact(f), "" if not task else " (task %s)" % f["task"]) +
-                              "\nRecord what you decide: `longrun fact ack %s \"...\"` (relay, re-plan, ask the user, or 'noted, no action')." % f["id"],
-                              wake=bool(wake), from_sid=me)
-    print("%s recorded%s" % (f["id"], (" -> orchestrator via %s" % how.split(":")[0]) if how else " (no orchestrator to tell)"))
-    return 0
-
-
-ORCH_ROLE = """You are this project's ORCHESTRATOR. Your job, every time you wake up:
-1. `longrun board`: what is doing, blocked, next; `longrun fact ls`: facts nobody handled yet.
-2. Dispose of each unhandled fact (`longrun fact ack F3 \"...\"`): relay it (`longrun send`), change the board, or ask the user.
-3. Unblock: answer questions from shared notes, or ask the user; hand out the next todo (`longrun board assign T8 <session>`); no free session: a `spawn_task` chip in the desktop app (self-contained prompt, first line `longrun board take T8`; the user's click opens it), else ask the user to open one.
-4. Watch the SESSIONS flags (tool/turn age, waiting, fail xN, ctx): message the session (`longrun send`), or tell the user which one is stuck and let them stop it.
-5. Keep your own context small: read state files, not transcripts (`longrun status`, not `list_events`).
-6. Usage pace or anything that must stop everything: `longrun halt \"why\"`; the user lifts it with `longrun resume`.
-Then stop. The next event wakes you; do not poll."""
+ORCH_ROLE = """You are this project's ORCHESTRATOR: you coordinate several windows and call the human, you do not drive alone.
+1. `longrun board` and `longrun board ls --facts`: what is doing, blocked, next; what nobody has handled yet.
+2. Dispose of every fact: `longrun board ack F3 "relayed to PR D"` after relaying it, re-planning, or asking the user.
+3. Unblock and hand out: answer from the shared notes, `longrun board assign T8 <session>`, or one dialog per decision to the user.
+4. Read the SESSIONS flags. A window that is stuck is the user's to stop; keep your own context on state files, not transcripts.
+5. Anything that must stop everyone: `longrun halt "why"`. Only the user lifts it.
+Then stop - a board move or the watcher wakes you, so do not poll. Full protocol: `longrun orchestrate help`."""
 
 
 ORCH_HELP = """longrun orchestrate - one session coordinates the others through a shared board, and reaches the user when it must.
@@ -1902,7 +1902,7 @@ AS A WORKER (any session that is not the orchestrator)
   A task was handed to you (`YOUR TASK T7` in the digest): `longrun board take T7`, work,
   `longrun board done T7 "outcome"`; a wall or a question: `longrun board block T7 "why"`.
   done and block wake the orchestrator; it answers with a message or a board move.
-  Something learned from outside that others must know: `longrun fact "..." [--task T7]
+  Something learned from outside that others must know: `longrun board add --fact "..." [--task T7]
   [--source review|msngr|user]`. Record first, act second.
   Only the user can unblock you right now (an approval, a credential, a choice you must not make
   alone): `mcp__longrun__ask`, or `longrun ask "question" --options "Yes,No"`. Questions about the
@@ -1911,8 +1911,8 @@ AS A WORKER (any session that is not the orchestrator)
   user's words in THIS conversation only.
 
 AS THE ORCHESTRATOR, every time you wake up
-  1. `longrun board`, `longrun fact ls`: what is doing, blocked, next; which facts nobody handled.
-  2. Dispose of each fact: `longrun fact ack F3 "relayed to PR D"` after relaying it (`longrun send`),
+  1. `longrun board`, `longrun board ls --facts`: what is doing, blocked, next; which facts nobody handled.
+  2. Dispose of each fact: `longrun board ack F3 "relayed to PR D"` after relaying it (`longrun send`),
      re-planning (`board add/assign/edit/drop`), or asking the user.
   3. Unblock: answer from the shared notes, or ask the user (one dialog per decision, options as
      buttons); hand out the next todo (`longrun board assign T8 <session>`). No session free for it:
@@ -2661,7 +2661,7 @@ def board_delta(store, m, budget=700):
     m["board_seen"] = sig
     if not lines:
         return ""
-    head = "BOARD changes%s:" % (" (you are the orchestrator: `longrun fact ack F<n>`, `longrun board`)" if is_orch else " for you (`longrun board`):")
+    head = "BOARD changes%s:" % (" (you are the orchestrator: `longrun board ack F<n>`, `longrun board`)" if is_orch else " for you (`longrun board`):")
     text = "\n".join([head] + lines)
     return text if len(text.encode("utf-8")) <= budget else text.encode("utf-8")[: budget - 3].decode("utf-8", "ignore") + "..."
 
@@ -3954,9 +3954,9 @@ def watch_tick(force=False, only=None, quiet=False):
 
 
 def stuck_scan():
-    """Every project with an orchestrator: sessions over a stuck threshold (tool/turn age, waiting for a
-    permission answer, repeated FAIL, context near the window) are reported to the orchestrator once per
-    episode; the raised flags live in watch/state.json and clear when the condition does. -> reports sent"""
+    """Every project with an orchestrator: sessions over a stuck threshold (a long-running tool, an
+    unanswered permission prompt or dialog) are reported to the orchestrator once per episode; the raised
+    flags live in watch/state.json and clear when the condition does. -> reports sent"""
     st_path = os.path.join(WATCH_DIR, "state.json")
     st = read_json(st_path)
     raised = st.get("stuck") or {}
@@ -4873,7 +4873,7 @@ def board_block(store, sid, budget):
         st = orch_state(store, o)
         you = o.get("skey") == skey
         lines.append("ORCHESTRATOR: %s [%s] %s since %s%s" % (o.get("name"), o.get("skey", "")[:8], st, o.get("since"),
-                                                              " (you)" if you else "; report with `longrun board done|block T<n> ...`, `longrun fact \"...\"`"))
+                                                              " (you)" if you else "; report with `longrun board done|block T<n> ...`, `longrun board add --fact \"...\"`"))
     else:
         lines.append("ORCHESTRATOR: none (`longrun orchestrate start --goal \"...\"` in the session that drives the project)")
     lines += ["BOARD (`longrun board`):"] + board_summary_lines(store, b, skey)
@@ -4892,7 +4892,7 @@ def facts_block(store, budget):
     facts = board_facts(load_board(store), handled=False)
     if not facts:
         return ""
-    lines = ["FACTS unhandled (%d), dispose of each: relay, re-plan, ask the user, or note it (`longrun fact ack F<n> \"decision\"`):" % len(facts)]
+    lines = ["FACTS unhandled (%d), dispose of each: relay, re-plan, ask the user, or note it (`longrun board ack F<n> \"decision\"`):" % len(facts)]
     lines += ["  " + fmt_fact(f) for f in facts[-10:]]
     text = "\n".join(lines)
     while len(lines) > 2 and len(text.encode("utf-8")) > budget:
@@ -6337,7 +6337,8 @@ ORCHESTRATION (one session coordinates the others through the board; `longrun or
   board [ls [--all]]          goal, doing, blocked, next todo; `board goal "..."`, `board add "..." [--after T3] [--for WHO]`
   board take|done|block|drop|release|edit|rm T7 [text]   this session's moves; done/block wake the orchestrator
   board assign T7 WHO [--quiet]   hand a task to a session (its socket now, or its inbox)
-  fact "text" [--task T7] [--source user|review|msngr|watch|session] [--wake]   record something learned; `fact ls`, `fact ack F3 "decision"`
+  board add --fact "text" [--task T7] [--source user|review|msngr|watch|session] [--wake]   record something learned from outside
+  board ls --facts | board ack F3 "decision"   what nobody handled yet; how it was disposed of
   orchestrate [help|status|start [--goal "..."]|stop]   take (one per project) or show the orchestrator role
   halt "why" [--project] | resume   refuse every tool call in every session until the user lifts it
   ask "question" [--options "Yes,No"] [--default Yes] [--text] [--wait SEC] [--expire MIN]   a dialog in front of every window; the answer inline, or later as a message
@@ -6424,7 +6425,7 @@ def main(argv):
              "ask": cmd_ask,
              "recall": cmd_recall, "status": cmd_status, "digest": cmd_digest, "gc": cmd_gc, "send": cmd_send,
              "doc": cmd_doc, "stale": cmd_stale, "mute": cmd_mute,
-             "unmute": lambda st, a: cmd_mute(st, ["unmute-mode"] + a), "board": cmd_board, "fact": cmd_fact, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,
+             "unmute": lambda st, a: cmd_mute(st, ["unmute-mode"] + a), "board": cmd_board, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,
              "compact-hint": cmd_compact_hint, "important": cmd_important}
     if cmd not in table:
         die("unknown command %s (longrun help)" % cmd, 2)

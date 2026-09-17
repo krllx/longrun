@@ -188,7 +188,8 @@ Seven keys were retired in 0.6.0 and are now fixed numbers in the script: `stric
 | `autocompact_window` | 0 | where Claude Code auto-compacts, as set by `/autocompact N`; accepts `300k`, `1M`. 0 - follow Claude Code (the `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable, then `autoCompactWindow` in settings.json, then the model's window). The key is the user's intent: a hook cannot run `/autocompact`, so `onboard` compares it with settings.json and asks the user to type the command themselves |
 | `board_block_bytes`, `facts_block_bytes` | 900, 900 | room in the digest for the board and for unhandled facts |
 | `ctx_warn_before` | 50000 | how often to read the context size from the transcript; how many tokens before the auto-compact window to warn |
-| `stuck_tool_min`, `stuck_turn_min`, `stuck_wait_min`, `stuck_fail_streak` | 30, 60, 10, 3 | watcher thresholds: tool, turn, waiting for confirmation (minutes), identical FAILs in a row |
+| `stuck_tool_min`, `stuck_wait_min` | 30, 10 | the watcher's two thresholds: a tool call still running, an unanswered permission prompt or dialog (minutes) |
+| `stuck_fail_streak` | 3 | identical FAILs in a row before the SESSIONS line says `fail x3` (a flag, not a report) |
 | `wake_on_stuck` | true | a stuck report starts a turn at the orchestrator (otherwise it lands in the inbox) |
 | `ask_wait_sec`, `ask_expire_min`, `ask_beep` | 90, 360, true | how many seconds `ask` waits for an inline answer; after how many minutes the dialog closes by itself (0 = never); a sound before showing |
 | `note_max_chars` | 400 | longer - `add` refuses: one fact, one line |
@@ -220,7 +221,7 @@ What changes in habits: `longrun add` without `--shared` now writes to own notes
 
 `bash tests/scenarios.sh` - 37 checks in nine scenarios, one per task from the README: orientation of a new session, own notes through compaction, the shared notes delta per turn, two sessions in one folder, resume under a new CLI id (immediately and with delayed app metadata), `/clear`, fork, handing over work (inbox, socket, watch by name), and the live picture of the other sessions (one appears, one ends, one is archived in the app). Output of the last runs: [tests/last-run.txt](../tests/last-run.txt), [tests/last-run-scenarios.txt](../tests/last-run-scenarios.txt).
 
-`bash tests/orchestrator.sh` - 51 checks of the orchestrator layer (lock and mirror, board, facts, halt via PreToolUse, telemetry, stuck detection by the watcher). `bash tests/ask.sh` - 27 checks of the dialog and the MCP server on a fixture (answer inline and by a turn, cancel/expire/failure, exclusion from halt, the flag at the watcher, JSON-RPC over stdio). All suites run with `LONGRUN_NO_UI=1`: the tests show no real dialogs or notifications.
+`bash tests/orchestrator.sh` - 51 checks of the orchestrator layer (lock and mirror, board, facts, halt via PreToolUse, telemetry, the watcher's two stuck rules). `bash tests/ask.sh` - 27 checks of the dialog and the MCP server on a fixture (answer inline and by a turn, cancel/expire/failure, exclusion from halt, the flag at the watcher, JSON-RPC over stdio). All suites run with `LONGRUN_NO_UI=1`: the tests show no real dialogs or notifications.
 
 A live run on `claude -p` (costs money): [tests/e2e-claude.md](../tests/e2e-claude.md).
 
@@ -259,15 +260,15 @@ One session of the project takes the role, the others report through the board. 
 
 | Command | What it does |
 |---|---|
-| `board [ls [--all]]` | goal, doing, blocked, next todo, counters; `--all` adds done/dropped |
+| `board [ls [--all] [--facts]]` | goal, doing, blocked, next todo, counters; `--all` adds done/dropped, `--facts` lists the facts instead |
 | `board goal "..."` | the project goal |
 | `board add "..." [--after T3,T4] [--for WHO] [--wake]` | a task; `--for` assigns it to a session at once (a message to the inbox, `--wake` into the socket) |
 | `board take T7 [--force]` | take; refused if the task is waiting on `--after` or another session is doing it |
 | `board done T7 ["outcome"]`, `board block T7 "why"` | close / block; wake the orchestrator (the socket if it is alive, otherwise the inbox); `--quiet` does not wake |
 | `board drop|release|edit|rm T7 [...]` | drop, return to todo, rewrite the text, delete |
 | `board assign T7 WHO [--quiet] [--force]` | assign to a session: a `YOUR TASK` message into its socket (the turn starts immediately) or into the inbox |
-| `fact "..." [--task T7] [--source user|review|msngr|watch|session] [--wake]` | record a fact; to the orchestrator's inbox (`--wake` into the socket); the task's worker sees `NEW FACT` |
-| `fact ls [--all]`, `fact ack F3 ["decision"]` | the list of unhandled ones; mark as handled |
+| `board add --fact "..." [--task T7] [--source user\|review\|msngr\|watch\|session] [--wake]` | record something learned from outside; it reaches the orchestrator's inbox (`--wake` into the socket). A fact is an item of the same `board.json`, so since 0.6.0 it is a `board` subcommand, not a command of its own |
+| `board ls --facts [--all]`, `board ack F3 ["decision"]` | the ones nobody handled yet; mark one handled with what was decided |
 | `orchestrate [status]` | who the orchestrator is, halt, board, facts, sessions with flags |
 | `orchestrate start [--goal "..."] [--force]`, `orchestrate stop [--force]` | take the role (one per project) / give it up |
 | `halt "why" [--project]`, `resume` | forbid tools in all sessions (or only in this project) / lift |
@@ -286,7 +287,7 @@ In the digest: the line `ORCHESTRATOR: <name> [skey] alive|idle|stale|ended sinc
 
 ### The watcher
 
-Every tick after the checks, `stuck_scan`: for every project with an orchestrator mirror and a live role, for every session except the orchestrator: a tool longer than `stuck_tool_min`, a turn longer than `stuck_turn_min`, waiting for confirmation or for an `ask` answer longer than `stuck_wait_min`, `stuck_fail_streak` identical FAILs in a row, context closer than `ctx_warn_before` to the window. If the session has a live pid but there is no shell-snapshot wrapper in the process tree, the `tool` flag is not raised (the meta is stale). Every flag is reported once per episode: `STUCK? <name> [skey]: ... Options: ...`, delivered into the socket (`wake_on_stuck`) or the inbox.
+Every tick after the checks, `stuck_scan`: for every project with an orchestrator mirror and a live role, for every session except the orchestrator, two rules - a tool running longer than `stuck_tool_min`, and waiting for a permission answer or an `ask` answer longer than `stuck_wait_min`. Both mean the same thing: this session is not moving and nobody inside it can tell. Three further rules were dropped in 0.6.0 - a turn over an hour (which is what a long normal turn looks like), three identical FAILs (the turn card already puts those in front of that session, with the command in it), and a context near the window (already sent to the session as a warning and to the orchestrator through `ctx_told`). All three are still shown as SESSIONS flags. If the session has a live pid but there is no shell-snapshot wrapper in the process tree, the `tool` flag is not raised (the meta is stale). Every flag is reported once per episode: `STUCK? <name> [skey]: ... Options: ...`, delivered into the socket (`wake_on_stuck`) or the inbox.
 
 ### Context window
 

@@ -156,8 +156,9 @@ One session takes the orchestrator role and keeps a board: the goal, tasks, fact
 This is coordination across several windows plus a line to you, not autonomy: driving **one** session to a condition an evaluator can check is what `/goal` is for.
 
 ```bash
-longrun orchestrate start --goal "ship the checkout drawer"    # in the driving session
+longrun orchestrate start --goal "ship the checkout drawer"    # in the coordinating session
 longrun board take T7; longrun board done T7 "PR 42 merged"    # in a worker
+longrun board add --fact "reviewer wants the field renamed"    # something learned outside
 longrun ask "Merge PR 42?" --options "Yes,No"                  # a dialog, answered inline
 ```
 
@@ -228,7 +229,7 @@ longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune |
 longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
-longrun orchestrate start --goal "..." | board | fact | ask | halt | resume
+longrun orchestrate start --goal "..." | board [add --fact|ack] | ask | halt | resume
 ```
 
 Full flags, file formats and the facts we verified about Claude Code: [docs/REFERENCE.md](docs/REFERENCE.md). The orchestrator's design and what is left: [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md).
