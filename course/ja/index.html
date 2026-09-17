@@ -48,7 +48,7 @@
 <ol>
 <li><b>1度だけインストール。</b>1行で済み、checkoutも要りません。インストーラーがソースを自分で取ってきます：
 <pre><code>curl -fsSL https://krllx.github.io/longrun/install.sh | bash</code></pre>
-入るのはskill、<code>~/.claude/settings.json</code>の11個のhook、CLIの<code>~/.local/bin/longrun</code>、<code>longrun</code> MCPサーバー、そしてチェックと監視役を5分ごとに走らせるタイマーです。尋ねられるのは1つだけ、次の項目のデスクトップ通知です。cloneから入れる場合も同じ<code>install.sh</code>で、<code>--uninstall</code>が元に戻します。</li>
+入るのはskill、<code>~/.claude/settings.json</code>の12個のhook、CLIの<code>~/.local/bin/longrun</code>、<code>longrun</code> MCPサーバー、そしてチェックと監視役を5分ごとに走らせるタイマーです。尋ねられるのは1つだけ、次の項目のデスクトップ通知です。cloneから入れる場合も同じ<code>install.sh</code>で、<code>--uninstall</code>が元に戻します。</li>
 <li><b>通知（任意）。</b><code>install.sh</code>は通知を設定するかを尋ね、この項目が必要かどうかは、その答えで決まります。longrunが通知に依存することはありません。全停止も発火したウォッチも、いずれにせよsocketか受信箱を通ってセッションに届くので、断っても他には何も変わりません（<code>--no-notify</code>で先に答えておくこともでき、あとから<code>brew install terminal-notifier</code>で有効にもできます）。macOSでは、<code>terminal-notifier</code>がなければインストーラーが<code>brew install terminal-notifier</code>を実行し（Homebrewが前提です。なければその旨を伝えて先へ進みます）、テスト通知を1つ送ります。macOSはterminal-notifierからの通知を許可するかを1度だけ尋ねることがあるので、許可してください。macOS標準の手段でこの手順を置き換えることはできません。<code>osascript -e 'display notification'</code>はScript Editorの名義で通知を出しますが、Script Editorは通知権限を持たないため、システムは通知を記録するだけで何も表示せず、終了コードは0を返します（macOS 15で25回中25回。Script Editorを先に起動しても権限は付きません）。そのためバナーにはterminal-notifier自身の名前とアイコンが出ます。macOSはこの2つを通知を出したバンドルから取るので、通知ごとに差し替える方法はありません。Linuxでは<code>notify-send</code>(<code>libnotify</code>)で、たいていのデスクトップ環境にはすでに入っています。どちらでも<code>longrun notify --test</code>で確かめられます。テスト通知を1つ送り、システムが実際に表示したかを読み返し、クリックするとどのセッションが開くかを出力します。絶対に見逃したくないセッションが1つあるなら<code>longrun important on</code>（または<code>next</code>、あるいは数字）です。そのセッションのターンの終わりは、<code>notify_turn_end</code>がどう設定されていようと、どのウィンドウが前面だろうと必ず通知されます。別のClaudeセッションで入力している間は、前面ウィンドウを見る通常の判定ではこの通知を出せません。</li>
 <li><b>フォルダをプロジェクトにする。</b>longrunにとってのプロジェクトは、Claude Codeで開くフォルダです。リポジトリのルートである必要はありません。複数のリポジトリを含むフォルダ、monorepoのサブディレクトリ、空の司令塔フォルダでもかまいません。そこで1度<code>longrun init</code>を実行します。ターミナルでも、Claude Codeのセッションの中でもよく、頼めばエージェントが代わりに実行します。<code>.longrun/</code>ディレクトリができます。そのフォルダがリポジトリの中にあるなら、ignoreファイルに追加してください（または<code>longrun init --external</code>で、ディレクトリを<code>~/.claude/longrun/</code>の下に置きます）。同じプロジェクトの各worktreeからは<code>longrun link &lt;path to the project&gt;</code>。確認は<code>longrun where</code>です。</li>
 <li><b>設定する。</b>セッションでエージェントに「set up longrun」と言います（または<code>/longrun onboard</code>）。エージェントは<code>longrun onboard</code>を実行し、skillが何をするかを手短に説明し、主な設定について尋ねます。autocompactのウィンドウ、停滞のしきい値、メモのサイズ、通知です。答えはエージェントが<code>longrun config set</code>で適用します。例外が1つ。hookはautocompactのウィンドウを設定できないので、エージェントはClaude Codeで<code>/autocompact 300k</code>（または選んだ値）と入力するよう頼みます。そのしきい値の5万token手前で、hookがcompactionの前にメモを書くようセッションに促します。キーの詳細は下の第9章。</li>
@@ -97,7 +97,7 @@
 </figure>
 <h3>skillは何でできているか</h3>
 <div class="grid2">
-  <div class="card"><h4>機械層：hook、CLI、タイマー</h4><p>Claude Codeのhookが11個（下の第4章）、<code>longrun</code>コマンド、そしてタイマー（macOSではlaunchd agent、Linuxではsystemd user timerかcron）。機械層はモデルなしで動きます：</p>
+  <div class="card"><h4>機械層：hook、CLI、タイマー</h4><p>Claude Codeのhookが12個（下の第4章）、<code>longrun</code>コマンド、そしてタイマー（macOSではlaunchd agent、Linuxではsystemd user timerかcron）。機械層はモデルなしで動きます：</p>
   <ul>
   <li>セッション開始時と毎回のcompactionの後にダイジェストを出力します。</li>
   <li>compactionの要約をすべてそのままアーカイブします。</li>
@@ -167,7 +167,7 @@
 <section class="lesson" id="l4">
 <div class="kicker">第4章</div>
 <h2>hook：機械層のありか</h2>
-<p>Claude Codeはセッションのイベントごとに外部コマンドを呼びます。longrunはそうしたコマンドを11個入れますが、実体はどれも1つのpythonスクリプトです。hookはイベントごとに別プロセスなので、インストールの直後から新しいコードがすべてのセッションで同時に効きます。ループの中のhookをクリックしてください。</p>
+<p>Claude Codeはセッションのイベントごとに外部コマンドを呼びます。longrunはそうしたコマンドを12個入れますが、実体はどれも1つのpythonスクリプトです。hookはイベントごとに別プロセスなので、インストールの直後から新しいコードがすべてのセッションで同時に効きます。ループの中のhookをクリックしてください。</p>
 <div class="hooks"><div id="hookloop"></div><div class="hookinfo" id="hookinfo"><h4>1つのセッションのループ</h4><div>開始、そしてターンが続きます。人間のリクエスト、ツール呼び出し、回答。コンテキストが一杯になればcompaction、そして再びSessionStart。どのノードにもhookがあります。</div></div></div>
 <div class="callout ok">hookからモデルのコンテキストへ届くのは、これだけです。SessionStartのダイジェスト、UserPromptSubmitでの共有メモの差分とメッセージ、まれに出る、メモを書くよう促す文、コンテキストの警告、そして全停止中の拒否。ほかはすべて、黙ってファイルへ書かれます。</div>
 <div class="next"><a href="#l5">次：何を書くか</a></div>
@@ -259,7 +259,7 @@ longrun config unset notes_max_bytes            # back to the default</code></pr
 <div class="cheat">
 <pre><code># install
 curl -fsSL https://krllx.github.io/longrun/install.sh | bash
-                        # skill, 11 hooks, CLI, MCP server, the 5-minute timer, notifications
+                        # skill, 12 hooks, CLI, MCP server, the 5-minute timer, notifications
 longrun watch install   # the timer alone (the installer already did it)
 longrun notify --test   # optional: does a notification reach the screen
 longrun init [--external]  # in the project folder
@@ -349,7 +349,8 @@ window.LR_I18N = { step: 'ステップ', of: '/', prev: '戻る', next: '次へ'
     { name: 'SessionStart', what: 'ディレクトリからプロジェクトを見つけ（.longrun/まで上へ、なければレジストリ）、CLI idをセッションkeyに結びつけ（新しいidでのresumeの後も）、ダイジェストを出力します。SHARED、OWN、SESSIONS、ウォッチ、ボード、メッセージです。セッションのBashへLONGRUN_SESSIONとLONGRUN_DIRをexportします。1時間に1度、片付けを走らせます。' },
     { name: 'UserPromptSubmit', what: '毎ターン：受信箱のメッセージを配送し、共有メモの差分(+ ~ -)とボードの変更を出力し、ターンを数え、ウィンドウの50k手前でコンテキストについて警告します。' },
     { name: 'PreToolUse', what: '全停止を確認します。停止中は理由つきのdenyを返し、モデルはそれを見ます。どのツールがいつ始まったかをmeta.jsonへ記録します（"tool `ya make` 38m"というフラグのため）。mcp__longrun__*のツールは全停止の対象外です。' },
-    { name: 'PostToolUse', what: '呼び出しと編集を数え、実行中のツールの記録を閉じます。メモなしで40回の呼び出しか8ターンが過ぎ、しかも編集か失敗があった場合だけ、1度だけメモを書くよう促します。' },
+    { name: 'PostToolUse', what: '呼び出しと編集を数え、実行中のツールの記録を閉じます。メモなしで40回の呼び出しか8ターンが過ぎ、しかも編集か失敗があった場合だけ、1度だけメモを書くよう促します。他のセッションが変えたものを、人の次のリクエストを待たずに運びます。プロジェクトの別の場所にすでに書かれていることを探し始めたときも、ここで答えます。' },
+    { name: 'PostToolBatch', what: '並列の呼び出しがひとまとまり解決したあとに1度だけ走るイベントです。matcherがないのでReadも見えます。使い道は同じヒントで、すでにディスクにあり、いま文脈にないものを探しているという知らせです。他のイベントより新しく、CLIがこのイベントを知らない場合は何も起きず、ヒントはPostToolUseだけが運びます。' },
     { name: 'PostToolUseFailure', what: '失敗したBashコマンドを、セッションのジャーナルにFAILの1行として記録します。3回続くとSESSIONSに"fail x3"のフラグが出ます。これはほかのセッションから見えるフラグであって、誰かへの報告ではありません。' },
     { name: 'PermissionRequest', what: 'セッションがツールの権限を待っている状態です。meta.jsonに印を付け、そこから"waiting permission 12m"のフラグが出ます。' },
     { name: 'Notification', what: 'Claude Codeの通知（idle、入力待ち、ダイアログ）。meta.jsonに待機中の印を付けます。' },

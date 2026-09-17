@@ -24,6 +24,9 @@ start(){ # start SID CWD SOURCE -> digest
 turn(){ # turn SID CWD -> what the hook injects before the model sees the prompt
   printf '{"session_id":"%s","transcript_path":"/x.jsonl","cwd":"%s","hook_event_name":"UserPromptSubmit","prompt":"go"}' "$1" "$2" | "$LR" hook UserPromptSubmit
 }
+tool(){ # tool SID CWD [NAME] -> what the hook injects between two tool calls, mid-turn
+  printf '{"session_id":"%s","transcript_path":"/x.jsonl","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"%s","tool_input":{"command":"ls"},"tool_response":{}}' "$1" "$2" "${3:-Bash}" | "$LR" hook PostToolUse
+}
 stop(){ printf '{"session_id":"%s","cwd":"%s","hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"%s"}' "$1" "$2" "$3" | "$LR" hook Stop; }
 end(){ printf '{"session_id":"%s","cwd":"%s","hook_event_name":"SessionEnd","reason":"%s"}' "$1" "$2" "$3" | "$LR" hook SessionEnd; }
 as(){ LONGRUN_SESSION="$1" "$LR" "${@:2}"; }   # a CLI call made from inside session $1's Bash
@@ -39,6 +42,8 @@ as $A add --shared -t pin "PR E = 15526210, branch EDAINAPP-1375-screen, opened 
 as $A add --shared -t decision "STQ v2 over v1 for payment callbacks: v1 needs a TPS ticket per env" >/dev/null
 as $A add --own -t dead "own: LC client path gives 400 whatever the body; bdui-catalog testing lacks the screen" >/dev/null
 as $A stale n1 "PR E is merged, the branch is gone" >/dev/null   # any write the session journals
+edit(){ printf '{"session_id":"%s","transcript_path":"/x.jsonl","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"%s"},"tool_response":{}}' "$1" "$2" "$3" | "$LR" hook PostToolUse >/dev/null; }
+edit $A "$WT_E" "$WT_E/internal/handlers/post_v_1_screen.go"
 stop $A "$WT_E" "PR E opened, waiting for reviewers"
 D="$(cd "$WT_C" && start $B "$WT_C" startup)"
 check "S1.1 the new session in another worktree sees the project's shared notes (PR map, decisions)" "echo \"\$D\" | grep -q 'PR E = 15526210' && echo \"\$D\" | grep -q 'STQ v2 over v1'"
@@ -47,6 +52,9 @@ check "S1.3 it sees which other sessions exist and what each did last" "echo \"\
 check "S1.4 it does NOT get the other session's own notes pushed into its context" "! echo \"\$D\" | grep -q 'LC client path'"
 check "S1.5 its own notes start empty" "echo \"\$D\" | grep -q 'OWN notes (this session) 0 entries'"
 check "S1.6 but it can pull a detail from another session's own notes on demand" "(cd '$WT_C' && as $B recall 'LC client path' --no-transcript) | grep -q 'sessions/aaaaaaaa/notes.md'"
+# "Hand it to a more relevant session" needs relevance to be visible. A window's title is whatever the
+# user happened to call it; where the session has actually been editing is not a guess.
+check "S1.7 it sees what part of the tree each other session has been working in" "echo \"\$D\" | grep -q 'in internal/handlers'"
 
 echo "== S2: own notes survive compaction and stay own"
 cd "$WT_E"
@@ -82,6 +90,16 @@ check "S3.7 the rest arrive on the next turns instead of being lost" "echo \"\$T
 python3 - "$HQ/.longrun/config.json" <<'PY'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d.pop("shared_delta_max_bytes",None); json.dump(d,open(p,"w"))
 PY
+# A turn is now one prompt and an hour of tool calls. Waiting for the user to press Enter again means
+# running that whole hour on a picture another window has already moved past.
+turn $B "$WT_C" >/dev/null
+( cd "$WT_E" && as $A add --shared -t dead "eats-payments retry via STQ v1: the task is dropped when the payload grows past 128 kB" >/dev/null )
+MT=""; for i in 1 2 3 4 5 6; do MT="$MT$(tool $B "$WT_C")"; done
+check "S3.8 a peer's note reaches a session INSIDE its turn, between two tool calls" "echo \"\$MT\" | grep -q 'additionalContext' && echo \"\$MT\" | grep -q 'past 128 kB'"
+MT2=""; for i in 1 2 3 4 5 6; do MT2="$MT2$(tool $B "$WT_C")"; done
+check "S3.9 ...and once only: the mid-turn delta marks it seen like the boundary one does" "! echo \"\$MT2\" | grep -q 'past 128 kB'"
+TB9="$(turn $B "$WT_C")"; check "S3.10 ...so the turn boundary does not repeat it either" "! echo \"\$TB9\" | grep -q 'past 128 kB'"
+MT3="$(tool $B "$WT_C")"; check "S3.11 the check is rate-limited: not on every single tool call" "test -z \"\$MT3\""
 
 echo "== S4: two sessions started in the same directory keep separate own notes"
 cd "$HQ"; start $C "$HQ" startup >/dev/null

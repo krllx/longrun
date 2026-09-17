@@ -144,13 +144,19 @@ open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
 PY
 SWC="\"session_id\":\"77777777-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$SWP\""
 ( cd "$SWP" && hook SessionStart "{$SWC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
-SW1="$(cd "$SWP" && hook UserPromptSubmit "{$SWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"what do we know\"}")"
+SW0="$(cd "$SWP" && hook UserPromptSubmit "{$SWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"what do we know\"}")"
+# Turn one is the worst moment to ask: the session has just been handed a task and has not yet touched
+# anything the old notes are about. "At some suitable moment during the session" means a few turns in.
+check "not on the first turn of a session, when the only honest answer is 'I don't know yet'" "! echo \"\$SW0\" | grep -q housekeeping"
+for p in b c; do ( cd "$SWP" && hook UserPromptSubmit "{$SWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"$p\"}" >/dev/null ); done
+SW1="$(cd "$SWP" && hook UserPromptSubmit "{$SWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"and now\"}")"
 check "the housekeeping question comes on its own: no edits, no failures, no card in that turn" "echo \"\$SW1\" | grep -q 'longrun, housekeeping: 1 shared note older than 7 days' && echo \"\$SW1\" | grep -q 'longrun stale n<id>' && ! echo \"\$SW1\" | grep -q 'your last turn'"
 SW2="$(cd "$SWP" && hook UserPromptSubmit "{$SWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"and now\"}")"
 check "...and not again on the next turn: once per half an ageing window, not once per turn" "! echo \"\$SW2\" | grep -q housekeeping"
 FRP="$T/sweep-fresh"; mkdir -p "$FRP"; ( cd "$FRP" && "$LR" init >/dev/null && "$LR" add -t fact "every note here is from today" >/dev/null )
 FRC="\"session_id\":\"77777777-3333-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$FRP\""
 ( cd "$FRP" && hook SessionStart "{$FRC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
+for p in a b c d; do ( cd "$FRP" && hook UserPromptSubmit "{$FRC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"$p\"}" >/dev/null ); done
 SW3="$(cd "$FRP" && hook UserPromptSubmit "{$FRC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"hi\"}")"
 check "nothing old enough to re-read: the question is not asked at all" "! echo \"\$SW3\" | grep -q housekeeping"
 # transcript for precompact snapshot + recall
@@ -302,16 +308,27 @@ check "doc add writes one shared line with the path relative to the project root
 ( cd "$DOCP" && "$LR" doc add /etc/hosts "outside" >/dev/null 2>/tmp/lr-doc3 ); check "a file outside the project is refused (it would not resolve in another worktree)" "test \$? -eq 2 && grep -q 'outside the project' /tmp/lr-doc3"
 DD="$(cd "$DOCP" && "$LR" digest)"; check "the pointer is in the digest, the file's contents are not" "echo \"\$DD\" | grep -q 'research/M.md - the original intent' && ! echo \"\$DD\" | grep -q 'zanzibar'"
 RD="$(cd "$DOCP" && "$LR" recall zanzibar --no-transcript)"; check "recall reaches inside the file the pointer names" "echo \"\$RD\" | grep -q 'research/M.md:3'"
-python3 - "$DOCP/.longrun/NOTES.md" <<'PY'
+DD1="$(cd "$DOCP" && "$LR" digest)"; check "a file untouched since its line was written carries no warning" "! echo \"\$DD1\" | grep -q 'this line may be stale'"
+# The reference is the file's mtime at the moment the description was written, kept in .longrun/docs.json -
+# not the note's date. A note carries no time of day, so against the date a change made hours later on the
+# SAME day read as no change at all: exactly the case of "another window rewrote this while I was away".
+sleep 3; printf 'a line added minutes after the pointer was written\n' >> "$DOCP/research/M.md"
+DD2="$(cd "$DOCP" && "$LR" digest)"; check "a change made the same day the line was written is still marked (the note's date could not tell)" "echo \"\$DD2\" | grep -q 'this line may be stale'"
+check "the mark says when, to the minute" "echo \"\$DD2\" | grep -qE 'file changed [0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}'"
+( cd "$DOCP" && "$LR" doc touch n1 "what is in it now, after the rewrite" >/dev/null )
+check "doc touch rewrites the description and keeps the path" "grep -q 'research/M.md - what is in it now' '$DOCP/.longrun/NOTES.md'"
+DD2B="$(cd "$DOCP" && "$LR" digest)"; check "...and clears the mark: the description now matches the file" "! echo \"\$DD2B\" | grep -q 'this line may be stale'"
+DL="$(cd "$DOCP" && "$LR" doc ls)"; check "doc ls shows the path, the size and when it last changed" "echo \"\$DL\" | grep -q 'research/M.md' && echo \"\$DL\" | grep -q 'changed '"
+OLDP="$T/oldstamp"; mkdir -p "$OLDP/research"; ( cd "$OLDP" && "$LR" init >/dev/null )
+printf 'material from a project made before stamps existed\n' > "$OLDP/research/O.md"
+( cd "$OLDP" && "$LR" doc add research/O.md "long material" >/dev/null && rm -f .longrun/docs.json )
+python3 - "$OLDP/.longrun/NOTES.md" <<'PY'
 import re,sys,datetime
 p=sys.argv[1]; s=open(p).read()
 old=(datetime.date.today()-datetime.timedelta(days=3)).strftime("%m-%d")
 open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
 PY
-DD2="$(cd "$DOCP" && "$LR" digest)"; check "a file newer than its line is marked, so nobody trusts a stale description" "echo \"\$DD2\" | grep -q 'this line may be stale'"
-( cd "$DOCP" && "$LR" doc touch n1 "what is in it now, after the rewrite" >/dev/null )
-check "doc touch rewrites the description and keeps the path" "grep -q 'research/M.md - what is in it now' '$DOCP/.longrun/NOTES.md'"
-DL="$(cd "$DOCP" && "$LR" doc ls)"; check "doc ls shows the path, the size and when it last changed" "echo \"\$DL\" | grep -q 'research/M.md' && echo \"\$DL\" | grep -q 'changed '"
+DDO="$(cd "$OLDP" && "$LR" digest)"; check "a project with no stamps yet falls back to the note's date instead of going quiet" "echo \"\$DDO\" | grep -q 'this line may be stale'"
 DG="\"session_id\":\"dddddddd-2222-4333-8444-555555555555\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$DOCP\""
 ( cd "$DOCP" && hook SessionStart "{$DG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
   hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"a\"}" >/dev/null )
@@ -325,6 +342,11 @@ sleep 1; printf 'a line THIS session wrote\n' >> "$DOCP/research/M.md"
 ( cd "$DOCP" && hook PostToolUse "{$DG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$DOCP/research/M.md\"},\"tool_response\":{}}" >/dev/null )
 DTURN3="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"d\"}")"
 check "a file THIS session edited asks for doc touch instead of offering a read" "echo \"\$DTURN3\" | grep -q 'DOCS you changed this session' && echo \"\$DTURN3\" | grep -q 'doc touch' && echo \"\$DTURN3\" | grep -q '! n1 research/M.md'"
+# The attribution lasts one turn, not the whole session. It used to be a rolling list for the session, so
+# once this session had touched a file, every later change by anybody was still signed "you".
+sleep 1; printf 'and now somebody ELSE changed the same file\n' >> "$DOCP/research/M.md"
+DTURN3B="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"d2\"}")"
+check "a later change to a file this session edited turns ago is theirs again, not an unpaid debt" "echo \"\$DTURN3B\" | grep -q '~ n1 research/M.md' && ! echo \"\$DTURN3B\" | grep -q 'you changed'"
 printf 'a second long file, this one only read here\n' > "$DOCP/research/N.md"
 ( cd "$DOCP" && "$LR" doc add research/N.md "the second pile of long material" >/dev/null
   hook PostToolUse "{$DG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$DOCP/research/N.md\"},\"tool_response\":{}}" >/dev/null
@@ -342,6 +364,68 @@ open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
 PY
 ( cd "$DOCP" && "$LR" gc >/dev/null )
 check "gc archives a pointer whose file has been missing for a week" "! grep -q 'research/M.md' '$DOCP/.longrun/NOTES.md' && grep -q 'doc file gone' '$DOCP/.longrun/archive/notes.md'"
+
+echo "== the poll hint: waiting by hand, told once what to do instead"
+# "Never poll" was a line in SKILL.md and nothing else. A hint, never a refusal: a long sleep is sometimes
+# right, and nothing here can tell which.
+PLP="$T/pollhint"; mkdir -p "$PLP"; ( cd "$PLP" && "$LR" init >/dev/null )
+PG="\"session_id\":\"pppppppp-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$PLP\""
+pbash(){ hook PostToolUse "{$PG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$1\"},\"tool_response\":{}}"; }
+pturn(){ hook UserPromptSubmit "{$PG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null; }
+( cd "$PLP" && hook SessionStart "{$PG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
+PH0="$(cd "$PLP" && pbash 'go build ./...')"; check "an ordinary command is not a poll" "! echo \"\$PH0\" | grep -q 'watch add'"
+PH1="$(cd "$PLP" && pbash 'sleep 120 && gh pr checks 42')"
+check "a long sleep is met with watch, and with the reason it is better" "echo \"\$PH1\" | grep -q 'longrun watch add' && echo \"\$PH1\" | grep -q 'waits 120s'"
+PH2="$(cd "$PLP" && pbash 'sleep 120 && gh pr checks 42')"
+check "...once per turn, not after every sleep" "! echo \"\$PH2\" | grep -q 'watch add'"
+( cd "$PLP" && pturn )
+PH3="$(cd "$PLP" && pbash 'sleep 5')"; check "a short sleep is pacing a command, not waiting for the world" "! echo \"\$PH3\" | grep -q 'watch add'"
+( cd "$PLP" && pbash 'gh pr checks 42' >/dev/null; pbash 'gh pr checks 42' >/dev/null )
+PH4="$(cd "$PLP" && pbash 'gh pr checks 42')"
+check "the same command three times over is a poll loop even with no sleep in it" "echo \"\$PH4\" | grep -q 'longrun watch add' && echo \"\$PH4\" | grep -q 'same command 3 times'"
+
+echo "== the recall hint: a session searching for something already written down, outside its context"
+# Manifesto point 2 is the one direction nothing mechanical covered: the digest OFFERS the saved material
+# at every start, but nothing noticed a session working out again what a file or an archived note already
+# answers. The signal is the session's own search term - a Grep pattern, a Glob, a subagent's description.
+RCP="$T/recallhint"; mkdir -p "$RCP/research"; ( cd "$RCP" && "$LR" init >/dev/null )
+RLOCAL="$RCP/.longrun"
+printf 'The retry path.\nEPMA rejects a retry when the idempotency key is reused after a decline; use a fresh key.\nUnrelated prose about deployment.\n' > "$RCP/research/R.md"
+( cd "$RCP" && "$LR" doc add research/R.md "how the retry path behaves, in detail" >/dev/null )
+RG="\"session_id\":\"rrrrrrrr-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$RCP\""
+( cd "$RCP" && hook SessionStart "{$RG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
+ptu(){ hook PostToolUse "{$RG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$1\",\"tool_input\":$2,\"tool_response\":{}}"; }
+RH1="$(cd "$RCP" && ptu Grep '{"pattern":"idempotency"}')"
+check "a Grep for a term a doc file already answers is met with the line and with recall" "echo \"\$RH1\" | grep -q 'already written down in this project' && echo \"\$RH1\" | grep -q 'research/R.md:2' && echo \"\$RH1\" | grep -q 'longrun recall idempotency'"
+RH2="$(cd "$RCP" && ptu Grep '{"pattern":"idempotency"}')"
+check "...and not again for the same term and file: one pointer, not a nag" "test -z \"\$RH2\""
+RH3="$(cd "$RCP" && ptu Grep '{"pattern":"the"}')"
+check "a short word is not a search term: no hint" "test -z \"\$RH3\""
+printf 'deployment\ndeployment\ndeployment\ndeployment\ndeployment\ndeployment\ndeployment\n' >> "$RCP/research/R.md"
+RH4="$(cd "$RCP" && ptu Grep '{"pattern":"deployment"}')"
+check "a term on too many lines is a word, not a term: no hint" "test -z \"\$RH4\""
+RH5="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}}]}")"
+check "a Read carries no question, so it is never guessed at from the path" "test -z \"\$RH5\""
+RMETA="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*recallhint*/rrrrrrrr/meta.json 2>/dev/null | head -1)"
+check "a search tool moves no counter: looking around is still not activity" "test -n \"\$RMETA\" && grep -q '\"tools\": 0' \"\$RMETA\""
+printf 'x\n' > "$RCP/research/R2.md"
+RH6="$(cd "$RCP" && ptu Grep '{"pattern":"nothing_here_at_all"}')"
+check "a term nothing answers stays silent" "test -z \"\$RH6\""
+# PostToolBatch: one event for a whole batch, no matcher, and it sees the Reads too - so a file the
+# session already has open is not offered back to it.
+echo "supersede: the checkout drawer was moved to widget v3 in PR 41" > "$RLOCAL/archive/notes.md"
+RB1="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}},{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"supersede\"},\"tool_response\":{}}]}")"
+check "PostToolBatch reads the whole batch and finds the archived answer" "echo \"\$RB1\" | grep -q 'additionalContext' && echo \"\$RB1\" | grep -q 'widget v3 in PR 41'"
+printf 'the drawer also owns the promocode slot\n' >> "$RCP/research/R.md"
+RB2="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"promocode\"},\"tool_response\":{}}]}")"
+check "a file this session has already opened is not offered back to it" "test -z \"\$RB2\""
+# Two pointers in a turn is help; five is a lecture. The budget refills at the turn boundary.
+echo "the kassa callback signature is checked against the merchant key, not the shop key" >> "$RLOCAL/archive/notes.md"
+RB3="$(cd "$RCP" && ptu Grep '{"pattern":"merchant"}')"
+check "a third hint in the same turn is held back, however many terms are searched" "test -z \"\$RB3\""
+( cd "$RCP" && hook UserPromptSubmit "{$RG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"next\"}" >/dev/null )
+RB4="$(cd "$RCP" && ptu Grep '{"pattern":"merchant"}')"
+check "...and the next turn gets it, instead of it being lost" "echo \"\$RB4\" | grep -q 'merchant key'"
 
 echo "== recall ranking: curated notes are not crowded out by a noisy archive"
 for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do echo "old summary $k mentioning pgx pool deadlock again" > "$LOCAL/archive/compact/11111111-2026010$((k%9))-$k.md"; done

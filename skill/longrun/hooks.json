@@ -1,5 +1,5 @@
 {
-  "_comment": "11 hook entries installed into ~/.claude/settings.json by install.sh. LONGRUN_BIN is replaced with the absolute path of scripts/longrun. Entries are recognised on uninstall by that path.",
+  "_comment": "12 hook entries installed into ~/.claude/settings.json by install.sh. LONGRUN_BIN is replaced with the absolute path of scripts/longrun. Entries are recognised on uninstall by that path. PostToolBatch is newer than the rest: where the CLI does not know the event, the entry is inert and PostToolUse carries the same hint.",
   "hooks": {
     "SessionStart": [
       {
@@ -37,11 +37,22 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell|Agent|Task|Workflow|mcp__.*",
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell|Agent|Task|Workflow|Grep|Glob|WebSearch|mcp__.*",
         "hooks": [
           {
             "type": "command",
             "command": "LONGRUN_BIN hook PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook PostToolBatch",
             "timeout": 10
           }
         ]

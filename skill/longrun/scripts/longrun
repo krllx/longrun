@@ -29,7 +29,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.6.1"
+VERSION = "0.6.2"
 HOME = os.path.expanduser("~")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
@@ -620,7 +620,8 @@ def cmd_notes(store, args):
 
 
 DOC_SEP = " - "          # "<path relative to the project root>" + this + "<what is in it>"
-DOC_STALE_DAYS = 1       # a file newer than its line by this much makes the line suspect
+DOC_STALE_DAYS = 1       # fallback only: without a stamp, a line is suspect once the file is this many days newer
+DOC_STAMP_SLACK = 2      # seconds of tolerance, so writing the note right after the file does not mark it at once
 
 
 def doc_parts(e):
@@ -646,16 +647,62 @@ def entry_date(e):
     return d.replace(year=d.year - 1) if d > now() + _dt.timedelta(days=1) else d
 
 
-def doc_suffix(store, e):
+def docs_stamp_path(store):
+    return os.path.join(store.local, "docs.json")
+
+
+def load_doc_stamps(store):
+    d = read_json(docs_stamp_path(store))
+    return d if isinstance(d, dict) else {}
+
+
+def stamp_doc(store, e):
+    """Remember the file's mtime at the moment its description was written.
+
+    Without this the digest could only compare the file against the note's DATE, and a note carries no
+    time of day - so a file changed by another session a few hours after the pointer was written, on the
+    same day, read as unchanged. That is the common case, not an edge one: the session that would benefit
+    is the one starting a fresh window while somebody else has just rewritten the material."""
+    d = load_doc_stamps(store)
+    try:
+        d[str(e["id"])] = {"mtime": int(os.path.getmtime(doc_path(store, e))), "at": ts()}
+    except OSError:
+        d.pop(str(e["id"]), None)
+    write_json(docs_stamp_path(store), d)
+
+
+def sweep_doc_stamps(store):
+    """Drop stamps whose entry is no longer a doc (removed, archived by gc, replaced by a plain note)."""
+    d = load_doc_stamps(store)
+    live = {str(e["id"]) for e in doc_entries(store)}
+    keep = {k: v for k, v in d.items() if k in live}
+    if len(keep) != len(d):
+        write_json(docs_stamp_path(store), keep)
+
+
+def doc_changed_at(store, e, stamps=None):
+    """When the file was last written, if that is after the description was. None = not after, or no file."""
+    try:
+        mt = os.path.getmtime(doc_path(store, e))
+    except OSError:
+        return False, None       # (file exists, changed at)
+    st = (stamps if stamps is not None else load_doc_stamps(store)).get(str(e["id"])) or {}
+    if st.get("mtime") is not None:
+        return True, (_dt.datetime.fromtimestamp(mt) if mt > int(st["mtime"]) + DOC_STAMP_SLACK else None)
+    # no stamp: a project written by an older version. Fall back to the note's date, which has no time of
+    # day in it, so only a change a whole day newer than the line can be told apart from the line itself.
+    d = _dt.datetime.fromtimestamp(mt)
+    return True, (d if (d - entry_date(e)).days >= DOC_STALE_DAYS else None)
+
+
+def doc_suffix(store, e, stamps=None):
     """What the digest adds after a doc line: the file is gone, or it has changed since the line was
     written and the description may no longer be what is in it. Cheap: one stat per doc entry."""
-    p = doc_path(store, e)
-    try:
-        mt = _dt.datetime.fromtimestamp(os.path.getmtime(p))
-    except OSError:
+    exists, changed = doc_changed_at(store, e, stamps)
+    if not exists:
         return "  (MISSING: no such file now)"
-    if (mt - entry_date(e)).days >= DOC_STALE_DAYS:
-        return "  (file changed %s, this line may be stale)" % mt.strftime("%m-%d")
+    if changed:
+        return "  (file changed %s, this line may be stale)" % changed.strftime("%m-%d %H:%M")
     return ""
 
 
@@ -673,12 +720,15 @@ def cmd_doc(store, args):
             print("no docs yet. `longrun doc add <path> \"<what is in it>\"` points the project at a file "
                   "that is too long for a note; every session then sees the pointer and reads the file on demand.")
             return 0
+        stamps = load_doc_stamps(store)
         for e in docs:
             path, desc = doc_parts(e)
             p = doc_path(store, e)
             try:
-                size, mt = os.path.getsize(p), _dt.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%m-%d %H:%M")
-                state = "%d B, changed %s" % (size, mt)
+                size = os.path.getsize(p)
+                mt = _dt.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%m-%d %H:%M")
+                changed = doc_changed_at(store, e, stamps)[1]
+                state = "%d B, changed %s%s" % (size, mt, "  (newer than this line: `doc touch`)" if changed else "")
             except OSError:
                 state = "MISSING"
             print("n%-4d %-44s %s\n      %s" % (e["id"], path, state, desc))
@@ -706,7 +756,12 @@ def cmd_doc(store, args):
             if doc_parts(e)[0] == rel:
                 die("%s is already n%d: `longrun doc touch n%d \"<new line>\"` rewrites its description."
                     % (rel, e["id"], e["id"]), 2)
-        return cmd_add(store, ["--shared", "-t", "doc", rel + DOC_SEP + desc])
+        rc = cmd_add(store, ["--shared", "-t", "doc", rel + DOC_SEP + desc])
+        if rc == 0:
+            e = next((x for x in doc_entries(store) if doc_parts(x)[0] == rel), None)
+            if e:
+                stamp_doc(store, e)   # the file as it is now IS what the description describes
+        return rc
     if sub in ("touch", "edit"):
         if len(rest) < 2:
             die("usage: longrun doc touch n12 \"<what is in it now>\"", 2)
@@ -717,9 +772,14 @@ def cmd_doc(store, args):
         if not e:
             die("n%d is not a doc entry (`longrun doc ls`)" % ids[0][1], 2)
         rel = doc_parts(e)[0]
-        return cmd_replace(store, ["n%d" % e["id"], rel + DOC_SEP + " ".join(rest[1:])])
+        rc = cmd_replace(store, ["n%d" % e["id"], rel + DOC_SEP + " ".join(rest[1:])])
+        if rc == 0:
+            stamp_doc(store, e)       # the description now matches the file as it is at this second
+        return rc
     if sub == "rm":
-        return cmd_rm(store, ["n" + str(i) for _, i in parse_ids(rest, "n")] or rest)
+        rc = cmd_rm(store, ["n" + str(i) for _, i in parse_ids(rest, "n")] or rest)
+        sweep_doc_stamps(store)
+        return rc
     die("usage: longrun doc [ls | add <path> \"<what is in it>\" | touch n12 \"<new line>\" | rm n12]", 2)
 
 
@@ -1092,8 +1152,10 @@ def load_meta(store, sid):
     m.setdefault("compactions", 0)
     m.setdefault("fails", 0)
     m.setdefault("fails_since_note", 0)
-    m.setdefault("files", [])
-    m.setdefault("edited", [])       # of `files`, the ones an edit tool wrote: whose doc line this session owes an update
+    m.setdefault("files", [])        # files a tool wrote to, or named: "what this session is changing"
+    m.setdefault("opened", [])       # files it merely looked at (PostToolBatch only): "already in front of it"
+    m.setdefault("edited", [])       # of `files`, the ones an edit tool wrote THIS TURN: whose doc line this session
+                                     # owes an update. Cleared at the turn boundary, like turn_files
     m.setdefault("turn_files", [])   # this turn only, for the turn card; `files` is the whole session
     m.setdefault("turn_fails", [])
     return m
@@ -2598,6 +2660,9 @@ def mcp_serve(args):
 
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+SEARCH_TOOLS = ("Grep", "Glob", "WebSearch")  # carry an explicit query and nothing else. Matched only so the
+                                              # recall hint can read the query; they move no counter, because
+                                              # "40 tool calls since the last note" was never about looking around
 RUNNING_TOOLS = ("Bash", "PowerShell", "Agent", "Task", "Workflow")  # tools that can run long; MCP tools too
 
 
@@ -4639,9 +4704,10 @@ def notes_block(t, budget, label="", drop_oldest=0, muted=()):
                         (" " + t["cmd"]) if t["cmd"] else " --own"))
     store = t.get("store")
     marks = load_stale(store) if (store is not None and t["shared"]) else {}
+    stamps = load_doc_stamps(store) if (store is not None and t["shared"]) else {}
 
     def render(e):
-        tail = doc_suffix(store, e) if (e["tag"] == "doc" and store is not None) else ""
+        tail = doc_suffix(store, e, stamps) if (e["tag"] == "doc" and store is not None) else ""
         return fmt_note(e, t["prefix"]) + tail + (stale_suffix(store, e, marks) if marks else "")
 
     text = "\n".join(lines + [render(e) for e in body])
@@ -4719,7 +4785,7 @@ def shared_delta(store, m, budget):
     return "\n".join(lines)
 
 
-def docs_delta(store, m, budget):
+def docs_delta(store, m, budget, mine_ok=True):
     """A file a doc entry points at has changed since this session last looked.
 
     Derived from the file's own mtime rather than from who edited it: that way a change made by another
@@ -4730,7 +4796,10 @@ def docs_delta(store, m, budget):
     change is an offer to READ: the material moved, open it if the task needs it (manifesto point 2).
     Your own change is a debt to PAY: the description in the shared notes still describes the file as it
     was before you touched it, and every other session is reading that description instead of the file.
-    Attribution is from this session's own edit tools, so a file only Read is never claimed as yours."""
+    Attribution is from this session's own edit tools *in the turn that just ended*, so a file only Read
+    is never claimed as yours, and neither is one you touched an hour ago and somebody else has changed
+    since. `mine_ok=False` reports only the other half: mid-turn, a peer's change is news worth having at
+    once, while your own debt can wait for the turn boundary rather than fire after every save."""
     docs = doc_entries(store)
     if not docs:
         return ""
@@ -4751,6 +4820,10 @@ def docs_delta(store, m, budget):
     mine = {os.path.realpath(p) for p in (m.get("edited") or [])}
     ours = [e for e in changed if os.path.realpath(doc_path(store, e)) in mine]
     theirs = [e for e in changed if e not in ours]
+    if not mine_ok:
+        ours = []   # mid-turn: the debt waits for the boundary. Those entries keep their old mtime in
+    if not (ours or theirs):   # `shown` below, so the boundary still finds them changed and asks once
+        return ""
     if ours and theirs:
         head = ("DOCS changed: ! you changed it and the line other sessions read still describes the old file "
                 "(`longrun doc touch n<id> \"...\"`); ~ somebody else did, read it only if you need it:")
@@ -4777,6 +4850,163 @@ def docs_delta(store, m, budget):
     return "\n".join(lines)
 
 
+# --- the one situational half of manifesto point 2: not "here is the index, at every start", but "you are
+# --- looking for something this project already answered, and the answer is not in your context".
+RECALL_MIN_TERM = 5        # shorter words match everything and prove nothing
+RECALL_MAX_TERMS = 6       # per batch, so one long subagent prompt cannot turn into a scan of everything
+RECALL_COMMON_HITS = 6     # a term on more lines than this is not a term, it is a word: no hint
+RECALL_PER_TURN = 2        # hints per turn, counted from the turn boundary. The (term, file) dedupe below
+                           # stops the same pointer twice; this stops a wide search turning into a lecture
+RECALL_HINT_LINES = 2      # lines quoted per hint; the rest is what `longrun recall` is for
+RECALL_SCAN_BYTES = 600000  # hard ceiling on what one hint may read, whatever the project holds
+MIDTURN_DELTA_TOOLS = 5   # tool calls between two mid-turn checks of what the other sessions changed
+
+
+def search_terms(calls):
+    """What the session said out loud it is looking for, from a batch of [(tool, tool_input)].
+
+    Only tools that carry an explicit query. A `Read` has no term in it, and a path is not one either:
+    guessing intent from a path is exactly how this kind of hint turns into noise - and by then the
+    session is already looking in the right place, which is the case that needs no help.
+
+    `WebSearch`'s parameter name is not in the published tool reference, so it is looked up the same
+    defensive way the running-tool tracker does it, by trying the names a query could plausibly have."""
+    out = []
+    for tool, ti in calls:
+        raw = ""
+        if tool in ("Grep", "Glob"):
+            raw = str(ti.get("pattern") or "")
+        elif tool == "WebSearch":
+            raw = str(ti.get("query") or ti.get("prompt") or "")
+        elif tool in ("Task", "Agent"):
+            raw = str(ti.get("description") or "")
+        if not raw:
+            continue
+        for w in re.split(r"[^0-9A-Za-z_Ѐ-ӿ]+", raw):
+            w = w.strip("_")
+            if len(w) < RECALL_MIN_TERM or w.isdigit() or w.lower() in out:
+                continue
+            out.append(w.lower())
+    return out[:RECALL_MAX_TERMS]
+
+
+def recall_scan_files(store, m):
+    """Everything `recall` would search EXCEPT what this session already carries.
+
+    The shared notes and this session's own notes are injected whole at every start, so a hit in them is
+    not news - it is the digest read back. What is worth pointing at is the material deliberately kept
+    out of the context: the files behind doc pointers, other sessions' notes and journals, and the
+    archive (pruned entries, pre-compaction snapshots, compaction summaries). Files this session has
+    already opened are skipped for the same reason - `files` is what it edited, `opened` is what it merely
+    looked at, which only `PostToolBatch` can see (the PostToolUse matcher does not pay a process per Read)."""
+    read_here = {os.path.realpath(p) for p in ((m.get("files") or []) + (m.get("opened") or []))}
+    me = m.get("skey") or ""
+    files = [doc_path(store, e) for e in doc_entries(store)]
+    for d in sorted(glob.glob(os.path.join(store.sessions, "*"))):
+        if os.path.basename(d) == me:
+            continue
+        files += [os.path.join(d, "notes.md"), os.path.join(d, "journal.md")]
+        files += sorted(glob.glob(os.path.join(d, "archive", "*.md")), reverse=True)
+    files += sorted(glob.glob(os.path.join(store.archive, "**", "*.md"), recursive=True), reverse=True)
+    seen, out = set(), []
+    for f in files:
+        rp = os.path.realpath(f) if os.path.exists(f) else f
+        if rp in seen or rp in read_here or not os.path.isfile(f):
+            continue
+        seen.add(rp)
+        out.append(f)
+    return out
+
+
+def recall_label(store, f):
+    if f.startswith(store.sessions + os.sep):
+        return "sessions/" + os.path.relpath(f, store.sessions)
+    if f.startswith(store.local + os.sep):
+        return os.path.relpath(f, store.local)
+    return os.path.relpath(f, store.root())
+
+
+def recall_hint(store, m, calls):
+    """"You are looking for something already written down, and it is not in front of you."
+
+    Everything else in the skill offers the saved material BEFORE the fact: the digest at every start, the
+    doc pointers, the docs delta when a file moves. Point 2 of the manifesto is the other direction -
+    pulling it back in at the moment it is needed - and until now that rested entirely on the model
+    remembering `longrun recall`, which is an instruction, not a mechanism.
+
+    The signal costs nothing to get: a `Grep`, a `Glob`, a `WebSearch`, a subagent's one-line description
+    are the session naming its own question. The hint fires only when that name hits material outside the
+    context, only for terms specific enough to mean something (a term on more than RECALL_COMMON_HITS
+    lines is a word, not a term), at most RECALL_PER_TURN times in a turn, and never twice for the same
+    term and file."""
+    terms = search_terms(calls)
+    if not terms:
+        return ""
+    if int(m.get("recall_hints") or 0) >= RECALL_PER_TURN:
+        return ""
+    files = recall_scan_files(store, m)
+    if not files:
+        return ""
+    pat = re.compile("|".join(re.escape(t) for t in terms), re.I)
+    per_term, budget = {}, RECALL_SCAN_BYTES
+    for f in files:
+        if budget < 4096:     # out of room; one oversized file must not cost the rest their turn
+            break
+        try:
+            size = os.path.getsize(f)
+        except OSError:
+            continue
+        if size > budget:
+            continue
+        budget -= size
+        body = read(f)
+        if not pat.search(body):     # one pass over the whole file before paying for splitlines()
+            continue
+        for i, line in enumerate(body.splitlines(), 1):
+            for t in terms:
+                if t in line.lower():
+                    per_term.setdefault(t, []).append((recall_label(store, f), i, line.strip()))
+    prior = list(m.get("recalled") or [])
+    done = set(prior)
+    for t in terms:
+        hits = per_term.get(t) or []
+        if not hits or len(hits) > RECALL_COMMON_HITS:   # nothing, or a word rather than a term
+            continue
+        fresh = [h for h in hits if ("%s|%s" % (t, h[0])) not in done]
+        if not fresh:
+            continue
+        m["recall_hints"] = int(m.get("recall_hints") or 0) + 1
+        m["recalled"] = (prior + ["%s|%s" % (t, h[0]) for h in fresh])[-60:]
+        lines = ["  %s:%d: %s" % (w, i, clip(l, 160)) for w, i, l in fresh[:RECALL_HINT_LINES]]
+        more = ("\n  (+%d more line%s)" % (len(fresh) - len(lines), "" if len(fresh) - len(lines) == 1 else "s")) \
+            if len(fresh) > len(lines) else ""
+        return ("longrun: \"%s\" is already written down in this project, outside your context - read this before "
+                "working it out again:\n%s%s\n  All of it, with the surrounding lines: `longrun recall %s`."
+                % (t, "\n".join(lines), more, shlex.quote(t)))
+    return ""
+
+
+def midturn_deltas(store, m):
+    """What other sessions changed, delivered INSIDE a turn instead of only at its boundary.
+
+    The deltas used to run on `UserPromptSubmit` alone. That was enough when a turn was a prompt and two
+    tool calls; a turn is now one prompt and an hour of work, and for that whole hour a session ran on a
+    picture of the project another window had already moved past - which is the exact pain the manifesto
+    names: "when a session wrote something for the project, another one did not even know it had to
+    re-read". The plumbing was already here: `PostToolUse` carries the inbox, the board and the context
+    warning; the two deltas were simply not in that list.
+
+    Only somebody else's work is carried here. This session's own debt - a doc line it owes an update -
+    waits for the turn boundary, because mid-turn it would fire after every save of the same file."""
+    n = int(m.get("tools") or 0)
+    if n - int(m.get("midturn_at") or 0) < MIDTURN_DELTA_TOOLS:
+        return ""
+    m["midturn_at"] = n
+    out = [shared_delta(store, m, int(store.cfg["shared_delta_max_bytes"])),
+           docs_delta(store, m, int(store.cfg["shared_delta_max_bytes"]) // 2, mine_ok=False)]
+    return "\n".join(x for x in out if x)
+
+
 def session_is_noise(m):
     """The app opens and closes sessions that never do anything; a session that took a turn, ran a tool,
     wrote a note or answered once is work."""
@@ -4794,6 +5024,29 @@ def session_state(m, live_sids, stale_min):
     except ValueError:
         age = 10 ** 6
     return ("stale %dm" % age) if age > stale_min else "active?"
+
+
+SESSION_WHERE_DIRS = 2   # directories named per session: enough to recognise the area, not a file list
+
+
+def session_where(m):
+    """The part of the tree a session has been working in, from the files it edited.
+
+    The manifesto asks that a session be able to hand work to "a more relevant session". Until now the
+    block gave a name, a state and one last reply, so relevance had to be guessed from whatever the window
+    happened to be called - and a window called "работа" tells the reader nothing. The data was already
+    collected for the pre-compaction snapshot; it was simply never shown."""
+    dirs = []
+    for p in reversed(m.get("files") or []):          # most recent first
+        d = os.path.dirname(p)
+        if not d:
+            continue
+        short = os.sep.join([x for x in d.split(os.sep) if x][-2:])
+        if short and short not in dirs:
+            dirs.append(short)
+        if len(dirs) >= SESSION_WHERE_DIRS:
+            break
+    return (", in " + ", ".join(dirs)) if dirs else ""
 
 
 def sessions_block(store, sid, budget, limit=6):
@@ -4818,8 +5071,9 @@ def sessions_block(store, sid, budget, limit=6):
         name = session_display_name(m.get("sid", ""), store)
         n_own = len(parse_notes(read(os.path.join(store.sessions, m.get("skey", ""), "notes.md"))))
         fl = session_flags(store, m)
-        out.append("  %s [%s] %s%s, %s, %d own notes: %s" % (clip(name, 40), m.get("skey", "")[:8], st, (" [" + ", ".join(fl) + "]") if fl else "",
-                                                            clip(m.get("scope") or "", 24), n_own, clip(m.get("last_status") or "-", 90)))
+        out.append("  %s [%s] %s%s, %s, %d own notes%s: %s" % (clip(name, 40), m.get("skey", "")[:8], st, (" [" + ", ".join(fl) + "]") if fl else "",
+                                                               clip(m.get("scope") or "", 24), n_own, session_where(m),
+                                                               clip(m.get("last_status") or "-", 90)))
     if len(rows) > limit:
         out.append("  (+%d more: `longrun status`)" % (len(rows) - limit))
     text = "\n".join(out)
@@ -5404,6 +5658,7 @@ def cmd_gc(store, args, quiet=False):
     report = []
     age_docs(store, report)
     age_notes(notes_target(store, True), cfg, report, "shared notes")
+    sweep_doc_stamps(store)   # stamps of pointers that age_docs or a plain `rm` took away
     swept = sweep_stale(store)
     if swept:
         report.append("stale marks: dropped %d whose entry is gone" % swept)
@@ -5609,6 +5864,47 @@ def cmd_compact_hint(store, args):
     return 0
 
 
+SWEEP_AFTER_TURNS = 4   # turns a session takes before the housekeeping question is worth asking it
+POLL_SLEEP_SEC = 30     # a sleep this long is a session waiting for the world, not pacing a command
+POLL_REPEATS = 3        # the same command this many times in a session's recent history is a poll loop
+POLL_KEEP = 8           # commands kept to see the repeat
+
+
+def poll_hint(store, m, tool, ti):
+    """A session that has started waiting by hand, told once what to do instead.
+
+    The manifesto's complaint about routines is concrete: "agents started a wait loop, say until the CI
+    pipeline passes, and sent a request every few minutes, eating tokens". `watch` is the answer and it is
+    a hook-driven timer that costs nothing while it waits - but choosing it over `sleep 60 && gh pr checks`
+    was, until here, a line of advice in SKILL.md and nothing more.
+
+    A hint, never a refusal: a long sleep is sometimes exactly right, and this cannot tell which."""
+    if tool not in ("Bash", "PowerShell") or m.get("poll_hinted"):
+        return ""
+    cmd = str(ti.get("command") or "")
+    if not cmd.strip():
+        return ""
+    why = ""
+    slept = [int(x) for x in re.findall(r"\bsleep\s+(\d+)", cmd)]
+    if any(s >= POLL_SLEEP_SEC for s in slept):
+        why = "this command waits %ds by itself" % max(slept)
+    elif slept and re.search(r"\b(while|until|for)\b", cmd):
+        why = "this is a wait loop"
+    else:
+        recent = m.get("recent_cmds") or []
+        if recent.count(cmd) + 1 >= POLL_REPEATS:
+            why = "you have now run the same command %d times in this turn" % (recent.count(cmd) + 1)
+    m["recent_cmds"] = ((m.get("recent_cmds") or []) + [cmd])[-POLL_KEEP:]
+    if not why:
+        return ""
+    m["poll_hinted"] = True
+    return ("longrun: %s. Waiting like this spends a model turn per check and stops when the conversation does. "
+            "`longrun watch add --then \"<what to do once it happens>\" -- <check>` hands the waiting to a timer "
+            "instead: no tokens while it waits, a sleeping laptop only delays it, and the result comes back as a "
+            "turn in this session. `longrun watch help` lists the checks (pr-merged, pr-status, http, file, cmd, at)."
+            % why)
+
+
 def card_due(store, m, unit):
     """May a turn card be shown now?
 
@@ -5641,8 +5937,16 @@ def sweep_hint(store, m):
 
     It used to ride on the turn card, and so inherited every one of the card's gates: a session that only
     read, reviewed or talked - which is exactly the session with time to re-read old notes - was never
-    asked at all. It now stands on its own on `UserPromptSubmit`, with only its own two conditions: at
-    most once per half an ageing window, and only when something is actually old enough to re-read."""
+    asked at all. It now stands on its own on `UserPromptSubmit`, with only its own conditions: not on the
+    first turns of a session, at most once per half an ageing window, and only when something is actually
+    old enough to re-read.
+
+    The first-turns rule is what "at some suitable moment during the session" means in practice. Without
+    it the question landed on turn one every time - the session has just been handed a task and has not
+    yet touched anything the old notes are about, so the only honest answer is "I don't know yet". A few
+    turns in, the session has read enough of the project to recognise a line that stopped being true."""
+    if int(m.get("turns") or 0) < SWEEP_AFTER_TURNS:
+        return ""
     every = max(1, int(store.cfg["notes_max_age_days"]) // 2)
     last = m.get("swept_at") or ""
     if last and (now() - _dt.datetime.strptime(last[:10], "%Y-%m-%d")).days < every:
@@ -5812,6 +6116,11 @@ def cmd_hook(args):
             sw = sweep_hint(store, m)  # its own gates, not the card's: a session that only reads is asked too
             m["turn_card"] = {}                      # it belonged to the turn that ended, shown or not
             m["turn_files"], m["turn_fails"] = [], []
+            m["edited"] = []   # attribution is per turn, like turn_files: a file this session touched an hour
+                               # ago and somebody else has changed since is THEIR change, not an unpaid debt
+            m["midturn_at"] = int(m.get("tools") or 0)   # the boundary just checked; the next mid-turn one waits
+            m["recall_hints"] = 0                        # the hint budget is per turn, like the card's window
+            m["poll_hinted"], m["recent_cmds"] = False, []
             save_meta(store, sid, m)
         if cw:
             out.append(cw)
@@ -5838,8 +6147,35 @@ def cmd_hook(args):
         if out:
             sys.stdout.write("\n".join(out) + "\n")
         return 0
+    if event == "PostToolBatch":
+        # One event for a whole batch of parallel calls, and no matcher: it sees every tool, including the
+        # Reads that the PostToolUse matcher deliberately does not pay a process for. Newer than PostToolUse -
+        # where the CLI does not have it, the entry is simply inert and the PostToolUse path below carries
+        # the hint on its own, with `files` holding only what this session edited.
+        calls = [(c.get("tool_name", ""), c.get("tool_input") or {}) for c in (inp.get("tool_calls") or [])]
+        with store.shared_lock():
+            m = load_meta_stamped(sid)
+            opened = list(m.get("opened") or [])
+            for _t, _ti in calls:
+                fp = _ti.get("file_path") or _ti.get("notebook_path")
+                if fp and fp not in opened:   # what the session already has in front of it. Kept apart from
+                    opened.append(fp)         # `files`, which means "changing" and is read back as that by
+            m["opened"] = opened[-60:]        # the compaction hint
+            rh = recall_hint(store, m, calls)
+            save_meta(store, sid, m)
+        if rh:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolBatch", "additionalContext": rh}}))
+        return 0
     if event == "PostToolUse":
         tool = inp.get("tool_name", "")
+        if tool in SEARCH_TOOLS:   # matched for the query in it, nothing else: no counter moves for looking around
+            with store.shared_lock():
+                m = load_meta_stamped(sid)
+                rh = recall_hint(store, m, [(tool, inp.get("tool_input") or {})])
+                save_meta(store, sid, m)
+            if rh:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": rh}}))
+            return 0
         with store.shared_lock():
             m = load_meta_stamped(sid)
             m["tools"] += 1
@@ -5853,7 +6189,7 @@ def cmd_hook(args):
             if fp and tool in EDIT_TOOLS and fp not in m["turn_files"]:   # what the turn card names
                 m["turn_files"] = (m["turn_files"] + [fp])[-20:]
             if fp and tool in EDIT_TOOLS and fp not in m["edited"]:       # what the docs delta attributes to you
-                m["edited"] = (m["edited"] + [fp])[-60:]
+                m["edited"] = (m["edited"] + [fp])[-60:]                  # cleared at the turn boundary
             run = m.get("running") or {}
             tid = inp.get("tool_use_id") or ""
             if tid in run:
@@ -5873,10 +6209,13 @@ def cmd_hook(args):
             nt = turn_card(store, m) if card_due(store, m, "tools") else ""
             if nt:
                 card_mark(m)
+            md = midturn_deltas(store, m)   # a peer's note must not wait for the user to press Enter
+            rh = recall_hint(store, m, [(tool, ti)])   # a subagent sent off to work out what is already written
+            ph = poll_hint(store, m, tool, ti)         # a wait loop started by hand
             save_meta(store, sid, m)
         if tell:
             notify_orchestrator(store, "%s [%s]: %s" % (clip(session_display_name(sid, store), 30), session_key(sid)[:8], tell), wake=False, from_sid=sid)
-        ctx = [deliver_inbox(store, sid), bd, cw, nt]  # a message from another session lands between tool calls, like a socket one
+        ctx = [deliver_inbox(store, sid), rh, ph, md, bd, cw, nt]  # a message from another session lands between tool calls, like a socket one
         ctx = [c for c in ctx if c]
         if ctx:
             print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n".join(ctx)}}))
