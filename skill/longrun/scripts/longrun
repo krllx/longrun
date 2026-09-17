@@ -29,7 +29,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 HOME = os.path.expanduser("~")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
@@ -52,14 +52,14 @@ DEFAULTS = {
     "notes_autoprune_pct": 90,      # above this, gc archives cheap entries (stale-marked, then ctx) down to
                                     # notes_warn_pct, so `add` never runs into a permanent wall; 0 disables
     "journal_max_lines": 200,       # per-session journal, older lines are trimmed to archive
-    "inject_max_bytes": 9000,       # total digest size (Claude Code caps hook output at 10,000 chars)
+    "inject_max_bytes": 9000,       # total digest size (only ~10,000 chars of hook output reach the context
+                                    # inline; past that Claude Code spills the rest to a file, verified on 2.1.238)
     "sessions_block_bytes": 700,    # digest slice for "what the other sessions of this project are doing"
     "shared_delta_max_bytes": 1200, # per-turn slice for shared notes that changed since this session saw them
     "sessions_delta_max_bytes": 500,  # per-turn slice for sessions that appeared, ended or said something new
     "compact_hint": True,           # PreCompact prints instructions for the summariser on stdout; Claude Code appends a
                                     # hook's stdout to the compaction prompt as its "Additional Instructions" block, for
                                     # an automatic compaction too, not only for `/compact <text>`
-    "compact_hint_max_bytes": 1200, # cap of that text (Claude Code caps any hook output at 10,000 chars anyway)
     "compact_instructions": "",     # a project's own line for it ("keep every SQL query in full"), added last
     "archive_keep_days": 30,        # everything in archive/ older than this is deleted
     "compact_keep": 40,             # max archived compaction summaries per local dir
@@ -101,6 +101,7 @@ JOURNAL_TAIL_LINES = 12    # lines of this session's journal shown in the digest
 HANDOFF_MAX_BYTES = 1100   # slice of the pre-compaction snapshot re-injected on SessionStart(compact)
 FAIL_KEEP = 40             # FAIL lines kept per session journal
 RECALL_TRANSCRIPTS = 6     # transcripts of the project that recall scans, newest first
+COMPACT_HINT_MAX_BYTES = 1200  # cap of the PreCompact instructions; was a config key nobody ever set
 CTX_SAMPLE_EVERY = 5       # read the context size from the transcript every N tool calls (and on Stop)
 
 TAGS = ("dead", "decision", "fact", "ctx", "pin", "doc")
@@ -818,9 +819,12 @@ def cmd_stale(store, args):
 def cmd_mute(store, args):
     """longrun mute n12 [n13 ...] | longrun unmute n12 | longrun unmute --all | longrun mute
 
-    "Take this out of MY context" - the cheapest form of manifesto point 2, deciding what to unload.
-    Muting changes nothing on disk and nothing for anybody else: the entry simply stops being injected
-    into this session's digest, and the block head says how many are hidden."""
+    "Take this out of MY context" - not the manifesto's point 2, which is about pulling saved material
+    back in when it is needed (that is `doc`, the docs delta and `recall`), but its per-session inverse:
+    one session deciding an entry is not worth carrying, without deciding that for anybody else. `stale`
+    is the shared version of the same doubt. Muting changes nothing on disk and nothing for anybody else:
+    the entry simply stops being injected into this session's digest, and the block head says how many
+    are hidden."""
     unmute = args and args[0] == "unmute-mode"
     rest = args[1:] if unmute else args
     all_, rest = _flag(rest, "--all", False, takes_value=False)
@@ -1089,6 +1093,7 @@ def load_meta(store, sid):
     m.setdefault("fails", 0)
     m.setdefault("fails_since_note", 0)
     m.setdefault("files", [])
+    m.setdefault("edited", [])       # of `files`, the ones an edit tool wrote: whose doc line this session owes an update
     m.setdefault("turn_files", [])   # this turn only, for the turn card; `files` is the whole session
     m.setdefault("turn_fails", [])
     return m
@@ -4593,8 +4598,12 @@ def digest_cap(cfg, shared):
 
 
 def sheddable(entries):
-    """The entries a digest may leave out to fit, oldest first. `pin` is exempt, as everywhere else."""
-    return [e for e in entries if e["tag"] != "pin"]
+    """The entries a digest may leave out to fit, oldest first. `pin` is exempt, as everywhere else, and so
+    is `doc`: a doc line is not one fact among many, it is the index of material deliberately kept OUT of
+    the context. Shedding it does not cost a fact, it hides a whole file - and the file is where the long
+    material went precisely so it would not be carried around. `age_notes` already exempts both tags from
+    ageing; this is the same rule for the digest."""
+    return [e for e in entries if e["tag"] not in ("pin", "doc")]
 
 
 def notes_block(t, budget, label="", drop_oldest=0, muted=()):
@@ -4611,11 +4620,14 @@ def notes_block(t, budget, label="", drop_oldest=0, muted=()):
     eff = digest_cap(cfg, t["shared"])
     pct = int(100 * used / eff) if eff else 0
     warn = int(cfg.get("notes_warn_pct", DEFAULTS["notes_warn_pct"]))
-    prune = ("  PRUNE NEEDED: `longrun prune%s`%s" % ((" " + t["cmd"]) if t["cmd"] else "",
-             (" (only ~%d B of these fit a digest)" % eff) if eff < used else "")) if pct >= warn else ""
-    head = "%s %d entries %d/%d B (~%d tok)%s%s" % (label or t["label"], len(all_entries), used, cap,
-                                                    est_tokens(notes_body(all_entries)), prune,
-                                                    ("  (%d muted here: `longrun unmute --all`)" % len(muted_here)) if muted_here else "")
+    prune = ("  PRUNE NEEDED: `longrun prune%s`" % ((" " + t["cmd"]) if t["cmd"] else "")) if pct >= warn else ""
+    # Said whenever the configured cap is larger than what a hook may inject, not only once the file is
+    # already full: a project set to 15000 B with inject_max_bytes 9800 has thousands of bytes of budget
+    # that will never reach a session, and the number in the head would otherwise read as a promise.
+    tight = ("  (only ~%d B of these fit a digest: `longrun config`)" % eff) if eff < cap else ""
+    head = "%s %d entries %d/%d B (~%d tok)%s%s%s" % (label or t["label"], len(all_entries), used, cap,
+                                                      est_tokens(notes_body(all_entries)), prune, tight,
+                                                      ("  (%d muted here: `longrun unmute --all`)" % len(muted_here)) if muted_here else "")
     body = list(entries)
     if drop_oldest > 0:
         for e in sheddable(entries)[:drop_oldest]:
@@ -4712,7 +4724,13 @@ def docs_delta(store, m, budget):
 
     Derived from the file's own mtime rather than from who edited it: that way a change made by another
     session, by the user in an editor, or by a script all count the same, and it costs one stat per doc
-    entry with nothing to write down anywhere."""
+    entry with nothing to write down anywhere.
+
+    Who changed it decides what the line says, though, and the two asks are opposite. Somebody else's
+    change is an offer to READ: the material moved, open it if the task needs it (manifesto point 2).
+    Your own change is a debt to PAY: the description in the shared notes still describes the file as it
+    was before you touched it, and every other session is reading that description instead of the file.
+    Attribution is from this session's own edit tools, so a file only Read is never claimed as yours."""
     docs = doc_entries(store)
     if not docs:
         return ""
@@ -4730,11 +4748,21 @@ def docs_delta(store, m, budget):
     if not changed:
         m["docs_seen"] = cur
         return ""
-    head = "DOCS changed since you last looked (read one only if you need it):"
+    mine = {os.path.realpath(p) for p in (m.get("edited") or [])}
+    ours = [e for e in changed if os.path.realpath(doc_path(store, e)) in mine]
+    theirs = [e for e in changed if e not in ours]
+    if ours and theirs:
+        head = ("DOCS changed: ! you changed it and the line other sessions read still describes the old file "
+                "(`longrun doc touch n<id> \"...\"`); ~ somebody else did, read it only if you need it:")
+    elif ours:
+        head = ("DOCS you changed this session - the line other sessions read still describes the old file "
+                "(`longrun doc touch n<id> \"<what is in it now>\"`):")
+    else:
+        head = "DOCS changed since you last looked (read one only if you need it):"
     lines, used, shown = [head], len(head.encode("utf-8")), dict(seen)
-    for e in changed:
+    for e in ours + theirs:
         path, desc = doc_parts(e)
-        line = "  ~ n%d %s - %s" % (e["id"], path, clip(desc, 110))
+        line = "  %s n%d %s - %s" % ("!" if e in ours else "~", e["id"], path, clip(desc, 110))
         n = len(line.encode("utf-8")) + 1
         if used + n > budget and len(lines) > 1:
             break
@@ -5540,7 +5568,7 @@ def compact_hint(store, sid):
         text = (cfg.get(key) if key == "compact_instructions" else m.get(key)) or ""
         if str(text).strip():
             parts.append([key, "- " + clip(str(text), 400)])
-    cap = int(cfg.get("compact_hint_max_bytes") or 1200)
+    cap = COMPACT_HINT_MAX_BYTES
     body = lambda ps: "\n".join(p[1] for p in ps)
     for k in ("files", "notes", "task", "lead", "core3", "core2"):  # the explicit human lines and core0/1 never go
         if len(body(parts).encode("utf-8")) <= cap:
@@ -5607,9 +5635,14 @@ def card_mark(m):
 
 
 def sweep_hint(store, m):
-    """Every now and then the card also asks the other half of the question: not what to write, but what
-    has stopped being true. Manifesto point 3. Offered at most once per half an ageing window, and only
-    when there is actually something old enough to re-read."""
+    """The other half of the question the card asks: not what to write, but what has stopped being true.
+    Manifesto point 3, the "at some suitable moment during the session" half rather than the "when the
+    budget is full" half.
+
+    It used to ride on the turn card, and so inherited every one of the card's gates: a session that only
+    read, reviewed or talked - which is exactly the session with time to re-read old notes - was never
+    asked at all. It now stands on its own on `UserPromptSubmit`, with only its own two conditions: at
+    most once per half an ageing window, and only when something is actually old enough to re-read."""
     every = max(1, int(store.cfg["notes_max_age_days"]) // 2)
     last = m.get("swept_at") or ""
     if last and (now() - _dt.datetime.strptime(last[:10], "%Y-%m-%d")).days < every:
@@ -5620,7 +5653,7 @@ def sweep_hint(store, m):
     if not old:
         return ""
     m["swept_at"] = ts()
-    return ("\nWhile you are here: %d shared note%s older than %d days and nobody has looked at %s since. Any of them "
+    return ("longrun, housekeeping: %d shared note%s older than %d days and nobody has looked at %s since. Any of them "
             "no longer true? `longrun stale n<id> \"<why>\"` marks one for everyone (`longrun notes --shared` lists them)."
             % (len(old), "" if len(old) == 1 else "s", every, "it" if len(old) == 1 else "them"))
 
@@ -5660,13 +5693,12 @@ def turn_card(store, m, closed=False):
     if fails:
         bits.append("%d failed command%s (%s)" % (len(fails), "" if len(fails) == 1 else "s", clip(fails[-1], 60)))
     bits.append("0 notes")
-    tail = sweep_hint(store, m)
     where = "`longrun add -t dead|decision|fact \"...\"` (own; `--shared` for what other sessions need)" + \
             ""
     return ("longrun, %s: %s. Is there anything in it that another session, or you after a compaction, could not "
             "get back with one command - an approach that failed and why, a decision, a fact that cost effort? "
             "Then write that one line: %s. If there is not, go on."
-            % ("your last turn" if closed else "this turn so far", ", ".join(bits), where)) + tail
+            % ("your last turn" if closed else "this turn so far", ", ".join(bits), where))
 
 
 def cmd_hook(args):
@@ -5777,6 +5809,7 @@ def cmd_hook(args):
             nt = turn_card(store, m, closed=True) if card_due(store, m, "turns") else ""
             if nt:
                 card_mark(m)
+            sw = sweep_hint(store, m)  # its own gates, not the card's: a session that only reads is asked too
             m["turn_card"] = {}                      # it belonged to the turn that ended, shown or not
             m["turn_files"], m["turn_fails"] = [], []
             save_meta(store, sid, m)
@@ -5800,6 +5833,8 @@ def cmd_hook(args):
             out.append(ddelta)
         if nt:
             out.append(nt)
+        if sw:
+            out.append(sw)
         if out:
             sys.stdout.write("\n".join(out) + "\n")
         return 0
@@ -5817,6 +5852,8 @@ def cmd_hook(args):
                 m["files"] = (m["files"] + [fp])[-60:]
             if fp and tool in EDIT_TOOLS and fp not in m["turn_files"]:   # what the turn card names
                 m["turn_files"] = (m["turn_files"] + [fp])[-20:]
+            if fp and tool in EDIT_TOOLS and fp not in m["edited"]:       # what the docs delta attributes to you
+                m["edited"] = (m["edited"] + [fp])[-60:]
             run = m.get("running") or {}
             tid = inp.get("tool_use_id") or ""
             if tid in run:
@@ -6074,6 +6111,12 @@ def cmd_unlink(args):
 
 
 CONFIG_EXTRA = {"name": str, "arc_root": str, "hub": str, "hq": bool}   # hq: accepted, no longer read
+# Keys that became fixed sizes. A setting nobody has ever changed is not a setting, it is a number with a
+# lookup in front of it - but somebody's config.json may still carry it, so say what happened to it
+# instead of "unknown key", and let `config unset` clean it out.
+RETIRED_KEYS = {"compact_hint_max_bytes": "a fixed %d B now (the number nobody ever changed); `compact_hint` "
+                                          "still turns the instructions off and `compact_instructions` still "
+                                          "adds the project's own line" % COMPACT_HINT_MAX_BYTES}
 
 
 def config_coerce(key, raw):
@@ -6115,11 +6158,35 @@ def config_coerce(key, raw):
 BUDGET_KEYS = ("notes_max_bytes", "session_notes_max_bytes", "inject_max_bytes")
 
 
+def budget_warning(cfg):
+    """The same rule as `check_budget_keys`, but for a config that already exists.
+
+    `config set` has refused this state since 0.6.0, so it can only arrive two ways: a project configured
+    before the check, or a config.json edited by hand. Both look healthy from the outside - `longrun config`
+    prints the number the user asked for - while the digest quietly sheds entries every start."""
+    try:
+        need = int(cfg["notes_max_bytes"]) + int(cfg["session_notes_max_bytes"]) + DIGEST_FIXED_BYTES
+        have = int(cfg["inject_max_bytes"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    if need <= have:
+        return ""
+    s, o = digest_caps(cfg)
+    return ("WARNING: notes_max_bytes %d + session_notes_max_bytes %d + %d B of head and hints = %d B, but a digest stops\n"
+            "  at inject_max_bytes = %d B. A session is shown ~%d B of the shared notes and ~%d B of its own; the %d B\n"
+            "  above that line never reach anyone - the digest sheds the oldest entries to fit. Raise inject_max_bytes\n"
+            "  (only ~10000 characters of hook output reach a session inline) or lower the two notes budgets."
+            % (int(cfg["notes_max_bytes"]), int(cfg["session_notes_max_bytes"]), DIGEST_FIXED_BYTES, need,
+               have, s, o, need - have))
+
+
 def check_budget_keys(local, key, value):
     """Refuse a set that puts the two notes budgets past what a hook may inject. Entries above that
     line are not a preference to be honoured later: they are entries no session will ever be shown,
-    because `inject_max_bytes` is the hard end of a digest (Claude Code caps hook output at 10,000
-    characters). Raise `inject_max_bytes` first, or keep the notes below it.
+    because `inject_max_bytes` is the hard end of a digest (only ~10,000 characters of hook output reach
+    the context inline; past that Claude Code spills the rest to a file, verified on 2.1.238). Raise
+    `inject_max_bytes` first, or keep the notes below it. `budget_warning` says the same about a config
+    that already carries the state.
 
     Judged on the values this project would end up with, whichever file each of them comes from."""
     if key not in BUDGET_KEYS:
@@ -6131,7 +6198,7 @@ def check_budget_keys(local, key, value):
     if need > have:
         die("notes_max_bytes %d + session_notes_max_bytes %d + %d B of head and hints = %d B, but a digest stops at "
             "inject_max_bytes = %d B.\nThe %d B above that line would never reach a session: the digest would shed the "
-            "oldest entries to fit.\nRaise inject_max_bytes first (Claude Code drops hook output past 10000 characters), "
+            "oldest entries to fit.\nRaise inject_max_bytes first (only ~10000 characters of hook output arrive inline), "
             "or keep the two notes budgets under %d B together."
             % (int(eff["notes_max_bytes"]), int(eff["session_notes_max_bytes"]), DIGEST_FIXED_BYTES, need, have,
                need - have, have - DIGEST_FIXED_BYTES), 2)
@@ -6148,7 +6215,10 @@ def cmd_config(args):
         if len(rest) < 2 or (rest[0] == "set" and len(rest) < 3):
             die("usage: longrun config set KEY VALUE [--global] | unset KEY [--global]", 2)
         key = rest[1]
-        if key not in DEFAULTS and key not in CONFIG_EXTRA:
+        if key in RETIRED_KEYS and rest[0] == "set":
+            die("%s is no longer a setting: %s.\nA value already in a config.json is ignored; "
+                "`longrun config unset %s` removes it." % (key, RETIRED_KEYS[key], key), 2)
+        if key not in DEFAULTS and key not in CONFIG_EXTRA and key not in RETIRED_KEYS:
             die("unknown key %s. Keys: %s" % (key, ", ".join(known)), 2)
         if not glob and not local:
             die("no project here: use --global (~/.claude/longrun/config.json) or run inside a project", 3)
@@ -6176,6 +6246,13 @@ def cmd_config(args):
             continue
         src = "project" if k in pcfg else "global" if k in g else "default"
         print("  %-28s %-10s %s" % (k, json.dumps(eff[k]), "" if src == "default" else src))
+    for k in sorted(RETIRED_KEYS):
+        if k in pcfg or k in g:
+            print("  %-28s %-10s retired: %s (`longrun config unset %s%s`)"
+                  % (k, json.dumps(eff.get(k)), RETIRED_KEYS[k], k, "" if k in pcfg else " --global"))
+    w = budget_warning(eff)
+    if w:
+        print(w)
     print("Change: `longrun config set KEY VALUE` (this project) or `--global`; `unset` restores the default. Meaning of each key: docs/REFERENCE.md, section 6.")
     return 0
 

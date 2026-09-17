@@ -33,4 +33,4 @@
   ok   nothing but JSON-RPC on stdout, nothing on stderr
   ok   no session behind the server: the dialog alone, inline
 
-PASS=27 FAIL=0  (tmp: /tmp/longrun-ask.YlbgCG)
+PASS=27 FAIL=0  (tmp: /tmp/longrun-ask.LBUagS)

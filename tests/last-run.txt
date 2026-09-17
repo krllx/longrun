@@ -44,6 +44,9 @@
   ok   a turn of pure reading gets no card, and a note write resets the counters
   ok   a failed command stepping over the window boundary does not swallow the card
   ok   PostToolUseFailure -> FAIL line in journal
+  ok   the housekeeping question comes on its own: no edits, no failures, no card in that turn
+  ok   ...and not again on the next turn: once per half an ageing window, not once per turn
+  ok   nothing old enough to re-read: the question is not asked at all
   ok   PreCompact prints the summariser instructions on stdout (this is what Claude Code appends to the compaction prompt)
   ok   the hint names the notes that come back by themselves, and is plain text (JSON stdout would be read as a decision object)
   ok   the hint stays inside compact_hint_max_bytes
@@ -71,14 +74,20 @@
   ok   recall finds FAIL line in journal
   ok   recall miss exits 1
 == digest size cap
-  ok   digest respects inject_max_bytes (1365 B <= 1500)
+  ok   digest respects inject_max_bytes (1439 B <= 1500)
   ok   all budgets full: the digest still fits (8610 B <= 9000)
   ok   all budgets full: neither notes file is what gives way
-  ok   over budget: the digest sheds the OLDEST entries and keeps the newest (1292 B <= 1400)
+  ok   over budget: the digest sheds the OLDEST entries and keeps the newest (1337 B <= 1400)
   ok   over budget: a pin is never the entry that gives way
+  ok   over budget: a doc pointer is not shed either, oldest or not
   ok   PRUNE NEEDED is measured against what a digest can carry, not against the file cap
   ok   config refuses notes budgets that cannot fit inject_max_bytes (exit 2)
   ok   ...and accepts them once inject_max_bytes has room
+  ok   a budget written before the check is called out by longrun config, not silently honoured
+  ok   ...and the notes head says how much of that cap a digest can really carry
+  ok   a retired key is not an unknown key: config set says what replaced it (exit 2)
+  ok   a retired key left in a config.json is shown as retired, not obeyed
+  ok   config unset cleans a retired key out
 == docs layer: long material in a file, one line in the notes pointing at it
   ok   doc add writes one shared line with the path relative to the project root
   ok   the same file twice is refused, and points at doc touch
@@ -90,6 +99,8 @@
   ok   doc touch rewrites the description and keeps the path
   ok   doc ls shows the path, the size and when it last changed
   ok   a file changed under a pointer is reported once, on the next turn
+  ok   a file THIS session edited asks for doc touch instead of offering a read
+  ok   a file this session only READ is never claimed as its work: an offer to read, not a debt
   ok   a pointer whose file is gone says so instead of going quiet
   ok   gc archives a pointer whose file has been missing for a week
 == recall ranking: curated notes are not crowded out by a noisy archive
@@ -232,4 +243,4 @@
   ok   the flag beats both gates: notify_turn_end off and the Claude app in front
   ok   consume_important spends a counted flag and never goes below zero
 
-PASS=211 FAIL=0  (tmp: /tmp/longrun-test.ta7hQ3)
+PASS=222 FAIL=0  (tmp: /tmp/longrun-test.lxJYcg)

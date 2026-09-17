@@ -130,6 +130,29 @@ NB="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name
 check "a failed command stepping over the window boundary does not swallow the card" "test -z \"\$NB39\" && echo \"\$NB\" | grep -q 'this turn so far' && echo \"\$NB\" | grep -q 'make build'"
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./internal/services/screen/...\"},\"error\":\"Exit code 1\\n--- FAIL: TestScreen_NoPaymentMethods (0.00s)\\n    screen_test.go:41: expected 2 methods, got 0\",\"is_interrupt\":false}"
 check "PostToolUseFailure -> FAIL line in journal" "grep -q 'FAIL \`go test ./internal/services/screen/...\` -> Exit code 1' '$SD/journal.md'"
+# The other half of the question - what has STOPPED being true - used to ride on the turn card and so
+# inherited every one of its gates. A session that only read, reviewed or talked, which is exactly the
+# session with time to re-read old notes, was never asked at all. It now stands on its own.
+SWP="$T/sweep"; mkdir -p "$SWP"; ( cd "$SWP" && "$LR" init >/dev/null
+  "$LR" add -t fact "staging moved to vla-07 after the old host was decommissioned" >/dev/null
+  "$LR" add -t fact "written today, so there is nothing to re-read about it yet" >/dev/null )
+python3 - "$SWP/.longrun/NOTES.md" <<'PY'
+import datetime,re,sys
+p=sys.argv[1]; s=open(p).read()
+old=(datetime.date.today()-datetime.timedelta(days=10)).strftime("%m-%d")
+open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
+PY
+SWC="\"session_id\":\"77777777-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$SWP\""
+( cd "$SWP" && hook SessionStart "{$SWC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
+SW1="$(cd "$SWP" && hook UserPromptSubmit "{$SWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"what do we know\"}")"
+check "the housekeeping question comes on its own: no edits, no failures, no card in that turn" "echo \"\$SW1\" | grep -q 'longrun, housekeeping: 1 shared note older than 7 days' && echo \"\$SW1\" | grep -q 'longrun stale n<id>' && ! echo \"\$SW1\" | grep -q 'your last turn'"
+SW2="$(cd "$SWP" && hook UserPromptSubmit "{$SWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"and now\"}")"
+check "...and not again on the next turn: once per half an ageing window, not once per turn" "! echo \"\$SW2\" | grep -q housekeeping"
+FRP="$T/sweep-fresh"; mkdir -p "$FRP"; ( cd "$FRP" && "$LR" init >/dev/null && "$LR" add -t fact "every note here is from today" >/dev/null )
+FRC="\"session_id\":\"77777777-3333-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$FRP\""
+( cd "$FRP" && hook SessionStart "{$FRC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
+SW3="$(cd "$FRP" && hook UserPromptSubmit "{$FRC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"hi\"}")"
+check "nothing old enough to re-read: the question is not asked at all" "! echo \"\$SW3\" | grep -q housekeeping"
 # transcript for precompact snapshot + recall
 python3 - "$CLAUDE_CONFIG_DIR/projects/-proj/$SID.jsonl" "$SID" <<'PY'
 import json,sys
@@ -236,14 +259,34 @@ SHED="$T/shed"; mkdir -p "$SHED"; ( cd "$SHED" && "$LR" init >/dev/null )
 python3 - "$SHED/.longrun/config.json" <<'PY'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["inject_max_bytes"]=1400; json.dump(d,open(p,"w"))
 PY
-( cd "$SHED" && "$LR" add --shared -t pin "PIN: PR 42 = branch feature/checkout" >/dev/null
+printf 'material too long for a note, which is the whole point of keeping it here\n' > "$SHED/long.md"
+( cd "$SHED" && "$LR" doc add long.md "where the long material of this project lives" >/dev/null
+  "$LR" add --shared -t pin "PIN: PR 42 = branch feature/checkout" >/dev/null
   for i in $(seq 1 12); do "$LR" add --shared -t fact "shed filler $i: a line long enough to push this file past what one digest can carry" >/dev/null; done )
 D3="$(cd "$SHED" && "$LR" digest --source compact)"; D3B=$(printf '%s' "$D3" | wc -c | tr -d ' ')
 check "over budget: the digest sheds the OLDEST entries and keeps the newest ($D3B B <= 1400)" "test $D3B -le 1400 && echo \"\$D3\" | grep -q 'shed filler 12' && ! echo \"\$D3\" | grep -q 'shed filler 1:' && echo \"\$D3\" | grep -q 'older entries left out to fit'"
 check "over budget: a pin is never the entry that gives way" "echo \"\$D3\" | grep -q 'PR 42 = branch feature/checkout'"
+# A doc line is the index of material deliberately kept OUT of the context. Shedding it as the oldest
+# entry (which is what it usually is) hides a whole file instead of costing one fact.
+check "over budget: a doc pointer is not shed either, oldest or not" "echo \"\$D3\" | grep -q 'long.md - where the long material'"
 check "PRUNE NEEDED is measured against what a digest can carry, not against the file cap" "echo \"\$D3\" | grep -q 'PRUNE NEEDED' && echo \"\$D3\" | grep -q 'fit a digest'"
 ( cd "$SHED" && "$LR" config set notes_max_bytes 9000 >/dev/null 2>/tmp/lr-budget ); check "config refuses notes budgets that cannot fit inject_max_bytes (exit 2)" "test \$? -eq 2 && grep -q 'would never reach a session' /tmp/lr-budget"
 ( cd "$SHED" && "$LR" config set inject_max_bytes 9000 >/dev/null && "$LR" config set notes_max_bytes 5000 >/dev/null ); check "...and accepts them once inject_max_bytes has room" "test \$? -eq 0"
+# The check above only guards new writes. A project configured before it existed, or edited by hand, is
+# in the same state and looks healthy from the outside: `longrun config` prints the number that was asked for.
+python3 - "$SHED/.longrun/config.json" <<'PY'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["notes_max_bytes"]=15000; d["inject_max_bytes"]=9800; json.dump(d,open(p,"w"))
+PY
+CW="$(cd "$SHED" && "$LR" config)"
+check "a budget written before the check is called out by longrun config, not silently honoured" "echo \"\$CW\" | grep -q 'WARNING: notes_max_bytes 15000' && echo \"\$CW\" | grep -q 'never reach anyone'"
+D4="$(cd "$SHED" && "$LR" digest)"
+check "...and the notes head says how much of that cap a digest can really carry" "echo \"\$D4\" | grep -q 'fit a digest'"
+( cd "$SHED" && "$LR" config set compact_hint_max_bytes 900 >/dev/null 2>/tmp/lr-retired ); check "a retired key is not an unknown key: config set says what replaced it (exit 2)" "test \$? -eq 2 && grep -q 'no longer a setting' /tmp/lr-retired && grep -q 'compact_instructions' /tmp/lr-retired"
+python3 - "$SHED/.longrun/config.json" <<'PY'
+import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["compact_hint_max_bytes"]=900; json.dump(d,open(p,"w"))
+PY
+CR="$(cd "$SHED" && "$LR" config)"; check "a retired key left in a config.json is shown as retired, not obeyed" "echo \"\$CR\" | grep -q 'compact_hint_max_bytes .*retired'"
+( cd "$SHED" && "$LR" config unset compact_hint_max_bytes >/dev/null ); check "config unset cleans a retired key out" "! grep -q compact_hint_max_bytes '$SHED/.longrun/config.json'"
 
 python3 - "$LOCAL/config.json" <<'PY'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["inject_max_bytes"]=9000; json.dump(d,open(p,"w"))
@@ -276,6 +319,19 @@ sleep 1; printf 'a line another session added\n' >> "$DOCP/research/M.md"
 DTURN="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"b\"}")"
 DTURN2="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"c\"}")"
 check "a file changed under a pointer is reported once, on the next turn" "echo \"\$DTURN\" | grep -q 'DOCS changed' && echo \"\$DTURN\" | grep -q 'n1 research/M.md' && ! echo \"\$DTURN2\" | grep -q 'DOCS changed'"
+# Somebody else's change is an offer to read; your own is a debt: the line every other session reads
+# still describes the file as it was before you touched it.
+sleep 1; printf 'a line THIS session wrote\n' >> "$DOCP/research/M.md"
+( cd "$DOCP" && hook PostToolUse "{$DG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$DOCP/research/M.md\"},\"tool_response\":{}}" >/dev/null )
+DTURN3="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"d\"}")"
+check "a file THIS session edited asks for doc touch instead of offering a read" "echo \"\$DTURN3\" | grep -q 'DOCS you changed this session' && echo \"\$DTURN3\" | grep -q 'doc touch' && echo \"\$DTURN3\" | grep -q '! n1 research/M.md'"
+printf 'a second long file, this one only read here\n' > "$DOCP/research/N.md"
+( cd "$DOCP" && "$LR" doc add research/N.md "the second pile of long material" >/dev/null
+  hook PostToolUse "{$DG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$DOCP/research/N.md\"},\"tool_response\":{}}" >/dev/null
+  hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"e\"}" >/dev/null )
+sleep 1; printf 'changed by somebody else\n' >> "$DOCP/research/N.md"
+DTURN4="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"f\"}")"
+check "a file this session only READ is never claimed as its work: an offer to read, not a debt" "echo \"\$DTURN4\" | grep -q 'DOCS changed since you last looked' && echo \"\$DTURN4\" | grep -q '~ n2 research/N.md' && ! echo \"\$DTURN4\" | grep -q 'you changed'"
 rm "$DOCP/research/M.md"
 DD3="$(cd "$DOCP" && "$LR" digest)"; check "a pointer whose file is gone says so instead of going quiet" "echo \"\$DD3\" | grep -q 'MISSING'"
 python3 - "$DOCP/.longrun/NOTES.md" <<'PY'
