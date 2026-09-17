@@ -4,7 +4,7 @@ English | [Русский](REFERENCE.ru.md)
 
 # longrun - reference
 
-Version 0.6.1. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop) on macOS; the Linux half of the platform layer (the systemd and cron timers, the choice of dialog and notification program) was verified on Ubuntu 24.04 with python3 3.12, where all four suites pass as well. See section 12. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
+Version 0.6.2. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop) on macOS; the Linux half of the platform layer (the systemd and cron timers, the choice of dialog and notification program) was verified on Ubuntu 24.04 with python3 3.12, where all four suites pass as well. See section 12. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
 
 ## 1. Entities
 
@@ -48,7 +48,7 @@ The project key is the project directory path with non-letter characters replace
 |---|---|
 | `notes.md` | like `NOTES.md`, but `[s<id>]` and no author |
 | `journal.md` | `MM-DD HH:MM <line>`, written by the hooks and by the commands that change something: `session <source>`, `FAIL \`<command>\` -> Exit code N ...`, `compaction ...`, `summary archived ...`, `send -> ...`, `watch wN ...`, `session end (<reason>)` |
-| `meta.json` | `sid` (current CLI id), `skey`, `cwd`, `scope`, `started`, `last_seen`, `ended`, `tools`, `turns`, `edit_tools_since_note`, `fails`, `files` (edited), `compactions`, `last_status` (the first 200 characters of the last reply, `Stop` hook), `permission_mode`, `desktop_id`, `shared_seen` (id -> hash of text plus stale mark of the shared entries the session has already seen), `muted`, `swept_at`, `sessions_seen` (skey -> state and last reply already reported), `last_note`, `turn_files`/`turn_fails`/`turn_card` (what the current and the last turn changed, for the turn card), `carded_at_turns`/`carded_at_tools` |
+| `meta.json` | `sid` (current CLI id), `skey`, `cwd`, `scope`, `started`, `last_seen`, `ended`, `tools`, `turns`, `edit_tools_since_note`, `fails`, `files` (edited), `compactions`, `last_status` (the first 200 characters of the last reply, `Stop` hook), `permission_mode`, `desktop_id`, `shared_seen` (id -> hash of text plus stale mark of the shared entries the session has already seen), `muted`, `swept_at`, `sessions_seen` (skey -> state and last reply already reported), `last_note`, `turn_files`/`turn_fails`/`turn_tools`/`turn_notes`/`turn_card` (what the current turn changed, how much work was in it and what it wrote down, plus the frozen copy of the same for the turn that just ended), `carded_at_turns`/`carded_at_tools` |
 | `state.json`, `archive/notes.md` | the id counter of own notes; deleted own entries |
 
 ### Global `~/.claude/longrun/`
@@ -113,13 +113,14 @@ Behaviour: the check runs immediately (`--no-test` disables this): already true 
 
 ## 4. Hooks
 
-Eleven entries in `~/.claude/settings.json`, all calling `longrun hook <Event>`. The project is resolved via `_index` for every event except `SessionStart(startup|resume|fork)`, where it is resolved by cwd and written to `_index`. Outside a project the hook silently exits with code 0.
+Twelve entries in `~/.claude/settings.json`, all calling `longrun hook <Event>`. The project is resolved via `_index` for every event except `SessionStart(startup|resume|fork)`, where it is resolved by cwd and written to `_index`. Outside a project the hook silently exits with code 0.
 
 | Event | What it does | What it prints into the context |
 |---|---|---|
 | `SessionStart` (all sources) | binding the CLI id to the session (resume chain, `/clear`, fork), heartbeat, a journal line, export of `LONGRUN_SESSION`, `LONGRUN_DIR`, `LONGRUN_SCOPE`, `LONGRUN_TRANSCRIPT` via `CLAUDE_ENV_FILE`, gc once an hour, the "all shared entries shown" mark | the digest (section 5) |
-| `UserPromptSubmit` | turn counter; finishing reading the app metadata and re-binding the chain | messages from the inbox; own notes once on re-binding; the shared notes delta; the sessions delta (one appeared, ended or said something new); the turn card: what the turn that just ended changed and what failed in it, at most once per 8 turns, only when it edited or failed something and wrote nothing down; the housekeeping question (are any of the old shared notes no longer true?), which has its own two conditions and none of the card's - at most once per half an ageing window, and only when something is old enough to re-read |
-| `PostToolUse` (Edit, Write, MultiEdit, NotebookEdit, Bash, PowerShell, Agent, Task, Workflow, mcp__*) | counters; only the four editing tools count as edits; the list of edited files | messages from the inbox as `additionalContext`; the same card for the turn in progress, once a window of 40 calls has passed since the last note or card |
+| `UserPromptSubmit` | turn counter; clearing what is measured per turn (the edited-file list behind the docs delta, the hint budgets); finishing reading the app metadata and re-binding the chain | messages from the inbox; own notes once on re-binding; the shared notes delta; the sessions delta (one appeared, ended or said something new); the docs delta; the turn card (section 5c), at most once per 8 turns; the housekeeping question (are any of the old shared notes no longer true?), which has its own conditions and none of the card's - not in the first 4 turns of a session, at most once per half an ageing window, and only when something is old enough to re-read |
+| `PostToolUse` (Edit, Write, MultiEdit, NotebookEdit, Bash, PowerShell, Agent, Task, Workflow, Grep, Glob, WebSearch, mcp__*) | counters; only the four editing tools count as edits; the list of edited files. The three search tools move no counter - they are matched for the query inside them and nothing else | messages from the inbox as `additionalContext`; the shared and docs deltas, so a peer's note does not wait for the user to press Enter (at most once per 5 calls, and only somebody else's changes); the recall hint (section 5a); the poll hint (section 5b); the same card for the turn in progress, once a window of 40 calls has passed since the last note or card |
+| `PostToolBatch` (no matcher) | one event per batch of parallel calls, after all of them resolve. Records the files the batch opened, Reads included - the `PostToolUse` matcher deliberately does not pay a process for those. Newer than the other events: where the CLI does not know it, the entry is inert and `PostToolUse` carries the hint alone | the recall hint for the whole batch, as `additionalContext` |
 | `PostToolUseFailure` (Bash, PowerShell; async) | a `FAIL` line in the journal, the last 40 kept | - |
 | `PreToolUse` (all tools) | under `halt` a refusal `permissionDecision: deny` with a reason (except calls to `longrun` itself); for Bash, PowerShell, Agent, Task, Workflow and MCP tools an entry in the meta's `running` (command, start) | the refusal with a reason under halt, otherwise nothing |
 | `PermissionRequest` (async) | `waiting_since` / `waiting_what = permission (<tool>)` in the meta | - |
@@ -143,7 +144,7 @@ Caveats: stdout that parses as JSON is read as a hook decision object instead (a
 
 ## 5. Digest and budgets
 
-Composition, in order: the header `<longrun v… project=… session=<name> [<key>] source=…>`; MESSAGE (undelivered messages); `SHARED notes (project X) N entries used/cap`; `OWN notes (this session)`; `SESSIONS of project X` (up to 6 other sessions: name, key, state, scope, number of own notes, last reply; live ones first); `WATCH n pending`; under an orchestrator also `ORCHESTRATOR`, `BOARD`, `YOUR TASK`, `FACTS unhandled`, the duties block and `ASKED` (section 11); `HANDOFF` (only after compaction: FAIL lines, `FOCUS:` from `/compact <text>`, `ASK:` the last requests, `FILES:`); the journal tail (after compaction, resume, `/clear`, fork and on a continued chain); a line about the archived summary; a command hint.
+Composition, in order: the header `<longrun v… project=… session=<name> [<key>] source=…>`; MESSAGE (undelivered messages); `SHARED notes (project X) N entries used/cap`; `OWN notes (this session)`; `SESSIONS of project X` (up to 6 other sessions: name, key, state, scope, number of own notes, the last two directories it has been editing in, last reply; live ones first - "hand it to a more relevant session" needs relevance to be visible, and a window's title is whatever the user happened to call it); `WATCH n pending`; under an orchestrator also `ORCHESTRATOR`, `BOARD`, `YOUR TASK`, `FACTS unhandled`, the duties block and `ASKED` (section 11); `HANDOFF` (only after compaction: FAIL lines, `FOCUS:` from `/compact <text>`, `ASK:` the last requests, `FILES:`); the journal tail (after compaction, resume, `/clear`, fork and on a continued chain); a line about the archived summary; a command hint.
 
 Default budgets: shared notes 5000 bytes, own 3000, digest 9000 (only ~10000 characters of hook output reach a session inline: past that Claude Code 2.1.238 writes the rest to a file and leaves a pointer, and older builds simply truncated), sessions block 700, HANDOFF 1100, shared notes delta per turn 1200. On overflow the digest drops blocks in this order: watch, journal, the orchestrator's duties, sessions, ASKED, facts, board, HANDOFF.
 
@@ -155,13 +156,64 @@ The SESSIONS block is a SessionStart snapshot, so a per-turn delta carries what 
 
 The per-turn delta obeys `shared_delta_max_bytes` the same way: it shows the changed entries oldest first, marks **only what it printed** as seen, and says `(+N more on your next turn)`. Whatever did not fit comes on the following turn instead of being silently skipped - it used to be marked seen and then clipped away, which meant a session never saw it at all.
 
-**The docs layer.** A `doc` entry is the lazy half of the memory: the long material stays in a file under the project, the shared notes carry one line with its path and what is in it, and a session reads the file only when it needs it. Three things keep the pointer honest, all from one `stat` per entry: a file newer than its line by a day or more renders as `(file changed MM-DD, this line may be stale)`, a file that is gone renders as `(MISSING: no such file now)` and is archived by `gc` after seven days, and a file that changed since a session last looked shows up on that session's next turn as `DOCS changed`. That last one reads the change in two directions: somebody else's change is an offer to read the file if the task needs it (`~`), while a file **this** session edited is a debt - the description every other session is reading still describes the old file, so the line asks for `doc touch n<id>` (`!`). Attribution comes from this session's own edit tools, so a file that was only read is never claimed as its work. `recall` searches inside the files the pointers name, ranked right after the notes themselves. Age alone never archives a `doc`: the file it names may be months old and still exactly right.
+**The docs layer.** A `doc` entry is the lazy half of the memory: the long material stays in a file under the project, the shared notes carry one line with its path and what is in it, and a session reads the file only when it needs it. Three things keep the pointer honest, all from one `stat` per entry: a file written after its description renders as `(file changed MM-DD HH:MM, this line may be stale)`, a file that is gone renders as `(MISSING: no such file now)` and is archived by `gc` after seven days, and a file that changed since a session last looked shows up on that session's next turn as `DOCS changed`.
+
+The reference for "after its description" is the file's mtime at the moment `doc add` or `doc touch` ran, kept per entry in `<project>/docs.json`. It used to be the note's own date, and a note carries no time of day - so a change made hours later on the **same day** read as no change at all, which is exactly the case that matters: another window rewrote the material while this session was closed. A project written before `docs.json` existed has no stamps and falls back to the old day-granularity comparison rather than going quiet. `gc` drops stamps whose pointer is gone.
+
+`DOCS changed` reads the change in two directions: somebody else's change is an offer to read the file if the task needs it (`~`), while a file **this** session edited is a debt - the description every other session is reading still describes the old file, so the line asks for `doc touch n<id>` (`!`). Attribution comes from this session's own edit tools **in the turn that just ended**; it used to be a rolling list for the whole session, so once a session had touched a file, every later change by anybody was still signed "you". Mid-turn only the `~` half is delivered: a peer's change is news worth having at once, while the debt would otherwise fire after every save of the same file. `recall` searches inside the files the pointers name, ranked right after the notes themselves. Age alone never archives a `doc`: the file it names may be months old and still exactly right.
 
 Cost: the digest is 350-2000 tokens depending on how full it is; per turn - only the delta and messages, usually zero.
 
+## 5a. The recall hint
+
+Everything else offers the saved material **before** the fact: the digest at every start, the doc pointers in it, the docs delta when a file moves. The other direction - pulling it back in at the moment it turns out to be needed, which is point 2 of the manifesto - rested on the model remembering `longrun recall`, that is, on an instruction rather than a mechanism. The recall hint is the mechanism.
+
+The signal is the session naming its own question: a `Grep` or `Glob` `pattern`, a `WebSearch` query, a subagent's one-line `description`. A `Read` carries no question and a path is not one either - guessing intent from a path is how a hint like this turns into noise, and by then the session is already looking in the right place.
+
+What it searches is the **curated** part of what `recall` searches, minus what is already in the context: the files behind doc pointers, other sessions' notes, and the notes the archive kept when they were pruned. The shared notes and this session's own notes are injected whole at every start, so a hit in them is the digest read back, not news. Files the session has already opened are skipped for the same reason; on a CLI with `PostToolBatch` that includes the ones it merely Read.
+
+Journals, pre-compaction snapshots and compaction summaries are **not** searched, and that boundary was measured rather than guessed. `recall` does search them, and should: a human asked and can judge what came back. An unprompted hint cannot. Replaying this project's real search history (`research/measure-recall.py`) through the first version showed it firing on half of all searches with two thirds of the hits being journal lines like "PR #8 opened" or an archived `ctx` note about a branch - words matched, no question answered.
+
+Two rules do the rest of the filtering, and both came from the same replay:
+
+- **In a notes file, only the tags another session is owed count**: `dead`, `decision`, `fact`, `pin`, `doc`. `ctx` and `todo` are one conversation's own bookkeeping - a single archived `ctx` note was the source of a third of all the noise in the first version.
+- **In a doc file, one word is not enough.** Prose matches an ordinary word by accident; two distinct search terms on the same line much less often. So a single-word `Grep` never points into prose, while a subagent's description or a multi-word query can.
+
+Four more things keep the volume down: a term must be at least 5 characters; a term found on more than 6 lines is a word rather than a term; the same (term, file) pair is never pointed at twice; and at most two hints fire per turn, the budget refilling at the turn boundary. One pass over the material is capped at 600 kB whatever the project holds. The hint quotes at most two lines and hands over to `longrun recall <term>` for the rest. On the replay corpus that comes to about 1.5 hints per session.
+
+## 5b. The poll hint
+
+`watch` exists because a session that waits by hand spends a model turn per check and stops waiting when the conversation does. Choosing it was advice in `SKILL.md` and nothing else. Now a `Bash` or `PowerShell` call that sleeps 30 seconds or more, or loops around a sleep, or repeats the same command for the third time in a turn, is answered once per turn with what `watch` would do instead. A hint, never a refusal: a long sleep is sometimes exactly right, and nothing here can tell which.
+
+## 5c. The turn card, and its two ways in
+
+After a turn, the next prompt may open with what that turn did and the one question the skill exists for: is any of it something the next session, or you after a compaction, could not get back with one command? It replaced a counter that said "40 tool calls since the last note" - a number nobody can act on, which invites filler notes written to silence it.
+
+**A turn that changed or broke something.** Gated on `nudge_edit_tools` (6 edits) or any failed command, because reading around is not activity worth a note and 40 `ls` calls prove nothing. Fires at the turn boundary and, once a window of `nudge_tools` calls has passed, mid-turn as well.
+
+**A turn that changed nothing but did real work.** Added in 0.6.2 and measured before it was built. `research/measure-cards.py` reads 725 transcripts and asks the question backwards: rather than judging which turns *should* have written a note, it counts the turns that *did*, since a note written unprompted is the strongest evidence a turn was worth asking about. Of 351 such turns, 182 (52%) happened in turns the edit gate is silent in, and 124 had no edit and no failure at all. The gate was aimed at less than half the territory notes come from.
+
+The rule the same data points at is length, which is the only thing a hook knows before the fact:
+
+| tool calls in a read-only turn | wrote | silent | note rate |
+|---|---|---|---|
+| 1-2 | 10 | 96 | 9% |
+| 3-5 | 19 | 92 | 17% |
+| 6-10 | 46 | 76 | 38% |
+| 11-20 | 23 | 42 | 35% |
+| 21+ | 27 | 26 | 51% |
+
+(counted in the calls a `PostToolUse` hook is actually fired for - `Read` is deliberately not one of them, and it makes almost no difference: a turn that reads a lot also runs plenty of `Bash`, `Grep` and MCP calls.)
+
+So `NUDGE_READ_TOOLS` is 6, a fixed number rather than a setting, because it came from a measurement that can be re-run rather than from a preference. It reaches 144 turns that currently write nothing, about 1.2 per session, in the band where the note rate is already 38-51%. Lowering `nudge_edit_tools` instead would reach 85 turns and none of the 124. This way in fires **only** at the turn boundary: a turn that has read six things may still be on its way to editing the seventh, and only at `Stop` is it known to have been reading all along. Its question is different too - there is no file to name, so it asks for the conclusion the reading reached.
+
+`card_due` keeps both ways to one card per window between them, so an editing session is not asked twice and an analysis session gets the slot the edit card is not using.
+
+**"Did this turn write anything" is counted, not inferred.** It used to be `last_note >= turn_started`. Both are stamped to the minute, so a note written moments *before* a turn compared equal and was read as written during it - and the `Stop` hook dropped `turn_started` before asking, so the comparison ran against a sentinel and answered "no" for every turn there has ever been. The edit-gated card hid this: a note write also resets `edit_tools_since_note`, which silenced the card by another route. The read-only card has no such second gate, which is how it surfaced. `turn_notes` counts the writes instead.
+
 ## 6. Configuration
 
-Eight keys have been retired and are now fixed numbers in the script: `strict_stop` and `auto_init` (both off, and both a mode nobody ran), `journal_tail_lines` (12), `handoff_max_bytes` (1100), `fail_keep` (40), `recall_transcripts` (6), `ctx_sample_every` (5) in 0.6.0, and `compact_hint_max_bytes` (1200) in 0.6.1. A setting that has never been changed is not a setting. A retired key left in a config.json is ignored, shown as retired by `longrun config`, and removed by `config unset`; `config set` on one says what replaced it instead of "unknown key".
+Eight keys have been retired and are now fixed numbers in the script: `strict_stop` and `auto_init` (both off, and both a mode nobody ran), `journal_tail_lines` (12), `handoff_max_bytes` (1100), `fail_keep` (40), `recall_transcripts` (6), `ctx_sample_every` (5) in 0.6.0, and `compact_hint_max_bytes` (1200) in 0.6.1. A setting that has never been changed is not a setting. What 0.6.2 added is fixed for the same reason: the housekeeping question waits 4 turns, the mid-turn delta runs at most once per 5 tool calls, the recall hint allows 2 per turn over terms of 5 characters or more found on at most 6 lines, the poll hint triggers on a 30-second sleep or a third identical command, and the read-only turn card wants 6 tool calls. A retired key left in a config.json is ignored, shown as retired by `longrun config`, and removed by `config unset`; `config set` on one says what replaced it instead of "unknown key".
 
 `~/.claude/longrun/config.json` (global) and `<project>/config.json`; the project value overrides the global one. View and change: `longrun config`, `longrun config set KEY VALUE [--global]`, `longrun config unset KEY [--global]`. Keys and defaults:
 
@@ -178,7 +230,7 @@ Eight keys have been retired and are now fixed numbers in the script: `strict_st
 | `compact_hint` | true | whether `PreCompact` sends the summariser its instructions (section 4); their cap is a fixed 1200 B |
 | `compact_instructions` | empty | one more line for them, the same for every session of the project ("keep every SQL query in full") |
 | `session_stale_min`, `session_dead_days` | 30, 7 | when a session is `stale`; when its directory moves to the archive |
-| `nudge_turns`, `nudge_tools`, `nudge_edit_tools` | 8, 40, 6 | the turn card: how often at most (turns), the mid-turn window (tool calls), and the edits it takes for a turn to be worth asking about. Both windows are measured from where the counters stood at the last card, never taken modulo: a counter that steps OVER the boundary (`PostToolUseFailure` charges one without looking at the card) used to skip a whole window |
+| `nudge_turns`, `nudge_tools`, `nudge_edit_tools` | 8, 40, 6 | the turn card: how often at most (turns), the mid-turn window (tool calls), and the edits it takes for a turn that changed something to be worth asking about (the read-only way in has its own fixed threshold, section 5c). Both windows are measured from where the counters stood at the last card, never taken modulo: a counter that steps OVER the boundary (`PostToolUseFailure` charges one without looking at the card) used to skip a whole window |
 | `name` | not set | project name instead of the folder name |
 | `pr_tool` | `auto` | what to query PR status with in `pr-merged`/`pr-status` checks: `gh` (GitHub CLI), `arc` (Arcadia), `auto` - by the folder the watch was registered from |
 | `arc_root` (global only) | `~/arcadia` | where to call `arc pr status` from, Arcadia only |

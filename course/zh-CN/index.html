@@ -48,7 +48,7 @@
 <ol>
 <li><b>装一次就好。</b>一行命令，不需要 checkout，安装脚本自己去取源码：
 <pre><code>curl -fsSL https://krllx.github.io/longrun/install.sh | bash</code></pre>
-它装上 skill、<code>~/.claude/settings.json</code> 里的 11 个 hook、CLI <code>~/.local/bin/longrun</code>、<code>longrun</code> MCP 服务器，以及一个定时器，每五分钟跑一次检查和监视器。它只问你一件事：桌面通知，也就是下一步。从 clone 下来的仓库安装，用的也是同一个 <code>install.sh</code>；<code>--uninstall</code> 撤销一切。</li>
+它装上 skill、<code>~/.claude/settings.json</code> 里的 12 个 hook、CLI <code>~/.local/bin/longrun</code>、<code>longrun</code> MCP 服务器，以及一个定时器，每五分钟跑一次检查和监视器。它只问你一件事：桌面通知，也就是下一步。从 clone 下来的仓库安装，用的也是同一个 <code>install.sh</code>；<code>--uninstall</code> 撤销一切。</li>
 <li><b>通知，想要就装。</b><code>install.sh</code> 会问要不要配置通知，装不装取决于你当时的回答。longrun 从不依赖通知：全部停止和触发的事件监听，本来就会经由 socket 或收件箱到达会话，所以拒绝了也不会有别的影响（<code>--no-notify</code> 可以提前替你回答；以后想开，再跑一句 <code>brew install terminal-notifier</code>）。在 macOS 上，缺少 <code>terminal-notifier</code> 时安装脚本会执行 <code>brew install terminal-notifier</code>（前提是有 Homebrew；没有就直说一声然后跳过），然后发一条测试通知；macOS 可能会问一次是否允许来自 terminal-notifier 的通知，允许它。macOS 自带的手段替代不了这一步：<code>osascript -e 'display notification'</code> 是以 Script Editor 的身份发出的，而它没有通知权限，于是系统把通知归档、什么都不画，还返回 0（在 macOS 15 上 25 次全是如此；就算先打开过 Script Editor 也拿不到权限）。所以横幅上带的是 terminal-notifier 自己的名字和图标：这两样 macOS 都取自发出通知的那个 bundle，也没有办法逐条覆盖。在 Linux 上用的是 <code>notify-send</code> (<code>libnotify</code>)，大多数桌面环境已经有了。两种系统都可以用 <code>longrun notify --test</code> 检查：它发一条探针，再回头读一次，确认系统真的把它画了出来，并打印点一下会打开哪个会话。如果有一个会话你绝对不能错过：<code>longrun important on</code>（或者 <code>next</code>，或者一个数字）让它每轮结束时一定发通知，不管 <code>notify_turn_end</code> 设成了什么，也不管当前前台是哪个窗口；你在另一个 Claude 会话里打字时，Claude 窗口就在前台，按前台窗口判断的那条规则就不会发通知。</li>
 <li><b>把文件夹变成项目。</b>对 longrun 来说，项目就是你在 Claude Code 里打开的那个文件夹。不一定是仓库根目录：可以是装着好几个仓库的文件夹、monorepo 的一个子目录，或者一个空的指挥部 (hq) 文件夹。在那里跑一次 <code>longrun init</code>：在终端里跑，或者直接在 Claude Code 会话里说一声，agent 会替你跑。一个 <code>.longrun/</code> 目录会出现；如果这个文件夹在仓库里，把它加进 ignore 文件（或者用 <code>longrun init --external</code>，它把目录放到 <code>~/.claude/longrun/</code> 下）。同一个项目的每个 worktree 里：<code>longrun link &lt;project&gt;</code>。检查一下：<code>longrun where</code>。</li>
 <li><b>调一调。</b>在会话里对 agent 说："set up longrun"（或者 <code>/longrun onboard</code>）。它会跑 <code>longrun onboard</code>，简短讲一下这个 skill 做什么，然后问你几个主要设置：autocompact 窗口、判定卡住的阈值、笔记大小、通知。它自己用 <code>longrun config set</code> 把答案写进配置。只有一个例外：hook 设不了 autocompact 窗口，所以 agent 会让你在 Claude Code 里手敲 <code>/autocompact 300k</code>（或者你选的那个值）。在离这个阈值还有 5 万 token 时，会有一个 hook 提醒会话在 compaction 之前先把笔记写好。各个 key 的细节见下面第 9 章。</li>
@@ -97,7 +97,7 @@
 </figure>
 <h3>这个 skill 由什么构成</h3>
 <div class="grid2">
-  <div class="card"><h4>机械层：hook、CLI、一个定时器</h4><p>11 个 Claude Code hook（见下面第 4 章）、<code>longrun</code> 命令，以及一个定时器（macOS 上是 launchd agent，Linux 上是 systemd user timer 或 cron）。机械层不用模型也照常工作：</p>
+  <div class="card"><h4>机械层：hook、CLI、一个定时器</h4><p>12 个 Claude Code hook（见下面第 4 章）、<code>longrun</code> 命令，以及一个定时器（macOS 上是 launchd agent，Linux 上是 systemd user timer 或 cron）。机械层不用模型也照常工作：</p>
   <ul>
   <li>在会话启动时和每次 compaction 之后打印摘要；</li>
   <li>把每一段 compaction 总结原样归档；</li>
@@ -167,7 +167,7 @@
 <section class="lesson" id="l4">
 <div class="kicker">第 4 章</div>
 <h2>hook：机械层在哪儿</h2>
-<p>会话的每个事件，Claude Code 都会调用一个外部命令。longrun 装了 11 个这样的命令，它们全都是同一个 python 脚本。每个事件的 hook 都是一个单独的进程，所以装完之后新代码在所有会话里立刻生效。点一下循环里的某个 hook。</p>
+<p>会话的每个事件，Claude Code 都会调用一个外部命令。longrun 装了 12 个这样的命令，它们全都是同一个 python 脚本。每个事件的 hook 都是一个单独的进程，所以装完之后新代码在所有会话里立刻生效。点一下循环里的某个 hook。</p>
 <div class="hooks"><div id="hookloop"></div><div class="hookinfo" id="hookinfo"><h4>一个会话的循环</h4><div>启动，然后是一轮又一轮：人的请求、工具调用、回答。上下文满了就 compaction，然后又是 SessionStart。每个节点上都有 hook。</div></div></div>
 <div class="callout ok">hook 里唯一会进到模型上下文的东西：SessionStart 上的摘要、UserPromptSubmit 上的共享笔记差异和消息、偶尔一次让写笔记的提醒、一条上下文警告，以及 halt 期间被拒绝的工具调用。其余一切都悄悄写进文件。</div>
 <div class="next"><a href="#l5">下一章：该写什么</a></div>
@@ -259,7 +259,7 @@ longrun config unset notes_max_bytes            # back to the default</code></pr
 <div class="cheat">
 <pre><code># install
 curl -fsSL https://krllx.github.io/longrun/install.sh | bash
-                        # skill, 11 hooks, CLI, MCP server, the 5-minute timer, notifications
+                        # skill, 12 hooks, CLI, MCP server, the 5-minute timer, notifications
 longrun watch install   # the timer alone (the installer already did it)
 longrun notify --test   # optional: does a notification reach the screen
 longrun init [--external]  # in the project folder
@@ -349,7 +349,8 @@ window.LR_I18N = { step: '步骤', of: '/', prev: '上一步', next: '下一步'
     { name: 'SessionStart', what: '按目录找到项目（向上找 .longrun/，找不到就查登记表），把 CLI id 关联到会话 key（resume 之后换了新 id 也一样），打印摘要：SHARED、OWN、SESSIONS、watch、任务板、消息。把 LONGRUN_SESSION 和 LONGRUN_DIR 导出到会话的 Bash 里。每小时跑一次清理。' },
     { name: 'UserPromptSubmit', what: '每一轮：投递收件箱里的消息，打印共享笔记的差异 (+ ~ -) 和任务板的变化，统计轮次，在离窗口还有 5 万 token 时发出上下文警告。' },
     { name: 'PreToolUse', what: '检查 halt：处于全部停止状态时，带上原因返回 deny，模型看得到。在 meta.json 里记下哪个工具什么时候开始跑（用来出 "tool `ya make` 38m" 这样的标记）。mcp__longrun__* 这几个工具不受 halt 影响。' },
-    { name: 'PostToolUse', what: '统计调用和编辑次数，把正在跑的工具的记录收尾。40 次调用或 8 轮没写笔记，而且确实有过编辑或失败时，提醒一次去写。' },
+    { name: 'PostToolUse', what: '统计调用和编辑次数，把正在跑的工具的记录收尾。40 次调用或 8 轮没写笔记，而且确实有过编辑或失败时，提醒一次去写。别的会话改了什么，不必等人下一次开口就送过来；开始去找项目里别处已经写下的东西时，也在这里给出回应。' },
+    { name: 'PostToolBatch', what: '一批并行调用全部结束之后只跑一次的事件，没有 matcher，所以 Read 它也看得见。用途是同一条提示：你正在找的东西已经在磁盘上，只是不在你的上下文里。这个事件比其他的新，CLI 不认识它时什么都不会发生，提示由 PostToolUse 独自承担。' },
     { name: 'PostToolUseFailure', what: '把失败的 Bash 命令作为一行 FAIL 写进会话日志。连着三次会在 SESSIONS 里出 "fail x3" 标记：这个标记别的会话看得到，但不会给谁发报告。' },
     { name: 'PermissionRequest', what: '会话在等一个工具权限：在 meta.json 里做个标记，"waiting permission 12m" 这个标记就来自它。' },
     { name: 'Notification', what: 'Claude Code 的通知（空闲、需要输入、一个对话框）：在 meta.json 里记一个等待标记。' },
