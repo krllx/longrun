@@ -1158,6 +1158,9 @@ def load_meta(store, sid):
                                      # owes an update. Cleared at the turn boundary, like turn_files
     m.setdefault("turn_files", [])   # this turn only, for the turn card; `files` is the whole session
     m.setdefault("turn_fails", [])
+    m.setdefault("turn_tools", 0)    # ...and how much work was in it, which is what makes a turn that
+    m.setdefault("turn_notes", 0)    # edited nothing still worth a card; and what it wrote down, counted
+                                     # rather than inferred from two timestamps stamped to the minute
     return m
 
 
@@ -1202,7 +1205,8 @@ def touch_session_note(store, locked=False, seen=None, drop=None):
         m["edit_tools_since_note"] = 0
         m["fails_since_note"] = 0
         m["carded_at_tools"] = 0   # relative to tools_since_note, which is being reset here too
-        m["turn_files"], m["turn_fails"] = [], []   # a card after this describes what came AFTER the note
+        m["turn_files"], m["turn_fails"], m["turn_tools"] = [], [], 0   # a card after this describes what
+        m["turn_notes"] = int(m.get("turn_notes") or 0) + 1             # came AFTER the note
         m["last_note"] = ts()
         if seen or drop:
             mark_shared_seen(store, m, ids=seen, drop=drop)
@@ -5883,6 +5887,12 @@ def cmd_compact_hint(store, args):
 
 
 SWEEP_AFTER_TURNS = 4   # turns a session takes before the housekeeping question is worth asking it
+# Tool calls in a turn that edited and broke nothing, before that turn is worth a card of its own. Not a
+# setting and not a guess: `research/measure-cards.py` over 725 transcripts put the note rate of a
+# read-only turn at 9% up to 2 calls, 17% at 3-5 and 38-51% past 6, counted in the calls a PostToolUse
+# hook is actually fired for. Six is where the band the card is aimed at begins; re-run the script to
+# move it rather than arguing about the number.
+NUDGE_READ_TOOLS = 6
 POLL_SLEEP_SEC = 30     # a sleep this long is a session waiting for the world, not pacing a command
 POLL_REPEATS = 3        # the same command this many times in a session's recent history is a poll loop
 POLL_KEEP = 8           # commands kept to see the repeat
@@ -5981,14 +5991,19 @@ def sweep_hint(store, m):
 
 
 def turn_card_data(m, closed=False):
-    """What the card is made of: the files this turn changed, the commands that failed in it, and whether
-    anything was written down. `closed` reads the card the Stop hook froze (the turn that just ended);
-    otherwise the turn still in progress."""
+    """What the card is made of: the files this turn changed, the commands that failed in it, how many tool
+    calls it made, and how many notes it wrote. `closed` reads the card the Stop hook froze (the turn that
+    just ended); otherwise the turn still in progress.
+
+    "Wrote something" is a counter and not a comparison of `last_note` against `turn_started`. Both of those
+    are stamped to the minute, so a note written moments BEFORE a turn began compared equal and was read as
+    written during it - and, since the Stop hook dropped `turn_started` before asking, the comparison was in
+    fact against a sentinel and answered "no" for every turn there has ever been."""
     if closed:
         c = m.get("turn_card") or {}
-        return list(c.get("files") or []), list(c.get("fails") or []), int(c.get("notes") or 0)
-    wrote = 1 if (m.get("last_note") or "") >= (m.get("turn_started") or "9") else 0
-    return list(m.get("turn_files") or []), list(m.get("turn_fails") or []), wrote
+        return list(c.get("files") or []), list(c.get("fails") or []), int(c.get("notes") or 0), int(c.get("tools") or 0)
+    return (list(m.get("turn_files") or []), list(m.get("turn_fails") or []),
+            int(m.get("turn_notes") or 0), int(m.get("turn_tools") or 0))
 
 
 def turn_card(store, m, closed=False):
@@ -5998,13 +6013,32 @@ def turn_card(store, m, closed=False):
     act on, which invites filler notes written to silence it. The card names what the turn actually did -
     these files, this command that failed - and asks the one question worth asking, which is the first
     thing the skill is for: is any of this something the next session, or you after a compaction, could
-    not get back with one command? Reading around is still not activity worth a note, so it takes real
-    edits or a failure, and `card_due` keeps it to once per window."""
-    files, fails, wrote = turn_card_data(m, closed)
-    if not (files or fails):
-        return ""
+    not get back with one command?
+
+    There are two ways in, and the second was measured before it was built. The first is a turn that
+    edited or broke something, gated on `nudge_edit_tools` because 40 `ls` calls prove nothing. That gate
+    turned out to be aimed at less than half the territory: over 725 transcripts, 52% of every note ever
+    written was written in a turn this card is silent in, and 124 of 351 in turns with no edit and no
+    failure at all (`research/measure-cards.py`). Reading is not idle - it ends in a conclusion, and the
+    conclusion is exactly what dies with the conversation.
+
+    So the second way in is a turn that edited and broke nothing but did real work: at least
+    `NUDGE_READ_TOOLS` tool calls. Length is the only thing a hook knows before the fact and it separates
+    the two populations cleanly - a read-only turn of 1-2 calls writes a note 9% of the time, one past six
+    38-51%. Boundary only, never mid-turn: a turn that has read six things may still be on its way to
+    editing the seventh, and only at `Stop` is it known to have been reading all along. `card_due` keeps
+    both ways to one card per window between them, so an editing session is not asked twice."""
+    files, fails, wrote, tools = turn_card_data(m, closed)
     if closed and wrote:   # the turn already wrote something down; mid-turn the counters below cover that,
         return ""          # because a note write resets them (and clears what the card would describe)
+    if not (files or fails):
+        if not closed or tools < NUDGE_READ_TOOLS:
+            return ""
+        return ("longrun, your last turn: %d tool calls, nothing edited, 0 notes. A turn spent reading ends in "
+                "a conclusion - what the answer turned out to be, which option was taken and why, what the code "
+                "actually does. That is the part that dies with this conversation and costs the next session the "
+                "same reading: `longrun add -t decision|fact \"...\"` (`--own` keeps it here). Still working it "
+                "out, or it was a question already answered above? Then go on." % tools)
     if int(m.get("edit_tools_since_note") or 0) < int(store.cfg["nudge_edit_tools"]) and not int(m.get("fails_since_note") or 0):
         return ""
     bits = []
@@ -6133,7 +6167,7 @@ def cmd_hook(args):
                 card_mark(m)
             sw = sweep_hint(store, m)  # its own gates, not the card's: a session that only reads is asked too
             m["turn_card"] = {}                      # it belonged to the turn that ended, shown or not
-            m["turn_files"], m["turn_fails"] = [], []
+            m["turn_files"], m["turn_fails"], m["turn_tools"], m["turn_notes"] = [], [], 0, 0
             m["edited"] = []   # attribution is per turn, like turn_files: a file this session touched an hour
                                # ago and somebody else has changed since is THEIR change, not an unpaid debt
             m["midturn_at"] = int(m.get("tools") or 0)   # the boundary just checked; the next mid-turn one waits
@@ -6186,9 +6220,10 @@ def cmd_hook(args):
         return 0
     if event == "PostToolUse":
         tool = inp.get("tool_name", "")
-        if tool in SEARCH_TOOLS:   # matched for the query in it, nothing else: no counter moves for looking around
-            with store.shared_lock():
-                m = load_meta_stamped(sid)
+        if tool in SEARCH_TOOLS:   # matched for the query in it: none of the note counters move for looking
+            with store.shared_lock():                    # around, only the turn's own size, which is what
+                m = load_meta_stamped(sid)               # tells a substantial read-only turn from a glance
+                m["turn_tools"] += 1
                 rh = recall_hint(store, m, [(tool, inp.get("tool_input") or {})])
                 save_meta(store, sid, m)
             if rh:
@@ -6198,6 +6233,7 @@ def cmd_hook(args):
             m = load_meta_stamped(sid)
             m["tools"] += 1
             m["tools_since_note"] += 1
+            m["turn_tools"] += 1
             if tool in EDIT_TOOLS:  # a command is not an edit: 40 `ls` prove nothing
                 m["edit_tools_since_note"] += 1
             ti = inp.get("tool_input") or {}
@@ -6253,6 +6289,7 @@ def cmd_hook(args):
                 m["fails_since_note"] += 1
                 m["tools"] += 1
                 m["tools_since_note"] += 1
+                m["turn_tools"] += 1
                 m["turn_fails"] = (m["turn_fails"] + [cmdl])[-10:]
                 run = m.get("running") or {}
                 run.pop(inp.get("tool_use_id") or "", None)
@@ -6346,13 +6383,18 @@ def cmd_hook(args):
                 m["last_status"] = last
             m["ended"] = ""
             m["running"] = {}
+            # Freeze the turn BEFORE `turn_started` is dropped: "did this turn write anything" is
+            # `last_note >= turn_started`, and with the key already gone it compared against a sentinel
+            # and came out 0 for every turn there has ever been. The edit-gated card did not show it -
+            # a note write resets `edit_tools_since_note` and that silenced the card anyway - but the
+            # read-only card has no such second gate behind it.
+            files, fails, wrote, tools = turn_card_data(m)   # the next prompt gets the card
             for k in ("turn_started", "waiting_since", "waiting_what"):
                 m.pop(k, None)
             sample_ctx(store, m, tpath, force=True)
             tell = ctx_warning(store, m, "ctx_told")
             imp = consume_important(m)   # spends one turn of a counted flag, inside the same lock
-            files, fails, wrote = turn_card_data(m)   # freeze the turn; the next prompt gets the card
-            m["turn_card"] = {"at": ts(), "files": files, "fails": fails, "notes": wrote}
+            m["turn_card"] = {"at": ts(), "files": files, "fails": fails, "notes": wrote, "tools": tools}
             save_meta(store, sid, m)
         if tell:
             notify_orchestrator(store, "%s [%s]: %s" % (clip(session_display_name(sid, store), 30), session_key(sid)[:8], tell), wake=False, from_sid=sid)

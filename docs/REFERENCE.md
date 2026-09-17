@@ -4,7 +4,7 @@ English | [Русский](REFERENCE.ru.md)
 
 # longrun - reference
 
-Version 0.6.1. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop) on macOS; the Linux half of the platform layer (the systemd and cron timers, the choice of dialog and notification program) was verified on Ubuntu 24.04 with python3 3.12, where all four suites pass as well. See section 12. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
+Version 0.6.2. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop) on macOS; the Linux half of the platform layer (the systemd and cron timers, the choice of dialog and notification program) was verified on Ubuntu 24.04 with python3 3.12, where all four suites pass as well. See section 12. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
 
 ## 1. Entities
 
@@ -48,7 +48,7 @@ The project key is the project directory path with non-letter characters replace
 |---|---|
 | `notes.md` | like `NOTES.md`, but `[s<id>]` and no author |
 | `journal.md` | `MM-DD HH:MM <line>`, written by the hooks and by the commands that change something: `session <source>`, `FAIL \`<command>\` -> Exit code N ...`, `compaction ...`, `summary archived ...`, `send -> ...`, `watch wN ...`, `session end (<reason>)` |
-| `meta.json` | `sid` (current CLI id), `skey`, `cwd`, `scope`, `started`, `last_seen`, `ended`, `tools`, `turns`, `edit_tools_since_note`, `fails`, `files` (edited), `compactions`, `last_status` (the first 200 characters of the last reply, `Stop` hook), `permission_mode`, `desktop_id`, `shared_seen` (id -> hash of text plus stale mark of the shared entries the session has already seen), `muted`, `swept_at`, `sessions_seen` (skey -> state and last reply already reported), `last_note`, `turn_files`/`turn_fails`/`turn_card` (what the current and the last turn changed, for the turn card), `carded_at_turns`/`carded_at_tools` |
+| `meta.json` | `sid` (current CLI id), `skey`, `cwd`, `scope`, `started`, `last_seen`, `ended`, `tools`, `turns`, `edit_tools_since_note`, `fails`, `files` (edited), `compactions`, `last_status` (the first 200 characters of the last reply, `Stop` hook), `permission_mode`, `desktop_id`, `shared_seen` (id -> hash of text plus stale mark of the shared entries the session has already seen), `muted`, `swept_at`, `sessions_seen` (skey -> state and last reply already reported), `last_note`, `turn_files`/`turn_fails`/`turn_tools`/`turn_notes`/`turn_card` (what the current turn changed, how much work was in it and what it wrote down, plus the frozen copy of the same for the turn that just ended), `carded_at_turns`/`carded_at_tools` |
 | `state.json`, `archive/notes.md` | the id counter of own notes; deleted own entries |
 
 ### Global `~/.claude/longrun/`
@@ -118,7 +118,7 @@ Twelve entries in `~/.claude/settings.json`, all calling `longrun hook <Event>`.
 | Event | What it does | What it prints into the context |
 |---|---|---|
 | `SessionStart` (all sources) | binding the CLI id to the session (resume chain, `/clear`, fork), heartbeat, a journal line, export of `LONGRUN_SESSION`, `LONGRUN_DIR`, `LONGRUN_SCOPE`, `LONGRUN_TRANSCRIPT` via `CLAUDE_ENV_FILE`, gc once an hour, the "all shared entries shown" mark | the digest (section 5) |
-| `UserPromptSubmit` | turn counter; clearing what is measured per turn (the edited-file list behind the docs delta, the hint budgets); finishing reading the app metadata and re-binding the chain | messages from the inbox; own notes once on re-binding; the shared notes delta; the sessions delta (one appeared, ended or said something new); the docs delta; the turn card: what the turn that just ended changed and what failed in it, at most once per 8 turns, only when it edited or failed something and wrote nothing down; the housekeeping question (are any of the old shared notes no longer true?), which has its own conditions and none of the card's - not in the first 4 turns of a session, at most once per half an ageing window, and only when something is old enough to re-read |
+| `UserPromptSubmit` | turn counter; clearing what is measured per turn (the edited-file list behind the docs delta, the hint budgets); finishing reading the app metadata and re-binding the chain | messages from the inbox; own notes once on re-binding; the shared notes delta; the sessions delta (one appeared, ended or said something new); the docs delta; the turn card (section 5c), at most once per 8 turns; the housekeeping question (are any of the old shared notes no longer true?), which has its own conditions and none of the card's - not in the first 4 turns of a session, at most once per half an ageing window, and only when something is old enough to re-read |
 | `PostToolUse` (Edit, Write, MultiEdit, NotebookEdit, Bash, PowerShell, Agent, Task, Workflow, Grep, Glob, WebSearch, mcp__*) | counters; only the four editing tools count as edits; the list of edited files. The three search tools move no counter - they are matched for the query inside them and nothing else | messages from the inbox as `additionalContext`; the shared and docs deltas, so a peer's note does not wait for the user to press Enter (at most once per 5 calls, and only somebody else's changes); the recall hint (section 5a); the poll hint (section 5b); the same card for the turn in progress, once a window of 40 calls has passed since the last note or card |
 | `PostToolBatch` (no matcher) | one event per batch of parallel calls, after all of them resolve. Records the files the batch opened, Reads included - the `PostToolUse` matcher deliberately does not pay a process for those. Newer than the other events: where the CLI does not know it, the entry is inert and `PostToolUse` carries the hint alone | the recall hint for the whole batch, as `additionalContext` |
 | `PostToolUseFailure` (Bash, PowerShell; async) | a `FAIL` line in the journal, the last 40 kept | - |
@@ -185,9 +185,35 @@ Four more things keep the volume down: a term must be at least 5 characters; a t
 
 `watch` exists because a session that waits by hand spends a model turn per check and stops waiting when the conversation does. Choosing it was advice in `SKILL.md` and nothing else. Now a `Bash` or `PowerShell` call that sleeps 30 seconds or more, or loops around a sleep, or repeats the same command for the third time in a turn, is answered once per turn with what `watch` would do instead. A hint, never a refusal: a long sleep is sometimes exactly right, and nothing here can tell which.
 
+## 5c. The turn card, and its two ways in
+
+After a turn, the next prompt may open with what that turn did and the one question the skill exists for: is any of it something the next session, or you after a compaction, could not get back with one command? It replaced a counter that said "40 tool calls since the last note" - a number nobody can act on, which invites filler notes written to silence it.
+
+**A turn that changed or broke something.** Gated on `nudge_edit_tools` (6 edits) or any failed command, because reading around is not activity worth a note and 40 `ls` calls prove nothing. Fires at the turn boundary and, once a window of `nudge_tools` calls has passed, mid-turn as well.
+
+**A turn that changed nothing but did real work.** Added in 0.6.2 and measured before it was built. `research/measure-cards.py` reads 725 transcripts and asks the question backwards: rather than judging which turns *should* have written a note, it counts the turns that *did*, since a note written unprompted is the strongest evidence a turn was worth asking about. Of 351 such turns, 182 (52%) happened in turns the edit gate is silent in, and 124 had no edit and no failure at all. The gate was aimed at less than half the territory notes come from.
+
+The rule the same data points at is length, which is the only thing a hook knows before the fact:
+
+| tool calls in a read-only turn | wrote | silent | note rate |
+|---|---|---|---|
+| 1-2 | 10 | 96 | 9% |
+| 3-5 | 19 | 92 | 17% |
+| 6-10 | 46 | 76 | 38% |
+| 11-20 | 23 | 42 | 35% |
+| 21+ | 27 | 26 | 51% |
+
+(counted in the calls a `PostToolUse` hook is actually fired for - `Read` is deliberately not one of them, and it makes almost no difference: a turn that reads a lot also runs plenty of `Bash`, `Grep` and MCP calls.)
+
+So `NUDGE_READ_TOOLS` is 6, a fixed number rather than a setting, because it came from a measurement that can be re-run rather than from a preference. It reaches 144 turns that currently write nothing, about 1.2 per session, in the band where the note rate is already 38-51%. Lowering `nudge_edit_tools` instead would reach 85 turns and none of the 124. This way in fires **only** at the turn boundary: a turn that has read six things may still be on its way to editing the seventh, and only at `Stop` is it known to have been reading all along. Its question is different too - there is no file to name, so it asks for the conclusion the reading reached.
+
+`card_due` keeps both ways to one card per window between them, so an editing session is not asked twice and an analysis session gets the slot the edit card is not using.
+
+**"Did this turn write anything" is counted, not inferred.** It used to be `last_note >= turn_started`. Both are stamped to the minute, so a note written moments *before* a turn compared equal and was read as written during it - and the `Stop` hook dropped `turn_started` before asking, so the comparison ran against a sentinel and answered "no" for every turn there has ever been. The edit-gated card hid this: a note write also resets `edit_tools_since_note`, which silenced the card by another route. The read-only card has no such second gate, which is how it surfaced. `turn_notes` counts the writes instead.
+
 ## 6. Configuration
 
-Eight keys have been retired and are now fixed numbers in the script: `strict_stop` and `auto_init` (both off, and both a mode nobody ran), `journal_tail_lines` (12), `handoff_max_bytes` (1100), `fail_keep` (40), `recall_transcripts` (6), `ctx_sample_every` (5) in 0.6.0, and `compact_hint_max_bytes` (1200) in 0.6.1. A setting that has never been changed is not a setting. What 0.6.2 added is fixed for the same reason: the housekeeping question waits 4 turns, the mid-turn delta runs at most once per 5 tool calls, the recall hint allows 2 per turn over terms of 5 characters or more found on at most 6 lines, and the poll hint triggers on a 30-second sleep or a third identical command. A retired key left in a config.json is ignored, shown as retired by `longrun config`, and removed by `config unset`; `config set` on one says what replaced it instead of "unknown key".
+Eight keys have been retired and are now fixed numbers in the script: `strict_stop` and `auto_init` (both off, and both a mode nobody ran), `journal_tail_lines` (12), `handoff_max_bytes` (1100), `fail_keep` (40), `recall_transcripts` (6), `ctx_sample_every` (5) in 0.6.0, and `compact_hint_max_bytes` (1200) in 0.6.1. A setting that has never been changed is not a setting. What 0.6.2 added is fixed for the same reason: the housekeeping question waits 4 turns, the mid-turn delta runs at most once per 5 tool calls, the recall hint allows 2 per turn over terms of 5 characters or more found on at most 6 lines, the poll hint triggers on a 30-second sleep or a third identical command, and the read-only turn card wants 6 tool calls. A retired key left in a config.json is ignored, shown as retired by `longrun config`, and removed by `config unset`; `config set` on one says what replaced it instead of "unknown key".
 
 `~/.claude/longrun/config.json` (global) and `<project>/config.json`; the project value overrides the global one. View and change: `longrun config`, `longrun config set KEY VALUE [--global]`, `longrun config unset KEY [--global]`. Keys and defaults:
 
@@ -204,7 +230,7 @@ Eight keys have been retired and are now fixed numbers in the script: `strict_st
 | `compact_hint` | true | whether `PreCompact` sends the summariser its instructions (section 4); their cap is a fixed 1200 B |
 | `compact_instructions` | empty | one more line for them, the same for every session of the project ("keep every SQL query in full") |
 | `session_stale_min`, `session_dead_days` | 30, 7 | when a session is `stale`; when its directory moves to the archive |
-| `nudge_turns`, `nudge_tools`, `nudge_edit_tools` | 8, 40, 6 | the turn card: how often at most (turns), the mid-turn window (tool calls), and the edits it takes for a turn to be worth asking about. Both windows are measured from where the counters stood at the last card, never taken modulo: a counter that steps OVER the boundary (`PostToolUseFailure` charges one without looking at the card) used to skip a whole window |
+| `nudge_turns`, `nudge_tools`, `nudge_edit_tools` | 8, 40, 6 | the turn card: how often at most (turns), the mid-turn window (tool calls), and the edits it takes for a turn that changed something to be worth asking about (the read-only way in has its own fixed threshold, section 5c). Both windows are measured from where the counters stood at the last card, never taken modulo: a counter that steps OVER the boundary (`PostToolUseFailure` charges one without looking at the card) used to skip a whole window |
 | `name` | not set | project name instead of the folder name |
 | `pr_tool` | `auto` | what to query PR status with in `pr-merged`/`pr-status` checks: `gh` (GitHub CLI), `arc` (Arcadia), `auto` - by the folder the watch was registered from |
 | `arc_root` (global only) | `~/arcadia` | where to call `arc pr status` from, Arcadia only |

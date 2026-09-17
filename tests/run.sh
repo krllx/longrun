@@ -130,6 +130,43 @@ NB="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name
 check "a failed command stepping over the window boundary does not swallow the card" "test -z \"\$NB39\" && echo \"\$NB\" | grep -q 'this turn so far' && echo \"\$NB\" | grep -q 'make build'"
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./internal/services/screen/...\"},\"error\":\"Exit code 1\\n--- FAIL: TestScreen_NoPaymentMethods (0.00s)\\n    screen_test.go:41: expected 2 methods, got 0\",\"is_interrupt\":false}"
 check "PostToolUseFailure -> FAIL line in journal" "grep -q 'FAIL \`go test ./internal/services/screen/...\` -> Exit code 1' '$SD/journal.md'"
+# The second way into the card, measured before it was built (research/measure-cards.py): 52% of every note
+# ever written came from a turn the edit gate is silent in, and a read-only turn of 6+ calls writes one
+# 38-51% of the time against 9% at one or two. Reading ends in a conclusion; the conclusion dies with the turn.
+ROP="$T/readonly"; mkdir -p "$ROP"; ( cd "$ROP" && "$LR" init >/dev/null )
+ROC="\"session_id\":\"70707070-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$ROP\""
+rohook(){ ( cd "$ROP" && hook "$1" "$2" ); }
+rotool(){ for i in $(seq 1 "$1"); do rohook PostToolUse "{$ROC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rg thing $i\"},\"tool_response\":{}}" >/dev/null; done; }
+rostop(){ rohook Stop "{$ROC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"done\"}" >/dev/null; }
+roturn(){ rohook UserPromptSubmit "{$ROC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}"; }
+rohook SessionStart "{$ROC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+roturn >/dev/null; rotool 3; rostop
+RO1="$(roturn)"; check "a glance - a read-only turn of a couple of calls - is still not worth a card" "! echo \"\$RO1\" | grep -q 'your last turn'"
+rotool 9; rostop
+RO2="$(roturn)"
+check "a read-only turn that did real work gets a card of its own, and asks for the conclusion" "echo \"\$RO2\" | grep -q '9 tool calls, nothing edited, 0 notes' && echo \"\$RO2\" | grep -q 'decision|fact'"
+rotool 9; rostop
+RO3="$(roturn)"; check "...at most once per window, like the other way in" "! echo \"\$RO3\" | grep -q 'your last turn'"
+RO4="$(cd "$ROP" && hook PostToolUse "{$ROC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rg more\"},\"tool_response\":{}}")"
+check "and never mid-turn: six calls in may still be on the way to the seventh, an edit" "! echo \"\$RO4\" | grep -q 'nothing edited'"
+# A session of its own, so the once-per-window limit cannot be what makes this one pass.
+RWP="$T/readonly-wrote"; mkdir -p "$RWP"; ( cd "$RWP" && "$LR" init >/dev/null )
+RWC="\"session_id\":\"70707071-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$RWP\""
+rw(){ ( cd "$RWP" && hook "$1" "$2" ); }
+rw SessionStart "{$RWC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+rw UserPromptSubmit "{$RWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+for i in $(seq 1 9); do rw PostToolUse "{$RWC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rg thing $i\"},\"tool_response\":{}}" >/dev/null; done
+( cd "$RWP" && LONGRUN_SESSION=70707071-2222-4333-8444-555555555555 "$LR" add -t fact "the conclusion this turn reached" >/dev/null )
+rw Stop "{$RWC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"done\"}" >/dev/null
+# "Did this turn write anything" is counted, not inferred from last_note >= turn_started. Both are stamped
+# to the minute, so a note written moments BEFORE a turn compared equal and read as written during it; and
+# the Stop hook dropped turn_started before asking, so the comparison ran against a sentinel and answered
+# "no" for every turn there has ever been. The edit-gated card hid it: a note write resets
+# edit_tools_since_note, and that silenced the card by another route.
+RWM="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*readonly-wrote*/70707071/meta.json 2>/dev/null | head -1)"
+check "the turn Stop froze counts what was written in it instead of comparing two minute-stamps" "test -n \"\$RWM\" && grep -q '\"notes\": 1' \"\$RWM\""
+RO5="$(rw UserPromptSubmit "{$RWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}")"
+check "a read-only turn that wrote its conclusion down is not asked for it again" "! echo \"\$RO5\" | grep -q 'nothing edited'"
 # The other half of the question - what has STOPPED being true - used to ride on the turn card and so
 # inherited every one of its gates. A session that only read, reviewed or talked, which is exactly the
 # session with time to re-read old notes, was never asked at all. It now stands on its own.

@@ -24,6 +24,14 @@ import sys
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 WRITE_CMDS = ("longrun add", "longrun doc add", "longrun doc touch", "longrun replace", "longrun stale")
+# What the PostToolUse matcher in hooks.json actually fires on. `Read` is deliberately not in it - a hook
+# is a process per call - so a threshold in "tool calls" has to be read in these, not in all of them.
+SEEN_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Agent", "Task",
+              "Workflow", "Grep", "Glob", "WebSearch"}
+
+
+def seen(name):
+    return name in SEEN_TOOLS or (name or "").startswith("mcp__")
 
 
 def blocks(row):
@@ -42,10 +50,10 @@ def is_real_user_turn(row):
 
 
 class Turn:
-    __slots__ = ("edits", "fails", "notes", "tools")
+    __slots__ = ("edits", "fails", "notes", "tools", "hooked")
 
     def __init__(self):
-        self.edits = self.fails = self.notes = self.tools = 0
+        self.edits = self.fails = self.notes = self.tools = self.hooked = 0
 
     def carded(self, min_edits):
         return (self.edits or self.fails) and (self.edits >= min_edits or self.fails)
@@ -78,6 +86,8 @@ def scan(path, min_edits):
                 if b.get("type") == "tool_use":
                     name, ti = b.get("name"), (b.get("input") or {})
                     cur.tools += 1
+                    if seen(name):
+                        cur.hooked += 1
                     if name in EDIT_TOOLS:
                         cur.edits += 1
                     cmd = str(ti.get("command") or "")
@@ -157,24 +167,39 @@ def main():
     # If read-only turns are to be carded at all, the rule must separate the productive ones from the
     # 2-call ones. Length is the only signal a hook has before the fact, so: does it separate them?
     print("\n== read-only turns (0 edits, 0 failures) by how much work was in them, sessions in use")
-    print("   %-14s %8s %8s %8s" % ("tool calls", "wrote", "silent", "note rate"))
     buckets = [(1, 2), (3, 5), (6, 10), (11, 20), (21, 10 ** 6)]
-    rows = {b: [0, 0] for b in buckets}
-    for turns in active.values():
-        for t in turns:
-            if t.edits or t.fails or not t.tools:
-                continue
-            for b in buckets:
-                if b[0] <= t.tools <= b[1]:
-                    rows[b][0 if t.notes else 1] += 1
-                    break
-    cum_w = cum_s = 0
-    for b in buckets:
-        w, s = rows[b]
-        label = "%d-%d" % b if b[1] < 10 ** 6 else "%d+" % b[0]
-        print("   %-14s %8d %8d %8s" % (label, w, s, ("%.0f%%" % (100.0 * w / (w + s))) if w + s else "-"))
-        cum_w, cum_s = cum_w + w, cum_s + s
-    print("   %-14s %8d %8d %8s" % ("all", cum_w, cum_s, ("%.0f%%" % (100.0 * cum_w / (cum_w + cum_s))) if cum_w + cum_s else "-"))
+
+    def table(attr, title):
+        print("\n   %s" % title)
+        print("   %-14s %8s %8s %8s" % ("calls", "wrote", "silent", "note rate"))
+        rows = {b: [0, 0] for b in buckets}
+        for turns in active.values():
+            for t in turns:
+                n = getattr(t, attr)
+                if t.edits or t.fails or not n:
+                    continue
+                for b in buckets:
+                    if b[0] <= n <= b[1]:
+                        rows[b][0 if t.notes else 1] += 1
+                        break
+        cum_w = cum_s = 0
+        for b in buckets:
+            w, s = rows[b]
+            label = "%d-%d" % b if b[1] < 10 ** 6 else "%d+" % b[0]
+            print("   %-14s %8d %8d %8s" % (label, w, s, ("%.0f%%" % (100.0 * w / (w + s))) if w + s else "-"))
+            cum_w, cum_s = cum_w + w, cum_s + s
+        print("   %-14s %8d %8d %8s" % ("all", cum_w, cum_s, ("%.0f%%" % (100.0 * cum_w / (cum_w + cum_s))) if cum_w + cum_s else "-"))
+        return rows
+
+    table("tools", "counted in ALL tool calls (what the transcript shows):")
+    hooked = table("hooked", "counted in the calls a PostToolUse hook is fired for (Read is not one):")
+    # The threshold the skill can actually use is the second one. Say what each candidate would card.
+    print("\n   a read-only card at N hooked calls would reach, per threshold:")
+    for n in (3, 4, 5, 6, 8):
+        w = sum(v[0] for b, v in hooked.items() if b[0] >= n)
+        s = sum(v[1] for b, v in hooked.items() if b[0] >= n)
+        print("     >= %-3d  %4d silent turns carded, in a band whose note rate is %s"
+              % (n, s, ("%.0f%%" % (100.0 * w / (w + s))) if w + s else "-"))
 
 
 if __name__ == "__main__":
