@@ -78,7 +78,7 @@ if [ "$MODE" = "install" ]; then
     echo "mcp:    'claude' is not on PATH; register the server by hand: claude mcp add --scope user longrun -- $BIN_DIR/longrun mcp"
   fi
   # 1b. desktop notifications. Asked for, not assumed: they install software on macOS and ask the system for
-  # a permission, and longrun never depends on them - a halt, a budget stop and a fired watch reach the
+  # a permission, and longrun never depends on them - a halt and a fired watch reach the
   # session through its socket or inbox either way. Neither OS can draw one unaided: macOS has no working
   # built-in route at all (an osascript notification is posted on behalf of Script Editor, which holds no
   # permission, so it is filed and never drawn, silently), and Linux needs libnotify.
@@ -106,12 +106,12 @@ if [ "$MODE" = "install" ]; then
       echo ""
     else
       NOTIFY=0
-      echo "Nothing here can answer (no terminal), so: skipped. 'longrun notify setup' turns them on later."
+      echo "Nothing here can answer (no terminal), so: skipped. 'brew install terminal-notifier' turns them on later."
       echo ""
     fi
   fi
   if [ "$NOTIFY" = "0" ]; then
-    echo "notify: skipped - 'longrun notify setup' (macOS) or a libnotify package (Linux) turns them on later"
+    echo "notify: skipped - 'brew install terminal-notifier' (macOS) or a libnotify package (Linux) turns them on later"
   elif [ "$(uname)" = "Darwin" ]; then
     if ! command -v terminal-notifier >/dev/null 2>&1; then
       if command -v brew >/dev/null 2>&1; then
@@ -119,21 +119,19 @@ if [ "$MODE" = "install" ]; then
         brew install terminal-notifier >/dev/null 2>&1 || echo "notify: brew install failed; run it by hand, then re-run this installer"
       else
         echo "notify: skipped - Homebrew is what installs terminal-notifier, and macOS draws no notification"
-        echo "        without it. Install Homebrew from https://brew.sh, then run this installer again (or"
-        echo "        just 'longrun notify setup'). Everything else works as it is."
+        echo "        without it. Install Homebrew from https://brew.sh, then run this installer again."
+        echo "        Everything else works as it is."
       fi
     fi
     if command -v terminal-notifier >/dev/null 2>&1; then
-      # the icon and the sender name of a macOS banner come only from the bundle that posted it, so we post
-      # from our own copy; building it ends with a test notification, which is also what grants the permission
-      echo "notify: setting up the sender bundle. macOS may ask once whether to allow notifications from"
-      echo "        \"longrun\" - allow it, and a test notification appears when it works."
-      "$BIN_DIR/longrun" notify setup 2>&1 | sed "s/^/        /"
+      # its first send is what creates its entry in System Settings and asks for the permission
+      echo "notify: terminal-notifier is here. macOS may ask once whether to allow its notifications - allow"
+      echo "        it, then 'longrun notify --test' puts one on the screen."
     fi
   elif command -v notify-send >/dev/null 2>&1; then
     echo "notify: notify-send found; check it with 'longrun notify --test'"
   else
-    echo "notify: no notify-send (libnotify) - halts, budget stops and fired watches still reach the sessions"
+    echo "notify: no notify-send (libnotify) - halts and fired watches still reach the sessions"
     echo "        themselves; 'apt install libnotify-bin' (or 'dnf install libnotify') to also see them on screen."
   fi
   # 1c. the timer that runs the tick every 5 minutes: the watches this machine is waiting on, and the watcher
@@ -207,6 +205,8 @@ if [ "$MODE" != "install" ]; then
   command -v claude >/dev/null 2>&1 && claude mcp remove --scope user longrun >/dev/null 2>&1 && echo "mcp:    server 'longrun' unregistered"
   rm -f "$BIN_DIR/longrun"
   rm -rf "$DEST"
+  # 0.5 built a copy of the terminal-notifier bundle here so banners carried a longrun icon; 0.6.0 dropped it
+  rm -rf "$CLAUDE_DIR/longrun/notifier"
   echo "removed $DEST and $BIN_DIR/longrun"
   if [ "$MODE" = "purge" ]; then
     rm -rf "$CLAUDE_DIR/longrun"

@@ -23,7 +23,7 @@ size(){ python3 -c "import os,sys;print(os.path.getsize(sys.argv[1]))" "$1"; }
 
 echo "== init (project) and a linked worktree"
 HUB="$T/hq"; WT="$T/wt/EDAINAPP-1375-screen"; mkdir -p "$HUB" "$WT"
-( cd "$HUB" && "$LR" init --hq >/dev/null ) && check "project init --hq" "test -f '$HUB/.longrun/NOTES.md' -a -f '$HUB/.longrun/ledger.md'"
+( cd "$HUB" && "$LR" init >/dev/null ) && check "project init makes NOTES.md and the message inbox" "test -f '$HUB/.longrun/NOTES.md' -a -d '$HUB/.longrun/inbox'"
 ( cd "$WT" && "$LR" link "$HUB" >/dev/null ) && check "worktree link -> registry entry, nothing written into the worktree" "test -f '$CLAUDE_CONFIG_DIR/longrun/registry.json' && ! test -e '$WT/.longrun'"
 WHERE="$(cd "$WT" && "$LR" where)"; check "where in the worktree resolves to the project" "echo '$WHERE' | grep -q 'project:  hq  ($HUB/.longrun)'"
 LOCAL="$HUB/.longrun"
@@ -76,26 +76,11 @@ check "unmute --all brings them back" "(cd '$STP' && LONGRUN_SESSION=$MU '$LR' d
 "$LR" add --shared -t pin "never rm this" >/dev/null; check "add after prune fits" "grep -q 'pin (.*): never rm this' '$LOCAL/NOTES.md'"
 check "shared entries carry the author label" "grep -q '\[n2\] .* decision (EDAINAPP-1375-screen)' '$LOCAL/NOTES.md'"
 
-echo "== ledger + ask + inbox"
-"$LR" ledger add -o user --next 2020-01-01 --link https://idm.yandex-team.ru/roles/1 "get the personal retrieve role approved by SIB" >/dev/null
-"$LR" ledger add -o skaurus87 "approve TVM draft 10725344" >/dev/null
-check "ledger in the project" "grep -q '\[L1\] open @user' '$LOCAL/ledger.md' && grep -q 'next:2020-01-01' '$LOCAL/ledger.md'"
-check "ledger DUE shown" "$LR ledger | grep -q 'L1.*<- DUE'"
-"$LR" ledger done L2 "applied 03.09" >/dev/null; check "ledger done with outcome" "grep -q '\[L2\] done @skaurus87 .*applied 03.09' '$LOCAL/ledger.md'"
-"$LR" ask --ledger "go ask Denis for the OK on TVM draft 10718653" >/dev/null; check "ask --ledger -> ledger @user + inbox file" "grep -q '\[L3\] open @user' '$LOCAL/ledger.md' && ls '$LOCAL/inbox/' | grep -q -- '-ask-'"
-printf '%s\n' "- HAND-WRITTEN: ask Denis about the prod rollout window" >> "$LOCAL/ledger.md"
-"$LR" ledger add -o me "item written after the hand edit" >/dev/null
-check "hand-edited ledger line survives a rewrite" "grep -q '^- HAND-WRITTEN: ask Denis' '$LOCAL/ledger.md'"
-check "hand-edited line is listed but not addressable as L0" "$LR ledger | grep -q 'HAND-WRITTEN' && ! $LR ledger done L0 2>&1 | grep -q 'done'"
-printf 'branch: EDAINAPP-1375-screen\npushed: yes\nreview: can call reviewers\nblockers: none\n' | "$LR" report - >/dev/null; check "report from stdin" "ls '$LOCAL/inbox/' | grep -q -- '-report-edainapp-1375-screen-'"
-check "inbox ls counts 2" "$LR inbox | grep -q '(2 unread)'"
-"$LR" inbox ack --all >/dev/null; check "inbox ack archives" "test \$(ls '$LOCAL/inbox/'*.md 2>/dev/null | wc -l) -eq 0 && test \$(ls '$LOCAL/inbox/.archive/' | wc -l) -eq 2"
-
 echo "== hooks with real payload shapes"
 COMMON="\"session_id\":\"$SID\",\"transcript_path\":\"$CLAUDE_CONFIG_DIR/projects/-proj/$SID.jsonl\",\"cwd\":\"$WT\""
 export CLAUDE_ENV_FILE="$T/env.sh"
 OUT="$(hook SessionStart "{$COMMON,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\",\"model\":\"claude-fable-5-1\"}")"
-check "SessionStart prints digest with shared notes, own notes, ledger and the commands" "echo \"\$OUT\" | grep -q '<longrun v' && echo \"\$OUT\" | grep -q 'SHARED notes (project hq)' && echo \"\$OUT\" | grep -q 'OWN notes (this session) 0 entries' && echo \"\$OUT\" | grep -q 'LEDGER open' && echo \"\$OUT\" | grep -q 'longrun recall'"
+check "SessionStart prints digest with shared notes, own notes and the commands" "echo \"\$OUT\" | grep -q '<longrun v' && echo \"\$OUT\" | grep -q 'SHARED notes (project hq)' && echo \"\$OUT\" | grep -q 'OWN notes (this session) 0 entries' && echo \"\$OUT\" | grep -q 'longrun recall'"
 check "SessionStart exports env for Bash" "grep -q 'LONGRUN_SESSION=$SID' '$T/env.sh' && grep -q 'LONGRUN_DIR=' '$T/env.sh'"
 SD="$SESS/11111111"
 check "SessionStart creates the session dir with meta + journal" "test -f '$SD/meta.json' && grep -q 'session startup' '$SD/journal.md'"
@@ -117,7 +102,7 @@ N46="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_nam
 N47="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/g.go\"},\"tool_response\":{}}")"
 check "mid-turn card names the files it edited, once per window (call 46 yes, 47 no)" "echo \"\$N46\" | grep -q 'this turn so far' && echo \"\$N46\" | grep -q '6 files (f1.go, f2.go, f3.go, +3 more)' && test -z \"\$N47\""
 UPS="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"continue\"}")"
-check "UserPromptSubmit right after a card: ledger items yes, a second card no" "echo \"\$UPS\" | grep -q '@user' && ! echo \"\$UPS\" | grep -q 'your last turn'"
+check "UserPromptSubmit right after a card: no second card" "! echo \"\$UPS\" | grep -q 'your last turn'"
 for i in 2 3 4 5 6 7; do hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"t$i\"}" >/dev/null; done
 hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"edited the handler\"}" >/dev/null
 hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/card.go\"},\"tool_response\":{}}" >/dev/null
@@ -220,8 +205,7 @@ import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["notes_max_bytes"]=6000;
 PY
 for i in $(seq 1 30); do "$LR" add --shared -t fact "digest cap filler $i: a moderately long line of text to inflate the notes towards the budget for the test" >/dev/null 2>&1; done
 D="$("$LR" digest --source compact)"; DB=$(printf '%s' "$D" | wc -c | tr -d ' '); check "digest respects inject_max_bytes ($DB B <= 1500)" "test $DB -le 1500 && echo \"\$D\" | grep -q '</longrun>'"
-# at production proportions (5000 shared + 3000 own + 3000 ledger > 9000 digest) the ledger must degrade to the rows
-# that name a human, not disappear wholesale, and neither notes file gives way
+# at production proportions (5000 shared + 3000 own, against a 9000 digest) both notes files must still fit whole
 BOTH="$T/both"; mkdir -p "$BOTH"; ( cd "$BOTH" && "$LR" init --hq >/dev/null )
 BSESS="$(cd "$BOTH" && "$LR" where | sed -n 's/^sessions: //p')"
 python3 - "$BOTH/.longrun/NOTES.md" "$BOTH/.longrun/ledger.md" "$BSESS/99990000/notes.md" <<'PY'
@@ -244,7 +228,7 @@ open(l, "w").write("# longrun ledger\n" + "\n".join(b) + "\n")
 PY
 printf '{"sid":"99990000-2222-4333-8444-555555555555","skey":"99990000","cwd":"%s","tools":3,"turns":1,"last_seen":"2026-09-06 10:00"}\n' "$BOTH" > "$BSESS/99990000/meta.json"
 D2="$(cd "$BOTH" && LONGRUN_SESSION=99990000-2222-4333-8444-555555555555 "$LR" digest --source compact)"; D2B=$(printf '%s' "$D2" | wc -c | tr -d ' ')
-check "all budgets full: digest fits ($D2B B <= 9000) and keeps the @user/DUE rows" "test $D2B -le 9000 && echo \"\$D2\" | grep -q '@user' && echo \"\$D2\" | grep -q '<- DUE' && echo \"\$D2\" | grep -q 'other open items omitted'"
+check "all budgets full: the digest still fits ($D2B B <= 9000)" "test $D2B -le 9000 && echo \"\$D2\" | grep -q '</longrun>'"
 check "all budgets full: neither notes file is what gives way" "echo \"\$D2\" | grep -q '\[n1\]' && echo \"\$D2\" | grep -q '\[s1\]' && ! echo \"\$D2\" | grep -q 'notes truncated'"
 # B1: when the notes DO have to give way, they shed their oldest entries, never their newest. A tail
 # clip (what this used to do) eats exactly what was written last, which is what a session needs most.
@@ -311,7 +295,7 @@ check "recall shows the NOTES.md hit despite 15 noisier archive hits" "echo \"\$
 
 echo "== status and concurrency"
 mkdir -p "$SESS/00000000"; printf '{"sid":"00000000-noise","skey":"00000000","cwd":"%s","tools":0,"turns":0,"last_seen":"2026-09-06 10:00"}\n' "$WT" > "$SESS/00000000/meta.json"
-S="$("$LR" status 2>&1)"; check "status lists the session with its state, own-note count and NEEDS USER" "echo \"\$S\" | grep -q '11111111 .* ended(clear)' && echo \"\$S\" | grep -q 'notes=4' && echo \"\$S\" | grep -q 'NEEDS USER'"
+S="$("$LR" status 2>&1)"; check "status lists the session with its state, own-note count and last status" "echo \"\$S\" | grep -q '11111111 .* ended(clear)' && echo \"\$S\" | grep -q 'notes=4'"
 check "status hides a session with no tool calls and no turns (app noise), --all shows it" "! echo \"\$S\" | grep -q '00000000' && echo \"\$S\" | grep -q '1 session(s) with no tool calls' && $LR status --all | grep -q '00000000'"
 python3 - "$LOCAL/config.json" <<'PY'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["notes_max_bytes"]=20000; d["session_notes_max_bytes"]=20000; json.dump(d,open(p,"w"))
@@ -372,20 +356,14 @@ W2="$(cd "$OLDWT" && "$LR" where)"
 check "a 0.2 worktree store resolves to its hub as the project" "echo \"\$W2\" | grep -q 'project:  hq  ($LOCAL)'"
 check "the notes it held are parked in the project archive and recall finds them" "grep -q 'legacy .*old-branch | - \[n1\] .*0.2 worktree store' '$LOCAL/archive/notes.md' && test -f '$OLDSTORE/NOTES.legacy.md' && (cd '$OLDWT' && $LR recall '0.2 worktree' --no-transcript) | grep -q 'archive/notes.md'"
 
-echo "== notes-only mode (the HQ layer is opt-in)"
+echo "== a project made by plain init, and hand edits to its notes"
 SOLO="$T/solo"
-check "plain init creates no ledger and no inbox" "! test -e '$SOLO/.longrun/ledger.md' && ! test -e '$SOLO/.longrun/inbox'"
-check "where reports notes-only" "(cd '$SOLO' && $LR where) | grep -q 'mode:     notes-only'"
-( cd "$SOLO" && "$LR" add --shared -t dead "notes still work without the HQ layer" >/dev/null )
-check "shared notes/recall work in notes-only mode" "(cd '$SOLO' && $LR recall notes --no-transcript) | grep -q 'NOTES.md'"
-( cd "$SOLO" && "$LR" ledger add -o user "should be refused" >/tmp/lr-hq 2>&1 ); check "HQ command refused with exit 4 and a way out" "test \$? -eq 4 && grep -q 'init --hq' /tmp/lr-hq"
-check "digest has no LEDGER block in notes-only mode" "! (cd '$SOLO' && $LR digest) | grep -q 'LEDGER'"
-OLDHUB="$T/oldhub"; OLDWT2="$T/wt/oldhub-branch"; mkdir -p "$OLDHUB" "$OLDWT2"; ( cd "$OLDHUB" && "$LR" init >/dev/null ); printf '# longrun ledger: things that need a human or a later action (`longrun ledger ...`)\n' > "$OLDHUB/.longrun/ledger.md"
-( cd "$OLDWT2" && "$LR" link "$OLDHUB/.longrun" >/dev/null )
-check "a worktree of a notes-only project is notes-only too (no ledger/report hints)" "(cd '$OLDWT2' && $LR where) | grep -q 'notes-only' && ! (cd '$OLDWT2' && $LR digest) | grep -q 'ledger add'"
+( cd "$SOLO" && "$LR" add --shared -t dead "notes work in a project nobody configured" >/dev/null )
+check "shared notes and recall work in a plain project" "(cd '$SOLO' && $LR recall notes --no-transcript) | grep -q 'NOTES.md'"
+check "the ledger layer is gone: no file, no command, no digest block" "! test -e '$SOLO/.longrun/ledger.md' && ! (cd '$SOLO' && $LR ledger add -o user x >/dev/null 2>&1) && ! (cd '$SOLO' && $LR digest) | grep -q 'LEDGER'"
+( cd "$SOLO" && "$LR" init --hq >/dev/null 2>&1 ); check "the old --hq flag is accepted and ignored, so an old command line still works" "test \$? -eq 0 && ! test -e '$SOLO/.longrun/ledger.md'"
 printf '## my own heading\n' >> "$SOLO/.longrun/NOTES.md"; ( cd "$SOLO" && "$LR" add --shared -t fact "written after a hand heading" >/dev/null )
 check "a hand-written heading in NOTES.md is kept, not silently dropped" "grep -q 'my own heading' '$SOLO/.longrun/NOTES.md'"
-( cd "$SOLO" && "$LR" init --hq >/dev/null ); check "--hq turns the layer on afterwards" "test -f '$SOLO/.longrun/ledger.md' && (cd '$SOLO' && $LR ledger add -o user 'now allowed' >/dev/null)"
 
 echo "== gc auto-prunes cheap entries so writing never simply stops"
 AP="$T/autoprune"; mkdir -p "$AP"; ( cd "$AP" && "$LR" init >/dev/null )
@@ -563,7 +541,7 @@ echo "== config command"
 cd "$HUB"
 "$LR" config set notes_max_bytes 6000 >/dev/null; check "config set writes the project config.json" "grep -q '\"notes_max_bytes\": 6000' '$LOCAL/config.json'"
 check "config shows the value with its source" "$LR config | grep -q 'notes_max_bytes *6000 *project'"
-"$LR" config set budget_on false --global >/dev/null; check "config set --global writes the global file and coerces the bool" "grep -q '\"budget_on\": false' '$CLAUDE_CONFIG_DIR/longrun/config.json'"
+"$LR" config set wake_on_stuck false --global >/dev/null; check "config set --global writes the global file and coerces the bool" "grep -q '\"wake_on_stuck\": false' '$CLAUDE_CONFIG_DIR/longrun/config.json'"
 "$LR" config set nope 1 2>/dev/null; check "unknown key refused (exit 2)" "test \$? -eq 2"
 "$LR" config set nudge_tools abc 2>/dev/null; check "non-integer refused (exit 2)" "test \$? -eq 2"
 "$LR" config unset notes_max_bytes >/dev/null; check "config unset removes the key" "! grep -q '\"notes_max_bytes\"' '$LOCAL/config.json'"
@@ -636,29 +614,12 @@ check "notify_user reports the program it used, so a caller can log how it notif
   "test \"\$(LONGRUN_NO_UI= lrpy \"\$(HAVE \"'terminal-notifier','true'\")
 m.notify_cmd=lambda k,t,x,link='': ['true']
 print(m.notify_user('T','X'))\")\" = terminal-notifier"
-check "the presented flag is unreadable without the macOS database, and that is not a failure" \
-  "test \"\$(lrpy 'print(m.notify_presented(\"nothing\", wait=0))')\" = None"
-check "no macOS database means no records, not a crash" \
-  "test \"\$(lrpy 'print(m.notify_records())')\" = '[]'"
 check "a click target is built only from a real app session id (local_<uuid>), never from a CLI id" \
   "lrpy 'print(m.session_deep_link(\"local_e5afcd96-5166-44c7-80ab-eddda0ea171b\"))' | grep -q '^claude://code/continue?session=local_e5afcd96-5166-44c7-80ab-eddda0ea171b&source=desktop_action\$' && test \"\$(lrpy 'print([m.session_deep_link(x) for x in (\"\", \"4b21e5e6-0f9b-4be9-a4ff-6f78f4261890\", \"local_a b\")])')\" = \"['', '', '']\""
 check "a missing notifier is never an error: notify_user returns a string for every kind and raises nothing" \
   "test \"\$(LONGRUN_NO_UI= lrpy \"
 m.shutil.which=lambda p, *a, **k: None
 print([m.notify_user('T','X') for _ in range(1)] == [''], m.notifier_kind())\")\" = \"True none\""
-check "notifications go through our own sender bundle as soon as it exists, and fall back to PATH when it does not" \
-  "test \"\$(lrpy 'print(m.notifier_bin())')\" = terminal-notifier && test \"\$(lrpy \"
-import os
-os.makedirs(os.path.join(m.NOTIFIER_APP,'Contents','MacOS'), exist_ok=True)
-b=os.path.join(m.NOTIFIER_APP,'Contents','MacOS','terminal-notifier')
-open(b,'w').close(); os.chmod(b, 0o755)
-print(m.notifier_bin() == b, m.notify_cmd('terminal-notifier','T','X')[0] == b)\")\" = 'True True'"
-check "the bundle keeps terminal-notifier's own id prefix, so the copy is recognisably a copy" \
-  "lrpy 'print(m.NOTIFIER_ID)' | grep -q '^fr.julienxx.oss.terminal-notifier\\.'"
-check "notify setup refuses politely off macOS instead of building a broken bundle" \
-  "test \"\$(lrpy 'm.IS_MAC=False; rc,msg=m.notifier_setup(); print(rc)')\" = 3"
-check "notify setup with a missing icon file is an argument error, and nothing is built" \
-  "test \"\$(lrpy 'rc,msg=m.notifier_setup(\"/nope/none.icns\"); print(rc)')\" = 2"
 check "notify_turn_end is off by default, and refuses anything but off/unfocused/always (exit 2)" \
   "test \"\$(lrpy 'print(m.DEFAULTS[\"notify_turn_end\"])')\" = off && $LR config set notify_turn_end sometimes --global 2>/dev/null; test \$? -eq 2"
 check "unfocused notifies only while the Claude app is not the one in front" \
@@ -707,10 +668,5 @@ check "consume_important spends a counted flag and never goes below zero" \
 mm=dict(important=dict(mode='count', left=2))
 print([bool(m.consume_important(mm)) for _ in range(3)], 'important' in mm)\")\" = '[True, True, False] False'"
 cd "$HUB"; export LONGRUN_SESSION=$SID
-check "the token comes from Claude Code's own credentials file when there is no keychain item" \
-  "mkdir -p '$CLAUDE_CONFIG_DIR' && printf '{\"claudeAiOauth\":{\"accessToken\":\"sk-test-not-a-real-token\"}}' > '$CLAUDE_CONFIG_DIR/.credentials.json' && test \"\$(lrpy 'tok,err=m.keychain_token(); print(bool(tok), err)')\" = 'True '"
-rm -f "$CLAUDE_CONFIG_DIR/.credentials.json"
-check "no credentials anywhere is an error, never an empty token" \
-  "lrpy 'tok,err=m.keychain_token(); print(repr(tok), err)' | grep -q \"^'' .\""
 
 echo; echo "PASS=$PASS FAIL=$FAIL  (tmp: $T)"; test $FAIL -eq 0

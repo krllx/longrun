@@ -28,7 +28,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-368_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-326_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -74,7 +74,7 @@ From there, nothing to call: *"write that down"*, *"what have we tried"*, *"tell
 <summary><b>Desktop notifications</b> - what they are for, and what the installer asks about</summary>
 
 - **Why:** the session learns about a halt, a fired watch and a finished turn either way; a banner is how *you* notice one while looking at another window. longrun never depends on them.
-- **macOS:** `terminal-notifier` via Homebrew (nothing built in draws a banner) and one permission prompt. Said no at install time? `longrun notify setup` later.
+- **macOS:** `terminal-notifier` via Homebrew (nothing built in draws a banner) and one permission prompt. Said no at install time? `brew install terminal-notifier` later.
 - **Linux:** `notify-send` (`libnotify`), which most desktops already have.
 
 `longrun notify --test` checks that one really reaches the screen. Two settings worth a look: `notify_turn_end unfocused` (a banner when a session finishes a turn while the Claude window is not in front) and `longrun important on|next` for the one session you must not miss. The `notify` tool the agent calls comes from the `longrun` MCP server the installer registers. The full story, macOS quirks included: [docs/REFERENCE.md](docs/REFERENCE.md).
@@ -161,7 +161,7 @@ longrun board take T7; longrun board done T7 "PR 42 merged"    # in a worker
 longrun ask "Merge PR 42?" --options "Yes,No"                  # a dialog, answered inline
 ```
 
-Control stays with the human: killing a stuck process (`longrun interrupt`), stopping every session (`longrun halt`), lifting the stop. The watcher and the orchestrator only propose. Optional and off until you turn it on: a 5-hour usage budget (`longrun budget on`) that halts everything when usage in that window runs ahead of plan and asks you what to do.
+Control stays with you. The orchestrator and the watcher only propose: they can message a session, put a question in front of you, and stop every session at once with `longrun halt` - which only you lift. Nothing kills a running tool; the window that is stuck is yours to stop, with Esc.
 
 ## How it works
 
@@ -215,11 +215,10 @@ One test: **would one command, one file read or grep get this back?** If yes, do
 | `pin` | a fact with no expiry: PR number, branch, host | shared |
 | `ctx` | task framing from the human | own |
 | `doc` | a pointer to a file too long for a note: `longrun doc add <path> "what is in it"` | shared |
-| `todo` | a small thing the agent still has to do | own |
 
 A note that stopped being true is not deleted behind everyone's back: `longrun stale n12 "staging moved to vla-07"` marks it, every session sees the mark, and the next cleanup takes marked entries first. `longrun mute n12` just takes one out of *your* digest and changes nothing for anybody else.
 
-Milestones (pushed, PR opened, tests green) go to the journal: `longrun log "PR opened"`. What outlives the task (who the user is, how they work) goes to Claude Code's auto memory, not to longrun.
+The journal keeps the mechanical record by itself - what was edited, what failed, when a compaction happened - so progress narration is not something to write down. What outlives the task (who the user is, how they work) goes to Claude Code's auto memory, not to longrun.
 
 ## Commands
 
@@ -229,7 +228,7 @@ longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune |
 longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
-longrun orchestrate start --goal "..." | board | fact | ask | halt | resume | interrupt | budget
+longrun orchestrate start --goal "..." | board | fact | ask | halt | resume
 ```
 
 Full flags, file formats and the facts we verified about Claude Code: [docs/REFERENCE.md](docs/REFERENCE.md). The orchestrator's design and what is left: [docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md).
@@ -251,10 +250,10 @@ Full flags, file formats and the facts we verified about Claude Code: [docs/REFE
 ## Development
 
 ```bash
-bash tests/run.sh            # 232 regression checks, no API calls
+bash tests/run.sh            # 211 regression checks, no API calls
 bash tests/scenarios.sh      # 37 scenarios, one per goal
-bash tests/orchestrator.sh   # 69: the orchestrator layer
-bash tests/ask.sh            # 30: the dialog and the MCP server
+bash tests/orchestrator.sh   # 51: the orchestrator layer
+bash tests/ask.sh            # 27: the dialog and the MCP server
 ```
 
 The installer copies files into `~/.claude/skills/longrun/`; nothing is loaded from the checkout. A running session picks an update up without a restart, because a hook is a separate process per event.

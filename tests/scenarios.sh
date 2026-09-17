@@ -38,7 +38,7 @@ cd "$WT_E"; start $A "$WT_E" startup >/dev/null
 as $A add --shared -t pin "PR E = 15526210, branch EDAINAPP-1375-screen, opened 2026-09-04" >/dev/null
 as $A add --shared -t decision "STQ v2 over v1 for payment callbacks: v1 needs a TPS ticket per env" >/dev/null
 as $A add --own -t dead "own: LC client path gives 400 whatever the body; bdui-catalog testing lacks the screen" >/dev/null
-as $A log "PR 15526210 opened" >/dev/null
+as $A stale n1 "PR E is merged, the branch is gone" >/dev/null   # any write the session journals
 stop $A "$WT_E" "PR E opened, waiting for reviewers"
 D="$(cd "$WT_C" && start $B "$WT_C" startup)"
 check "S1.1 the new session in another worktree sees the project's shared notes (PR map, decisions)" "echo \"\$D\" | grep -q 'PR E = 15526210' && echo \"\$D\" | grep -q 'STQ v2 over v1'"
@@ -53,7 +53,7 @@ cd "$WT_E"
 printf '{"session_id":"%s","transcript_path":"/x.jsonl","cwd":"%s","hook_event_name":"PreCompact","trigger":"auto"}' $A "$WT_E" | "$LR" hook PreCompact
 printf '{"session_id":"%s","transcript_path":"/x.jsonl","cwd":"%s","hook_event_name":"PostCompact","trigger":"auto","compact_summary":"summary text"}' $A "$WT_E" | "$LR" hook PostCompact
 DA="$(start $A "$WT_E" compact)"
-check "S2.1 after compaction the session gets its own notes and its journal back" "echo \"\$DA\" | grep -q 's1\] .* dead: own: LC client path' && echo \"\$DA\" | grep -q 'PR 15526210 opened'"
+check "S2.1 after compaction the session gets its own notes and its journal back" "echo \"\$DA\" | grep -q 's1\] .* dead: own: LC client path' && echo \"\$DA\" | grep -q 'SESSION journal tail' && echo \"\$DA\" | grep -q 'stale n1'"
 check "S2.2 and the shared picture" "echo \"\$DA\" | grep -q 'PR E = 15526210'"
 check "S2.3 the compaction summary is archived under the project, named by the session" "ls '$HQ/.longrun/archive/compact/' | grep -q '^aaaaaaaa-'"
 DB="$(cd "$WT_C" && start $B "$WT_C" compact)"
@@ -97,7 +97,7 @@ A2=aaaa000a-0000-4000-8000-00000000000a
 printf '{"sessionId":"local_desk-A","cliSessionId":"%s","priorCliSessionIds":["%s"],"cwd":"%s","title":"PR E: Шторка лотереи","isArchived":false,"lastActivityAt":1788779365881}' $A2 $A "$WT_E" > "$DSK/local_desk-A.json"
 cd "$WT_E"; D5="$(start $A2 "$WT_E" startup)"
 check "S5.1 the new CLI id continues the old session dir (priorCliSessionIds)" "grep -q '\"skey\": \"aaaaaaaa\"' '$CLAUDE_CONFIG_DIR/longrun/sessions/_index/$A2.json' && ! test -d '$SESS/aaaa000a'"
-check "S5.2 its digest carries the old own notes and journal, labelled as continued" "echo \"\$D5\" | grep -q 'continued from an earlier CLI id' && echo \"\$D5\" | grep -q 'LC client path' && echo \"\$D5\" | grep -q 'PR 15526210 opened'"
+check "S5.2 its digest carries the old own notes and journal, labelled as continued" "echo \"\$D5\" | grep -q 'continued from an earlier CLI id' && echo \"\$D5\" | grep -q 'LC client path' && echo \"\$D5\" | grep -q 'stale n1'"
 check "S5.3 the digest head names the session as the sidebar does" "echo \"\$D5\" | grep -q 'session=PR E: Шторка лотереи \[aaaaaaaa\]'"
 # the app may write its metadata only after SessionStart: then the chain is picked up on the first turn
 A3=aaaa000b-0000-4000-8000-00000000000b
