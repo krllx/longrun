@@ -28,7 +28,7 @@
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-326_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-337_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -253,7 +253,7 @@ longrun orchestrate start --goal "..." | board [add --fact|ack] | ask | halt | r
 ## Разработка
 
 ```bash
-bash tests/run.sh            # 211 регрессионных проверок, без API
+bash tests/run.sh            # 222 регрессионных проверок, без API
 bash tests/scenarios.sh      # 37 сценариев, по одному на задачу
 bash tests/orchestrator.sh   # 51: слой оркестратора
 bash tests/ask.sh            # 27: диалог и MCP-сервер
