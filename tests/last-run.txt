@@ -4,7 +4,8 @@
   ok   where in the worktree resolves to the project
   ok   session state lives outside the project and the worktree
 == shared notes: add / dedupe / budget / rm / replace / prune
-  ok   own note without a session is refused (exit 3) and points at --shared
+  ok   an --own note without a session is refused (exit 3) and points at the shared default
+  ok   add without a flag writes the project's shared notes, session or no session
   ok   add --shared writes [n1] into the project NOTES.md
   ok   duplicate detected
   ok   bad tag rejected
@@ -253,4 +254,4 @@
   ok   the token comes from Claude Code's own credentials file when there is no keychain item
   ok   no credentials anywhere is an error, never an empty token
 
-PASS=231 FAIL=0  (tmp: /tmp/longrun-test.vpY9dg)
+PASS=232 FAIL=0  (tmp: /tmp/longrun-test.T1SNYy)

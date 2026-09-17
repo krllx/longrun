@@ -37,7 +37,7 @@ echo "== S1: a new session orients itself in the project (shared picture + who i
 cd "$WT_E"; start $A "$WT_E" startup >/dev/null
 as $A add --shared -t pin "PR E = 15526210, branch EDAINAPP-1375-screen, opened 2026-09-04" >/dev/null
 as $A add --shared -t decision "STQ v2 over v1 for payment callbacks: v1 needs a TPS ticket per env" >/dev/null
-as $A add -t dead "own: LC client path gives 400 whatever the body; bdui-catalog testing lacks the screen" >/dev/null
+as $A add --own -t dead "own: LC client path gives 400 whatever the body; bdui-catalog testing lacks the screen" >/dev/null
 as $A log "PR 15526210 opened" >/dev/null
 stop $A "$WT_E" "PR E opened, waiting for reviewers"
 D="$(cd "$WT_C" && start $B "$WT_C" startup)"
@@ -86,7 +86,7 @@ PY
 echo "== S4: two sessions started in the same directory keep separate own notes"
 cd "$HQ"; start $C "$HQ" startup >/dev/null
 CC=dddddddd-0000-4000-8000-000000000004; start $CC "$HQ" startup >/dev/null
-as $C add -t ctx "C's framing: only the testing checklist" >/dev/null; as $CC add -t ctx "CC's framing: the RFC for billing" >/dev/null
+as $C add --own -t ctx "C's framing: only the testing checklist" >/dev/null; as $CC add --own -t ctx "CC's framing: the RFC for billing" >/dev/null
 check "S4.1 each has its own notes file" "grep -q \"C's framing\" '$SESS/cccccccc/notes.md' && grep -q \"CC's framing\" '$SESS/dddddddd/notes.md' && ! grep -q \"CC's\" '$SESS/cccccccc/notes.md'"
 check "S4.2 and the shared file is one" "as $C notes --shared | grep -q 'PR C = 15473925' && as $CC notes --shared | grep -q 'PR C = 15473925'"
 S4="$(as $C status)"; check "S4.3 status lists both by key with their own-note counts" "echo \"\$S4\" | grep 'cccccccc' | grep -q 'notes=1' && echo \"\$S4\" | grep 'dddddddd' | grep -q 'notes=1'"
@@ -118,7 +118,7 @@ F=ffffffff-0000-4000-8000-00000000000f
 printf '{"sessionId":"local_desk-F","cliSessionId":"%s","forkedFromSessionId":"local_desk-A","cwd":"%s","title":"PR E: Шторка (fork)","isArchived":false,"lastActivityAt":1788779365999}' $F "$WT_E" > "$DSK/local_desk-F.json"
 D7="$(cd "$WT_E" && start $F "$WT_E" fork)"
 check "S7.1 the fork starts with a copy of the parent's own notes, in its own dir" "echo \"\$D7\" | grep -q 'LC client path' && test -f '$SESS/ffffffff/notes.md' && grep -q 'LC client path' '$SESS/ffffffff/notes.md'"
-as $F add -t fact "fork-only fact" >/dev/null
+as $F add --own -t fact "fork-only fact" >/dev/null
 check "S7.2 from then on the two diverge" "! grep -q 'fork-only' '$SESS/aaaaaaaa/notes.md'"
 
 echo "== S8: work is handed to the session that has the context for it"
