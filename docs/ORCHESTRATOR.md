@@ -1,9 +1,38 @@
 English | [Русский](ORCHESTRATOR.ru.md)
 
-# Orchestrator: the session that drives a project to its goal
+# Orchestrator: the session that coordinates the others and calls the human
 
-Status: design from 2026-09-08, stages 1 and 3 implemented 2026-09-09 (version 0.4.0, section 11).
-Built on the verified facts in section 7; anything unverified is marked explicitly.
+Status: design from 2026-09-08, stages 1 and 3 implemented 2026-09-09 (version 0.4.0, section 11),
+cut back to its present size in 0.6.0 (section 0 below). Built on the verified facts in section 7;
+anything unverified is marked explicitly.
+
+## 0. 0.6.0: what was removed, and why
+
+The layer was sold as "autonomous driving toward a goal". It is not that, and it does not need to be:
+driving **one** session toward a condition an evaluator can check is what Claude Code's own `/goal`
+does, with a real evaluator, which this has never had. What is left is what nothing else does -
+several windows, a board between them, and a dialog that reaches the human on top of whatever they are
+looking at.
+
+- **`budget`** (the 5-hour usage rule, section 6) is gone. It halted every session on this machine from
+  an undocumented endpoint and the OAuth token out of the login keychain: a version change breaks it, a
+  first tick greets the user with a Keychain dialog, and Claude Code enforces its own window anyway.
+  `longrun halt` stays for "stop everyone", which was the pain worth solving.
+- **`interrupt`** is gone. It killed another session's processes by walking the process tree, was never
+  verified inside the desktop app, and the human has Esc and Stop in that window. The orchestrator now
+  names the stuck window instead of offering to kill it.
+- **`fact`** is no longer a command: a fact is an item of the same `board.json` as a task, so it is
+  `longrun board add --fact "..."`, `board ls --facts`, `board ack F3 "decision"`.
+- **The watcher keeps two rules of five**: a tool running past `stuck_tool_min`, and an unanswered
+  permission prompt or dialog past `stuck_wait_min`. A turn over an hour is what a long normal turn
+  looks like; three identical FAILs are what the turn card already puts in front of that session, with
+  the command in it; a context near the window already reaches both the session and the orchestrator by
+  other paths. All three are still SESSIONS flags - shown, not reported as a fault.
+- **The duties block in the digest** is six lines. The rest moved into `longrun orchestrate help`,
+  which is where a session that has taken the role is already looking.
+
+Sections 6 and 12 below describe the budget rule as it was; they are kept as the record of why it
+existed and what replaced it, not as documentation of anything that runs.
 
 ## 1. Why
 
@@ -163,7 +192,7 @@ The watcher does not decide whether a fact matters: it records and wakes. To avo
 chat message, a rule has `--wake-on <regex>`: without a match the fact lands in the inbox and waits
 for the next wake-up.
 
-## 6. The 5-hour window budget
+## 6. The 5-hour window budget (REMOVED in 0.6.0, see section 0)
 
 Off by default (`budget_on: false`; `longrun budget on` turns it on, and `orchestrate start`
 offers it when several sessions start sharing one window). Policy: plan `pace` percent per hour
@@ -298,7 +327,7 @@ What is needed from the human after installation: `./install.sh`, once `/autocom
 
 Not included (next stages): the dialog in front of the windows (`longrun-ask`), the 5-hour window budget (after the endpoint probe), automatic fact sources, checking the confirmation hooks in the app.
 
-## 12. Implemented: stage 3, budget (2026-09-09, version 0.4.0)
+## 12. Implemented: stage 3, budget (2026-09-09, version 0.4.0; REMOVED in 0.6.0, see section 0)
 
 - `budget_scan` on every watcher tick: a sample from the endpoint no more often than `budget_check_every` (300 s), the verdict `budget_verdict` (window start = `resets_at - 5h`, expected = `budget_pace_pct_per_hour` x hours, violation = used >= `budget_factor` x expected, the first `budget_quiet_min` minutes of the window without a verdict);
 - on violation: `halt.json` with `kind: budget` (all projects), a report in `~/.claude/longrun/budget-report-<ts>.md` and into the socket/inbox of every orchestrator (used, elapsed, expected, until reset, week, live sessions with flags), a macOS notification, a line in the watcher's journal;

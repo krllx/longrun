@@ -48,13 +48,13 @@
   ok   env window wins over the setting
   ok   model windows: 200k for 4.6, 1M for Sonnet 5
 == watcher: stuck report once per episode, to the orchestrator
-  ok   tick: tool age and turn age reported
+  ok   tick: a long-running tool is reported, a long turn is not (most long turns are just long)
   ok   second tick: nothing new
   ok   flags clear when the condition does
-  ok   three identical FAILs in a row are reported as a loop
+  ok   three identical FAILs are a SESSIONS flag, not a stuck report (the turn card already puts them in front of that session)
 == orchestrate stop
   ok   only the holder (or --force) stops
   ok   stop clears the lock and its mirror
   ok   digest without an orchestrator still shows the board
 
-PASS=51 FAIL=0  (tmp: /tmp/longrun-orch.58vjcU)
+PASS=51 FAIL=0  (tmp: /tmp/longrun-orch.mcX9v5)

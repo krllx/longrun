@@ -56,12 +56,12 @@ OUT="$(turn $A)"; check "nothing repeats on the next turn" "! echo \"\$OUT\" | g
 LONGRUN_SESSION=$B "$LR" board done T1 --quiet >/dev/null 2>&1; OUT="$(turn $B)"; check "a session's own board change is not echoed back to it" "! echo \"\$OUT\" | grep -q 'BOARD changes'"
 
 echo "== facts: record, reach the orchestrator, ack"
-LONGRUN_SESSION=$B "$LR" fact "reviewer asks to rename field foo to informer_id" --task T2 --source review >/tmp/lo-out
+LONGRUN_SESSION=$B "$LR" board add --fact "reviewer asks to rename field foo to informer_id" --task T2 --source review >/tmp/lo-out
 check "fact F1 recorded and sent to the orchestrator" "grep -q 'F1 recorded -> orchestrator via inbox' /tmp/lo-out && grep -q '\"source\": \"review\"' '$L/board.json'"
-LONGRUN_SESSION=$B "$LR" fact "x" --source bogus >/dev/null 2>&1; check "bad source refused" "test $? -eq 2"
+LONGRUN_SESSION=$B "$LR" board add --fact "x" --source bogus >/dev/null 2>&1; check "bad source refused" "test $? -eq 2"
 D="$(LONGRUN_SESSION=$A "$LR" digest)"; check "orchestrator digest: role, FACTS unhandled, role text" "echo \"\$D\" | grep -q 'role=orchestrator' && echo \"\$D\" | grep -q 'FACTS unhandled (1)' && echo \"\$D\" | grep -q 'You are this project.s ORCHESTRATOR'"
 D="$(LONGRUN_SESSION=$C "$LR" digest)"; check "worker digest: ORCHESTRATOR line, BOARD, no FACTS block" "echo \"\$D\" | grep -q 'ORCHESTRATOR: .*aaaa1111' && echo \"\$D\" | grep -q 'BOARD (' && ! echo \"\$D\" | grep -q 'FACTS unhandled'"
-LONGRUN_SESSION=$A "$LR" fact ack F1 "relayed to B" >/dev/null; check "ack marks handled with the decision" "grep -q '\"ack\": \"relayed to B\"' '$L/board.json' && LONGRUN_SESSION=$A '$LR' fact ls | grep -q '(0 unhandled)'"
+LONGRUN_SESSION=$A "$LR" board ack F1 "relayed to B" >/dev/null; check "ack marks handled with the decision" "grep -q '\"ack\": \"relayed to B\"' '$L/board.json' && LONGRUN_SESSION=$A '$LR' board ls --facts | grep -q '(0 unhandled)'"
 
 echo "== halt / resume through PreToolUse"
 LONGRUN_SESSION=$A "$LR" halt "5h usage at 45% after 1.5h" >/dev/null
@@ -112,12 +112,13 @@ for f in glob.glob(sys.argv[1]+"/*/cccc3333/meta.json"):
     json.dump(m,open(f,"w"))
 PY
 rm -f "$L"/inbox/*msg-to-aaaa1111*
-"$LR" watch run --quiet; N1=$(ls "$L/inbox/" | grep -c 'from-longrun-watch'); check "tick: tool age and turn age reported" "grep -l 'STUCK?.*ya make -A.*running 4[5-7]m' '$L'/inbox/*watch* >/dev/null && grep -l 'turn running 7[0-2]m' '$L'/inbox/*watch* >/dev/null"
+"$LR" watch run --quiet; N1=$(ls "$L/inbox/" | grep -c 'from-longrun-watch'); check "tick: a long-running tool is reported, a long turn is not (most long turns are just long)" "grep -l 'STUCK?.*ya make -A.*running 4[5-7]m' '$L'/inbox/*watch* >/dev/null && ! grep -l 'turn running' '$L'/inbox/*watch* >/dev/null"
 "$LR" watch run --quiet; N2=$(ls "$L/inbox/" | grep -c 'from-longrun-watch'); check "second tick: nothing new" "test $N1 -eq $N2"
 post $C t10 >/dev/null; stop $C "done" >/dev/null; "$LR" watch run --quiet
 check "flags clear when the condition does" "! python3 -c \"import json;print(json.load(open('$CLAUDE_CONFIG_DIR/longrun/watch/state.json')).get('stuck'))\" | grep -q 'cccc3333'"
 for i in 1 2 3; do printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{"command":"ya make -tt"},"error":"Exit code 1\\nboom","tool_use_id":"f%s"}' "$C" "$P" "$i" | "$LR" hook PostToolUseFailure; done
-"$LR" watch run --quiet; check "three identical FAILs in a row are reported as a loop" "grep -l 'failed 3 times in a row' '$L'/inbox/*watch* >/dev/null"
+"$LR" watch run --quiet
+check "three identical FAILs are a SESSIONS flag, not a stuck report (the turn card already puts them in front of that session)" "! grep -l 'failed 3 times in a row' '$L'/inbox/*watch* >/dev/null && LONGRUN_SESSION=$A '$LR' orchestrate | grep -q 'fail x3'"
 
 echo "== orchestrate stop"
 LONGRUN_SESSION=$B "$LR" orchestrate stop >/tmp/lo-out 2>&1; RC=$?; check "only the holder (or --force) stops" "test $RC -eq 2"

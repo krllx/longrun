@@ -232,4 +232,4 @@
   ok   the flag beats both gates: notify_turn_end off and the Claude app in front
   ok   consume_important spends a counted flag and never goes below zero
 
-PASS=211 FAIL=0  (tmp: /tmp/longrun-test.0bFrWh)
+PASS=211 FAIL=0  (tmp: /tmp/longrun-test.9MvnKr)
