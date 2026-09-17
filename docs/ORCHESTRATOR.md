@@ -152,6 +152,8 @@ into the session's socket (or into the inbox), the dialog is held by a detached 
 
 ## 5a. Facts from outside: delivery and recording
 
+(0.6.0: every `longrun fact ...` below is now `longrun board add --fact ...`, `board ls --facts`, `board ack` - the same items of the same `board.json`, see section 0.)
+
 Delivery, both channels verified 2026-09-08:
 
 - the human writes straight into the orchestrator's chat, even while it is working: the message

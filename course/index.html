@@ -13,7 +13,7 @@
 <div class="layout">
 <nav class="side">
   <div class="brand">longrun <small>a mini course, 11 parts, about 15 minutes</small></div>
-  <div class="lang"><a href="ru/">Русский</a></div>
+  <div class="lang"><a href="ru/">Русский</a> · <a href="zh-CN/">简体中文</a> · <a href="ja/">日本語</a></div>
   <ol>
     <li><a href="#l0"><span class="num">0</span>Quick start</a></li>
     <li><a href="#l1"><span class="num">1</span>Why</a></li>
@@ -360,7 +360,7 @@ window.LR_I18N = { step: 'Step', of: 'of', prev: 'Back', next: 'Next',
   new LR.Quiz(document.getElementById('quiz'), [
     { stmt: '"<code>pytest -x</code> hangs: it waits for a real Redis, fixed by <code>REDIS_URL=fake://</code>"', ans: 'own', why: 'A dead end with its reason: the dead tag, own notes. Shared if another session could hit the same.' },
     { stmt: '"PR 42 = branch cart-total"', ans: 'shared', why: 'An identity with no expiry: pin, shared. Exactly what the session that says "the PR is not created yet" is missing.' },
-    { stmt: '"The rollout plan: six steps, four open questions, two rollback paths"', ans: 'doc', why: 'Too long for one line. It stays a file in the project, and `longrun doc add` leaves a pointer to it in the shared notes.' },
+    { stmt: '"The rollout plan: six steps, four open questions, two rollback paths"', ans: 'doc', why: 'Too long for one line. It stays a file in the project, and <code>longrun doc add</code> leaves a pointer to it in the shared notes.' },
     { stmt: '"The total() function is in cart/models.py:42"', ans: 'no', why: 'One grep returns this in a second. Do not write it.' },
     { stmt: '"The user asked not to touch the discounts UI until next week"', ans: 'own', why: 'Task framing from the human: ctx, own. Shared if it concerns the other sessions too.' },
     { stmt: '"The Stripe key for the sandbox comes from 1password, the one in env is stale"', ans: 'shared', why: 'A fact about the environment that cost effort and everyone needs: fact, shared.' },

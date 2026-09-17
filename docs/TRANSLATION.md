@@ -95,7 +95,7 @@ These are translated, and translated the same way every time.
 | watch (event watch) | `watch` (kept Latin) | ウォッチ | 워치 | 事件监听 |
 | message | сообщение | メッセージ | 메시지 | 消息 |
 | task | задача | タスク | 작업 | 任务 |
-| board | борд | ボード | 보드 | 任务板 |
+| board | доска | ボード | 보드 | 任务板 |
 | orchestrator | оркестратор | オーケストレーター | 오케스트레이터 | 编排器 |
 | fact | факт | 事実 | 사실 | 事实 |
 | halt (stop everything) | остановка всех сессий (`halt`) | 全停止 | 전체 중단 | 全部停止 |
@@ -112,7 +112,7 @@ These are translated, and translated the same way every time.
 | summary (what compaction leaves) | резюме | 要約 | 요약 | 总结 |
 | digest vs summary | дайджест vs резюме - never both резюме | ダイジェスト vs 要約 - never both 要約 | 다이제스트 vs 요약 - never both 요약 | 摘要 vs 总结 - never both 摘要 |
 | dead end | тупик | 行き止まり | 막다른 길 | 死胡同 |
-| watcher (the one watching sessions) | наблюдатель | 監視役 | 감시자 | 监视器 |
+| watcher (the one watching sessions) | смотритель | 監視役 | 감시자 | 监视器 |
 | delta (of the shared notes) | дельта | 差分 | 변경분 | 差异 |
 | polling | опрос | ポーリング | 폴링 | 轮询 |
 | cheat sheet | шпаргалка | チートシート | 치트 시트 | 速查表 |

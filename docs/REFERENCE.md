@@ -143,7 +143,7 @@ Caveats: stdout that parses as JSON is read as a hook decision object instead (a
 
 ## 5. Digest and budgets
 
-Composition, in order: the header `<longrun v… project=… session=<name> [<key>] source=…>`; MESSAGE (undelivered messages); `SHARED notes (project X) N entries used/cap`; `OWN notes (this session)`; `SESSIONS of project X` (up to 6 other sessions: name, key, state, scope, number of own notes, last reply; live ones first); `WATCH n pending`; `HANDOFF` (only after compaction: FAIL lines, `FOCUS:` from `/compact <text>`, `ASK:` the last requests, `FILES:`); the journal tail (after compaction, resume, `/clear`, fork and on a continued chain); a line about the archived summary; a command hint.
+Composition, in order: the header `<longrun v… project=… session=<name> [<key>] source=…>`; MESSAGE (undelivered messages); `SHARED notes (project X) N entries used/cap`; `OWN notes (this session)`; `SESSIONS of project X` (up to 6 other sessions: name, key, state, scope, number of own notes, last reply; live ones first); `WATCH n pending`; under an orchestrator also `ORCHESTRATOR`, `BOARD`, `YOUR TASK`, `FACTS unhandled`, the duties block and `ASKED` (section 11); `HANDOFF` (only after compaction: FAIL lines, `FOCUS:` from `/compact <text>`, `ASK:` the last requests, `FILES:`); the journal tail (after compaction, resume, `/clear`, fork and on a continued chain); a line about the archived summary; a command hint.
 
 Default budgets: shared notes 5000 bytes, own 3000, digest 9000 (the hook output limit in Claude Code is 10000 characters), sessions block 700, HANDOFF 1100, shared notes delta per turn 1200. On overflow the digest drops blocks in this order: watch, journal, the orchestrator's duties, sessions, ASKED, facts, board, HANDOFF.
 
@@ -187,7 +187,7 @@ Seven keys were retired in 0.6.0 and are now fixed numbers in the script: `stric
 | `notify_turn_end` (global only) | `off` | a notification when a session finishes a turn: `off`, `unfocused` (only while the Claude app is not the application in front), `always`. The app sends this event itself, but silent and with `interruptionLevel: passive`, so macOS files it into Notification Center without drawing a banner - this is the loud, clickable version of the same thing |
 | `autocompact_window` | 0 | where Claude Code auto-compacts, as set by `/autocompact N`; accepts `300k`, `1M`. 0 - follow Claude Code (the `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable, then `autoCompactWindow` in settings.json, then the model's window). The key is the user's intent: a hook cannot run `/autocompact`, so `onboard` compares it with settings.json and asks the user to type the command themselves |
 | `board_block_bytes`, `facts_block_bytes` | 900, 900 | room in the digest for the board and for unhandled facts |
-| `ctx_warn_before` | 50000 | how often to read the context size from the transcript; how many tokens before the auto-compact window to warn |
+| `ctx_warn_before` | 50000 | how many tokens before the auto-compact window to warn the session (the size itself is read from the transcript every fifth tool call, which is no longer a setting) |
 | `stuck_tool_min`, `stuck_wait_min` | 30, 10 | the watcher's two thresholds: a tool call still running, an unanswered permission prompt or dialog (minutes) |
 | `stuck_fail_streak` | 3 | identical FAILs in a row before the SESSIONS line says `fail x3` (a flag, not a report) |
 | `wake_on_stuck` | true | a stuck report starts a turn at the orchestrator (otherwise it lands in the inbox) |

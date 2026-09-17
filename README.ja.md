@@ -1,16 +1,17 @@
 [English](README.md) | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | 日本語 | [한국어](README.ko.md)
 
 <p align="center">
-  <img src="assets/hero.jpg" alt="longrun：compactionを生き延びる記憶" width="820">
+  <img src="assets/hero.jpg" alt="longrun：Claude Codeセッションのための記憶と協調" width="820">
 </p>
 
 <h1 align="center">longrun</h1>
 
 <p align="center">
   Claude Codeセッションのための記憶と協調。<br>
-  compaction（会話履歴が自動で要約されること）を生き延びるメモ。メッセージを送り合い、タスクを渡し合うセッション。<br>
-  取りこぼしのない待機：ポーリングループはなく、イベントの発火でセッションが目を覚ます。<br>
-  決めた目標までほかのセッションを導く1つのセッション。
+  プロジェクトの状態はディスクに残り、書いて整えるのはエージェント自身。<br>
+  どのセッションも、プロジェクトが何を知っていて、ほかに誰が作業しているかを見る。<br>
+  仕事はコンテキストを持っているセッションへ。待機は確実で、コストはゼロ。<br>
+  1つのセッションがほかをまとめ、人間にしか決められないときは人間に届く。
 </p>
 
 <p align="center">
@@ -27,7 +28,7 @@
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-329_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-326_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -55,7 +56,7 @@ curl -fsSL https://krllx.github.io/longrun/install.sh | bash
 - `~/.claude/skills/longrun/`と、シンボリックリンク`~/.local/bin/longrun`。
 - ユーザースコープのMCPサーバー`longrun`(`claude mcp add`)。`ask`と`notify`のツールはこのサーバーが提供します。
 - **バックグラウンドのタイマー**、5分ごと：macOSではlaunchd agent、Linuxではsystemd user timerかcrontabの1行。登録したウォッチを確認し、セッションの様子を見ます。数回のシェルチェックだけで、モデルもtokenも使わず、登録した条件のどれかが成立したときだけセッションを起こします。`--no-timer`で外せます。
-- **デスクトップ通知**、インストーラーの質問に「はい」と答えた場合：macOSでは`terminal-notifier`がなければ`brew install terminal-notifier`、`~/.claude/longrun/notifier/`以下に通知を送るためのバンドル、そしてmacOSの権限ダイアログを出すためのテスト通知が1つ。Linuxでは`notify-send`があるかを確認するだけです。`--notify`と`--no-notify`は、この質問にあらかじめ答えておくためのものです。
+- **デスクトップ通知**、インストーラーの質問に「はい」と答えた場合：macOSでは`terminal-notifier`がなければ`brew install terminal-notifier`、そしてmacOSの権限ダイアログを出すためのテスト通知が1つ。Linuxでは`notify-send`があるかを確認するだけです。`--notify`と`--no-notify`は、この質問にあらかじめ答えておくためのものです。
 
 macOSまたはLinux、Claude Code、python3 3.9以上が必要です。cloneからインストールする場合も同じ[`install.sh`](install.sh)です。
 
@@ -75,7 +76,7 @@ cd ~/my-project && longrun init && claude "set up longrun"
 <summary><b>デスクトップ通知</b>：何のためにあり、インストーラーは何を尋ねるのか</summary>
 
 - **なぜ**：全停止、発火したウォッチ、ターンの終了は、通知がなくてもセッションに届きます。バナーは、別のウィンドウを見ている*人間*が気づくための手段です。longrunが通知に依存することはありません。
-- **macOS**：Homebrew経由の`terminal-notifier`（OS標準の手段ではバナーが表示されません）と、権限の確認が1回。インストール時に断った場合は、あとから`longrun notify setup`で設定できます。
+- **macOS**：Homebrew経由の`terminal-notifier`（OS標準の手段ではバナーが表示されません）と、権限の確認が1回。インストール時に断った場合は、あとから`brew install terminal-notifier`で入れられます。
 - **Linux**：`notify-send`(`libnotify`)。たいていのデスクトップ環境にはすでに入っています。
 
 `longrun notify --test`は、通知が実際に画面へ届くかを確かめます。見ておく価値のある設定が2つあります。`notify_turn_end unfocused`（Claudeのウィンドウが前面にないときにセッションがターンを終えるとバナーを出す）と、絶対に見逃したくない1つのセッションのための`longrun important on|next`です。エージェントが呼ぶ`notify`ツールは、インストーラーが登録する`longrun` MCPサーバーが提供します。macOS特有の癖も含めた全体像は[docs/REFERENCE.md](docs/REFERENCE.md)にあります。
@@ -84,20 +85,33 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 ## ひとことで
 
-**何も言わなくても、最初のセッションから**：エージェントは行き止まり・決定・事実をメモとしてディスクに書き、hookがそれをcompaction、`/clear`、resumeのたびにコンテキストへ戻します。hookは要約するモデルにも何を残すかを伝えます。毎ターン、プロジェクトの他のセッションが何を変えたかが表示されます。
+**何も言わなくても、最初のセッションから**：プロジェクトはディスク上にメモの束を持ちます。行き止まり・決定・事実を、エージェント自身が書き、読み直し、整理します。どのセッションも、そこに何が書かれていて、ほかにどんなセッションがあり、それぞれが最後に何をしたかを知った状態で始まり、毎ターン、その後ほかのセッションが何を変えたかが表示されます。
 
-**頼んだとき、またはエージェントが必要だと判断したとき**：「PRがマージされたら教えて」（待つ間tokenを使わないウォッチ）、セッション間のメッセージとタスク、見逃したくないセッションがターンを終えたときの通知、1つのセッションが他のセッションを、決めた目標へ導く動き。
+**頼んだとき、またはエージェントが必要だと判断したとき**：仕事はすでにコンテキストを持っているセッションへ渡されます。「PRがマージされたら教えて」は、待つ間tokenを使わず取りこぼしもないウォッチになります。見逃したくないセッションについては通知が人間に届きます。1つのセッションがほかのセッションを決めた目標へ向けてまとめ、人間にしか解けない詰まりがあれば目の前にダイアログを出します。
+
+**そして副産物として**：ディスク上のメモは劣化しないので、hookがcompaction（会話履歴が自動で要約されること）、`/clear`、resumeのたびにそれをコンテキストへ戻します。この点の重みは以前より小さくなりました。同じhookが要約するモデルにも何を残すかを伝えるようになり、普通のcompactionでも失われるものが減ったからです。
 
 ## なぜ
 
 | longrunがない場合 | longrunがある場合 |
 |---|---|
-| compactionは履歴を要約に圧縮します。真っ先に消えるのは、どのアプローチをなぜ捨て、なぜこの道を選んだのかという決定の理由です。30分後、エージェントは自分がすでに取り消した修正をまた提案します。 | **ディスク上のメモ**。行き止まり・決定・事実を1行ずつ。共有メモは全セッションから見え、自分のメモはcompaction、`/clear`、resumeのたびに戻ってきます。 |
-| 2つ目のセッションは1つ目の存在を知りません。片方がPRを作ったのに、もう片方は「PRはまだ作られていない」と言います。 | **メッセージとタスク**。セッションがメッセージを送るかタスクを渡すと、相手のセッションにはユーザーのターンとして届きます。 |
+| セッションが突き止めたことは、すべてその会話の中だけに残ります。次のセッション、つまり明日のセッションや隣のウィンドウのセッションは、何も知らないところから始まり、いま何が起きているのかを人間に尋ねます。 | **覚えているプロジェクト**。プロジェクトごとに1つの`.longrun/`。中のメモを書き、読み直し、整理するのはエージェント自身です。どのセッションもそのメモから始まり、ほかに誰が作業していて、それぞれが最後に何をしたかも分かります。 |
+| 2つ目のセッションは1つ目の存在を知りません。片方がPRを作ったのに、もう片方は「PRはまだ作られていない」と言います。 | **メッセージとタスク**。仕事はすでにコンテキストを持っているセッションへ渡り、相手にはユーザーのターンとして届きます。止まっているセッションにも渡せます。そのメッセージはプロジェクトの受信箱で待ちます。 |
 | 「PRがマージされたら教えて」は、tokenを浪費するポーリングループか、決めた時間だけ待つsleepになります。sleepが明けたころには、イベントはとうに過ぎているか、まだ来ていません。 | **ウォッチ**。バックグラウンドのタイマーが5分ごとにモデルなしで条件を確かめ、成立したらセッションを起こします。確実で、反応が速く、コストはゼロです。 |
-| 1つのプロジェクトに5つのセッション。何が終わり、何が詰まり、次が何かを知っているのは人間だけです。 | **オーケストレーター**。1つのセッションがボードを持ち、タスクを配り、停滞しているセッションを見つけ、どうしても必要なときだけダイアログで人間に尋ねます。 |
+| 1つのプロジェクトに5つのセッション。何が終わり、何が詰まり、次が何かを知っているのは人間だけで、そのうちの1つが自分の返事を待っていることに気づけるのも人間だけです。 | **オーケストレーター**。1つのセッションがほかのセッションのためにボードを持ち、停滞しているセッションを見つけ、人間にしか決められないときは全ウィンドウの手前にダイアログを出します。 |
+| compactionは履歴を要約に圧縮します。真っ先に消えるのは理由です。どのアプローチをなぜ捨て、なぜこの道を選んだのか。 | **ディスク上のメモは劣化しません**。hookはcompactionの後にそれをコンテキストへ戻します。あわせて要約するモデルにも何を残すかを伝えるので、compaction自体で失われるものも減ります。 |
 
 pythonファイル1つ、依存なし。
+
+## Claude Codeにすでにあるもの
+
+longrunが受け持つのは、1つのターンや1つのセッションより長く残るものです。まずは組み込みの仕組みを見てください。
+
+- **1つのセッションを、確かめられる1つの条件へ向けて動かす** -> `/goal`。条件が成立したことを別の評価役が確認するまで、そのセッションを進め続けます。longrunにあるのはボードと説得であって、評価役ではありません。
+- **1つのターンの中で作業を分ける** -> subagentとworkflow。並行して動き、合流し、ターンが終われば消えます。
+- **タスクそのものより長く残るもの**（ユーザーが誰か、どう仕事を進めるか、いつもの約束事）-> Claude Codeの自動メモリ。
+- **いま動いているセッションへのメッセージ** -> 組み込みの`SendMessage`。動いているセッションの一覧は`ListAgents`が出します。
+- **複数のウィンドウで、何時間も何日も** -> longrun。どのターンよりも長く残る状態、止まっていても書き込めるセッション、tokenを使わない待機、そしてほかをまとめる1つのセッション。
 
 ## セッションが協調する4つの方法
 
@@ -106,17 +120,20 @@ pythonファイル1つ、依存なし。
 
 ### 1. ディスク上の共有ドキュメント
 
-プロジェクトごとに1つの`.longrun/`が、全セッションから見えるメモを持ちます。各セッションはリポジトリのツリーの外に、自分のメモも持ちます。hookはcompaction、`/clear`、resumeのたびに両方を戻し、毎ターン他のセッションが何を変えたかを表示します。
+プロジェクトごとに1つの`.longrun/`が、全セッションから見えるメモを持ちます。メモは何も指定しなければここへ入ります。自分のところだけに留めたいときは`--own`で、リポジトリのツリーの外に置かれます。hookはcompaction、`/clear`、resumeのたびに両方を戻し、毎ターン他のセッションが何を変えたかを表示します。
 
 ```bash
-longrun add --shared -t pin "PR 42 = branch feature/checkout"     # for every session
-longrun add -t dead "retry on 429 does not help, limit is per org"  # for this one
-longrun recall 429                                                  # search everything
+longrun add -t pin "PR 42 = branch feature/checkout"           # shared: every session sees it
+longrun add --own -t ctx "only the checkout drawer, not the cart"  # this conversation only
+longrun doc add research/plan.md "the rollout plan and what is open"
+longrun recall 429                                             # notes, those files, journals, transcripts
 ```
 
 ### 2. コンテキストを持っているセッションへの委譲
 
 他のセッションへのメッセージは、相手のセッションにはユーザーのターンとして届きます。動いているセッションはsocket経由ですぐに受け取ります。止まっているセッションは、次のターンでプロジェクトの受信箱から受け取ります。`--resume`を付けたときだけその場で起きますが、バックグラウンドで`claude -p`を実行するためtokenを使います。セッションの名前は、サイドバーに表示されているタイトルです。
+
+この前半はClaude Code自身にもあります。`SendMessage`は**動いている**セッションへ書き込み、`ListAgents`は動いているセッションを一覧にします。`longrun send`が足すのは残りの部分です。止まっているセッションへ送れること（メッセージは受信箱で待ちます）、session idではなくサイドバーのタイトルで宛先を指定できること、`--resume`でheadlessに起こせること、そして発火したウォッチとボードが通るのと同じ経路であることです。ウォッチもボードも、代わりにツールを呼んでくれるモデルを持っていません。
 
 ```bash
 longrun send "PR 43: payments" "PR 42 merged, rebase onto main"
@@ -134,17 +151,20 @@ longrun watch add --then "check the deploy" -- at 10:00
 
 チェックの種類：`pr-merged`（`gh`経由のGitHub）、`pr-status`、`at`、`file`、`http`、`cmd`。
 
-### 4. オンにして初めて働く自律：1つのセッションが他を導く
+### 4. 1つのセッションが他をまとめ、必要なときは人間に届く
 
 1つのセッションがオーケストレーターの役を引き受け、ボードを持ちます。ボードに載るのは目標、タスク、外から来た事実です。作業役のセッションはタスクを取り、終わらせ、詰まったタスクにはブロックの印を付けます。ボードが変わるたびにオーケストレーターが目を覚まし、次のタスクを配り、詰まりを解消し、あるいは全ウィンドウの手前に出るダイアログで人間に尋ねます。ポーリングはせず、セッションを自分で立ち上げることもしません。デスクトップアプリではクリックすればセッションが開くチップ（ボタン）を残し、ターミナルでは、自分で貼り付けるための最初の1行を渡します。
 
+これは複数のウィンドウをまたぐ協調と、人間への連絡線であって、自律ではありません。**1つ**のセッションを、評価役が確かめられる条件へ向けて動かすのは`/goal`の役目です。
+
 ```bash
-longrun orchestrate start --goal "ship the checkout drawer"    # in the driving session
+longrun orchestrate start --goal "ship the checkout drawer"    # in the coordinating session
 longrun board take T7; longrun board done T7 "PR 42 merged"    # in a worker
+longrun board add --fact "reviewer wants the field renamed"    # something learned outside
 longrun ask "Merge PR 42?" --options "Yes,No"                  # a dialog, answered inline
 ```
 
-詰まったプロセスの強制終了(`longrun interrupt`)、全停止(`longrun halt`)、その解除といった主導権は、人間が握ったままです。監視役とオーケストレーターは提案するだけです。デフォルトではオフで、自分で有効にして初めて働くものもあります。5時間の使用量予算(`longrun budget on`)は、5時間枠の消費が予定より早く進んだときにすべてを止め、どうするかを尋ねます。
+主導権は人間が握ったままです。オーケストレーターと監視役は提案するだけで、できるのはセッションへメッセージを送ること、人間の前に質問を出すこと、そして`longrun halt`で全セッションを一度に止めることだけです。停止を解除できるのは人間だけです。動いているツールを殺すものは何もありません。詰まったウィンドウを止めるのは人間の役目で、Escで止めます。
 
 ## 仕組み
 
@@ -188,7 +208,7 @@ worktreeは`longrun link <project>`で紐づけます。worktree自体はメモ�
 
 ## 何を書くか
 
-判断基準は1つ。**コマンド1回、ファイルの読み取り1回、grep1回で取り戻せるか**？取り戻せるなら書きません。
+判断基準は1つ。**コマンド1回、ファイルの読み取り1回、grep1回で取り戻せるか**？取り戻せるなら書きません。1行に収まらないほど長いものは、メモではなくファイルにします。メモにはそのファイルを指し示す1行だけを置きます：`longrun doc add research/plan.md "the rollout plan and what is still open"`。どのセッションも開始のたびにこの1行を目にし、必要になったときだけファイルを開きます。
 
 | タグ | 何を | どこへ |
 |---|---|---|
@@ -197,18 +217,21 @@ worktreeは`longrun link <project>`で紐づけます。worktree自体はメモ�
 | `fact` | 手間をかけて分かった環境の事実 | 共有 |
 | `pin` | 有効期限のない事実。PR番号、ブランチ、ホスト | 共有 |
 | `ctx` | 人間から与えられたタスクの前提 | 自分のメモ |
-| `todo` | エージェントが後で済ませるべき短い作業 | 自分のメモ |
+| `doc` | 1行に収まらないファイルを指し示す1行：`longrun doc add <path> "what is in it"` | 共有 |
 
-マイルストーン（push済み、PR作成、テストが緑）はジャーナルへ：`longrun log "PR opened"`。タスクより長く残るもの（ユーザーが誰か、どう仕事を進めるか）は、longrunではなくClaude Codeの自動メモリへ入れます。
+事実でなくなったメモを、みんなに黙って消すことはしません。`longrun stale n12 "staging moved to vla-07"`が古くなった印をつけると、その印は全セッションから見え、次の片付けは印のついたエントリから先に処理します。`longrun mute n12`はまったく別の機能で、*自分の*ダイジェストからその行を外すだけです。ほかの誰にとっても何も変わりません。
+
+機械的な記録はジャーナルが勝手に残します。何を編集し、何が失敗し、いつcompactionが起きたか。ですから進捗の実況は書き留めるようなものではありません。タスクより長く残るもの（ユーザーが誰か、どう仕事を進めるか）は、longrunではなくClaude Codeの自動メモリへ入れます。
 
 ## コマンド
 
 ```bash
 longrun init [--external] | link <project> | where | onboard | config
-longrun add [--shared] -t TAG "..." | rm | replace | notes | prune | log "..." | recall <term>
+longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune | recall <term>
+longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
-longrun orchestrate start --goal "..." | board | fact | ask | halt | resume | interrupt | budget
+longrun orchestrate start --goal "..." | board [add --fact|ack] | ask | halt | resume
 ```
 
 全フラグ、ファイル形式、Claude Codeについて検証した事実は[docs/REFERENCE.md](docs/REFERENCE.md)。オーケストレーターの設計と残っている課題は[docs/ORCHESTRATOR.md](docs/ORCHESTRATOR.md)。
@@ -218,7 +241,7 @@ longrun orchestrate start --goal "..." | board | fact | ask | halt | resume | in
 <details>
 <summary><b>よくある質問</b></summary>
 
-**PRはあるのに、エージェントが「PRはまだ作られていない」と言う**。その事実が共有メモにありません：`longrun add --shared -t pin "PR 42 = branch feature/checkout"`。
+**PRはあるのに、エージェントが「PRはまだ作られていない」と言う**。その事実が共有メモにありません：`longrun add -t pin "PR 42 = branch feature/checkout"`。
 
 **worktreeのセッションがプロジェクトのメモを見られない**。`longrun where`にプロジェクトが出る必要があります。"not initialised"と出たら、そのworktreeで`longrun link <project>`を実行します。
 
@@ -230,10 +253,10 @@ longrun orchestrate start --goal "..." | board | fact | ask | halt | resume | in
 ## 開発
 
 ```bash
-bash tests/run.sh            # 202 regression checks, no API calls
-bash tests/scenarios.sh      # 30 scenarios, one per goal
-bash tests/orchestrator.sh   # 67: the orchestrator layer
-bash tests/ask.sh            # 30: the dialog and the MCP server
+bash tests/run.sh            # 211 regression checks, no API calls
+bash tests/scenarios.sh      # 37 scenarios, one per goal
+bash tests/orchestrator.sh   # 51: the orchestrator layer
+bash tests/ask.sh            # 27: the dialog and the MCP server
 ```
 
 インストーラーはファイルを`~/.claude/skills/longrun/`にコピーします。checkoutから読み込まれるものはありません。hookはイベントごとに別プロセスなので、動いているセッションも再起動なしで更新を拾います。
