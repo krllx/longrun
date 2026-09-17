@@ -29,7 +29,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.6.2"
+VERSION = "0.6.3"
 HOME = os.path.expanduser("~")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
@@ -656,18 +656,54 @@ def load_doc_stamps(store):
     return d if isinstance(d, dict) else {}
 
 
+DOC_HASH_MAX_BYTES = 4 * 1024 * 1024   # past this the mtime and the size are the identity; hashing a file
+                                       # this big on every digest costs more than the answer is worth
+
+
+def doc_fingerprint(path):
+    """(mtime, size, sha) of a doc file, or None when it is not there.
+
+    The hash is what makes a branch switch readable. `git checkout` rewrites the mtime of every file it
+    touches, so mtime alone reads as "changed" even when the checkout put back exactly the bytes the
+    description was written against - and then every doc pointer in the digest carries a stale warning
+    that means nothing, on every branch switch, in every worktree. The hash is only ever computed once the
+    mtime has moved, so the steady state stays one `stat` per entry."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    sha = ""
+    if st.st_size <= DOC_HASH_MAX_BYTES:
+        h = hashlib.sha1()
+        try:
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(262144), b""):
+                    h.update(chunk)
+            sha = h.hexdigest()[:12]
+        except OSError:
+            sha = ""
+    return int(st.st_mtime), int(st.st_size), sha
+
+
+def same_doc_bytes(fp, st):
+    """Is the file `fp` describes byte for byte the one the stamp `st` was taken on?"""
+    return bool(fp and fp[2] and st.get("sha") and fp[2] == st["sha"] and fp[1] == st.get("size"))
+
+
 def stamp_doc(store, e):
-    """Remember the file's mtime at the moment its description was written.
+    """Remember what the file was at the moment its description was written.
 
     Without this the digest could only compare the file against the note's DATE, and a note carries no
     time of day - so a file changed by another session a few hours after the pointer was written, on the
     same day, read as unchanged. That is the common case, not an edge one: the session that would benefit
     is the one starting a fresh window while somebody else has just rewritten the material."""
     d = load_doc_stamps(store)
-    try:
-        d[str(e["id"])] = {"mtime": int(os.path.getmtime(doc_path(store, e))), "at": ts()}
-    except OSError:
-        d.pop(str(e["id"]), None)
+    k = str(e["id"])
+    fp = doc_fingerprint(doc_path(store, e))
+    if fp:   # the file is here, so any "missing since" clock on this entry starts over
+        d[k] = {"mtime": fp[0], "size": fp[1], "sha": fp[2], "at": ts()}
+    else:
+        d.pop(k, None)
     write_json(docs_stamp_path(store), d)
 
 
@@ -682,13 +718,18 @@ def sweep_doc_stamps(store):
 
 def doc_changed_at(store, e, stamps=None):
     """When the file was last written, if that is after the description was. None = not after, or no file."""
+    p = doc_path(store, e)
     try:
-        mt = os.path.getmtime(doc_path(store, e))
+        mt = os.path.getmtime(p)
     except OSError:
         return False, None       # (file exists, changed at)
     st = (stamps if stamps is not None else load_doc_stamps(store)).get(str(e["id"])) or {}
     if st.get("mtime") is not None:
-        return True, (_dt.datetime.fromtimestamp(mt) if mt > int(st["mtime"]) + DOC_STAMP_SLACK else None)
+        if mt <= int(st["mtime"]) + DOC_STAMP_SLACK:
+            return True, None
+        if same_doc_bytes(doc_fingerprint(p), st):
+            return True, None    # a branch switch, a `touch`, a rewrite with the same bytes: not a change
+        return True, _dt.datetime.fromtimestamp(mt)
     # no stamp: a project written by an older version. Fall back to the note's date, which has no time of
     # day in it, so only a change a whole day newer than the line can be told apart from the line itself.
     d = _dt.datetime.fromtimestamp(mt)
@@ -2668,6 +2709,16 @@ SEARCH_TOOLS = ("Grep", "Glob", "WebSearch")  # carry an explicit query and noth
                                               # recall hint can read the query; they move no counter, because
                                               # "40 tool calls since the last note" was never about looking around
 RUNNING_TOOLS = ("Bash", "PowerShell", "Agent", "Task", "Workflow")  # tools that can run long; MCP tools too
+# The PostToolUse matcher of hooks.json, mirrored here so `PostToolBatch` can count the calls it does NOT
+# fire for. A hook is a process per call, so `Read` is deliberately not in the matcher - which meant a turn
+# spent entirely reading had a measured size of zero, and the read-only turn card could never see the very
+# population it was built for. tests/run.sh checks this tuple against the matcher string in hooks.json.
+HOOKED_TOOLS = tuple(EDIT_TOOLS) + RUNNING_TOOLS + SEARCH_TOOLS
+
+
+def hooked_tool(name):
+    """Does a PostToolUse hook fire for this tool? MCP tools match by prefix, as `mcp__.*` does."""
+    return name in HOOKED_TOOLS or (name or "").startswith("mcp__")
 
 
 RESUME_RE = re.compile(r"(?:^|[\s;&|(\"'])(?:[\w./-]*/)?longrun\s+resume\b")
@@ -4807,17 +4858,33 @@ def docs_delta(store, m, budget, mine_ok=True):
     docs = doc_entries(store)
     if not docs:
         return ""
-    cur = {}
+    seen = m.get("docs_seen")
+    seen = seen if isinstance(seen, dict) else None
+    cur, moved = {}, set()
     for e in docs:
+        k = str(e["id"])
         try:
-            cur[str(e["id"])] = int(os.path.getmtime(doc_path(store, e)))
+            mt = int(os.path.getmtime(doc_path(store, e)))
         except OSError:
             continue
-    seen = m.get("docs_seen")
+        was = (seen or {}).get(k)
+        was = was if isinstance(was, dict) else None       # an older meta held a bare mtime
+        if was and int(was.get("mtime", -1)) == mt:
+            cur[k] = was                                   # untouched since we looked: nothing to hash
+            continue
+        fp = doc_fingerprint(doc_path(store, e))
+        if not fp:
+            continue
+        if was and same_doc_bytes(fp, was):   # the mtime moved but the bytes did not - a branch switch.
+            cur[k] = dict(was, mtime=fp[0])   # remember the new mtime so the next turn does not hash it
+            continue                          # again, and say nothing: there is nothing to re-read
+        cur[k] = {"mtime": fp[0], "size": fp[1], "sha": fp[2]}
+        if was:
+            moved.add(k)
     if seen is None:
         m["docs_seen"] = cur
         return ""
-    changed = [e for e in docs if str(e["id"]) in cur and str(e["id"]) in seen and cur[str(e["id"])] != seen[str(e["id"])]]
+    changed = [e for e in docs if str(e["id"]) in moved]
     if not changed:
         m["docs_seen"] = cur
         return ""
@@ -4846,9 +4913,12 @@ def docs_delta(store, m, budget, mine_ok=True):
         lines.append(line)
         used += n
         shown[str(e["id"])] = cur[str(e["id"])]
-    for k, v in cur.items():          # a doc that did not change, or is new, needs no line
-        shown.setdefault(k, v)
-    for k in [k for k in shown if k not in cur]:
+    for k, v in cur.items():
+        if k in moved:
+            shown.setdefault(k, v)  # changed but not shown yet: keep the old mark, so it is reported later
+        else:
+            shown[k] = v            # unchanged, new, or the same bytes under a new mtime: take it as it is,
+    for k in [k for k in shown if k not in cur]:   # or a branch switch would be re-hashed every turn
         shown.pop(k)
     m["docs_seen"] = shown
     return "\n".join(lines)
@@ -4863,24 +4933,57 @@ RECALL_PER_TURN = 2        # hints per turn, counted from the turn boundary. The
                            # stops the same pointer twice; this stops a wide search turning into a lecture
 RECALL_HINT_LINES = 2      # lines quoted per hint; the rest is what `longrun recall` is for
 RECALL_SCAN_BYTES = 600000  # hard ceiling on what one hint may read, whatever the project holds
+RECALL_SPECIFIC_LEN = 12   # a plain word this long names something on its own
 RECALL_TAGS = ("dead", "decision", "fact", "pin", "doc")   # what another session is owed; `ctx` and `todo`
 RECALL_TAG_RE = re.compile(r"\[[ns]\d+\]\s+\d\d-\d\d\s+(\w+)")   # are one conversation's own bookkeeping
+RECALL_ESCAPE_RE = re.compile(r"\\[A-Za-z]")   # \b \s \d \w: the letter is regex syntax, not part of a word
+RECALL_WORD_RE = re.compile(r"[^0-9A-Za-z_Ѐ-ӿ]+")
+RECALL_NAMED_TOOLS = ("Grep", "Glob")   # the pattern IS the string the session is looking for, verbatim
 MIDTURN_DELTA_TOOLS = 5   # tool calls between two mid-turn checks of what the other sessions changed
 
 
+def term_names_something(raw):
+    """Does this word name a thing, or is it just a word?
+
+    An identifier names a thing: it carries an underscore, a digit or an internal capital, or it is simply
+    long. `payment_callback`, `PostToolBatch` and `deserialization` name the question; `native`, `review`
+    and `english` are English. The distinction only matters for words lifted out of a SENTENCE - a subagent's
+    one-line description, a web query - where most of the words are there to make the sentence and not to
+    name anything. A replay of this project's history showed why: a description like "Native Japanese
+    review of README.ja.md" is six ordinary words fired at every note in the project."""
+    if "_" in raw or any(c.isdigit() for c in raw):
+        return True
+    if any(c.isupper() for c in raw[1:]):
+        return True
+    return len(raw) >= RECALL_SPECIFIC_LEN
+
+
 def search_terms(calls):
-    """What the session said out loud it is looking for, from a batch of [(tool, tool_input)].
+    """What the session said out loud it is looking for: [(term, names_something, verbatim)] for a batch
+    of [(tool, tool_input)].
 
     Only tools that carry an explicit query. A `Read` has no term in it, and a path is not one either:
     guessing intent from a path is exactly how this kind of hint turns into noise - and by then the
     session is already looking in the right place, which is the case that needs no help.
 
+    Two kinds of query, and they deserve very different trust.
+
+    A `Grep`/`Glob` pattern is the string the session typed to find something (`verbatim`). One word of
+    it IS the question, so it stands on its own; several words of it are a co-occurrence the session
+    asked for, so they stand together.
+
+    A subagent's description or a web query is a SENTENCE, and most of a sentence is there to be a
+    sentence. Only the words that name something carry the question - `CLAUDE_ENV_FILE` does, `native`
+    and `review` do not - and pairing two ordinary words is no help either, because a shared note runs to
+    400 characters and almost any English sentence has two of its words somewhere in one.
+
     `WebSearch`'s parameter name is not in the published tool reference, so it is looked up the same
     defensive way the running-tool tracker does it, by trying the names a query could plausibly have."""
-    out = []
+    out, seen = [], set()
     for tool, ti in calls:
+        verbatim = tool in RECALL_NAMED_TOOLS
         raw = ""
-        if tool in ("Grep", "Glob"):
+        if verbatim:
             raw = str(ti.get("pattern") or "")
         elif tool == "WebSearch":
             raw = str(ti.get("query") or ti.get("prompt") or "")
@@ -4888,11 +4991,15 @@ def search_terms(calls):
             raw = str(ti.get("description") or "")
         if not raw:
             continue
-        for w in re.split(r"[^0-9A-Za-z_Ѐ-ӿ]+", raw):
+        words = []
+        for w in RECALL_WORD_RE.split(RECALL_ESCAPE_RE.sub(" ", raw)):  # \bfoo\b must not yield "bfoo"
             w = w.strip("_")
-            if len(w) < RECALL_MIN_TERM or w.isdigit() or w.lower() in out:
+            if len(w) < RECALL_MIN_TERM or w.isdigit() or w.lower() in seen:
                 continue
-            out.append(w.lower())
+            seen.add(w.lower())
+            words.append(w)
+        alone = verbatim and len(words) == 1   # the whole pattern was this one word
+        out += [(w.lower(), alone or term_names_something(w), verbatim) for w in words]
     return out[:RECALL_MAX_TERMS]
 
 
@@ -4952,14 +5059,19 @@ def recall_hint(store, m, calls):
     context, only for terms specific enough to mean something (a term on more than RECALL_COMMON_HITS
     lines is a word, not a term), at most RECALL_PER_TURN times in a turn, and never twice for the same
     term and file."""
-    terms = search_terms(calls)
-    if not terms:
+    pairs = search_terms(calls)
+    if not pairs:
         return ""
     if int(m.get("recall_hints") or 0) >= RECALL_PER_TURN:
         return ""
     files = recall_scan_files(store, m)
     if not files:
         return ""
+    names = {t: n for t, n, _v in pairs}
+    verbatim = {t: v for t, _n, v in pairs}
+    # A term that names something is reported first: with two of them on a line, the one worth printing
+    # is the one that named the question, not whichever happened to come earlier in the sentence.
+    terms = sorted((t for t, _n, _v in pairs), key=lambda t: 0 if names[t] else 1)
     pat = re.compile("|".join(re.escape(t) for t in terms), re.I)
     per_term, budget = {}, RECALL_SCAN_BYTES
     for f, kind in files:
@@ -4984,9 +5096,21 @@ def recall_hint(store, m, calls):
                 tag = RECALL_TAG_RE.search(line)
                 if not tag or tag.group(1) not in RECALL_TAGS:
                     continue     # ctx and todo are one conversation's bookkeeping, not the project's knowledge
-            elif len(hit) < 2:
-                continue         # prose: one word lands by accident, two on the same line much less often
-            for t in hit:
+            # One rule for every kind of material, and it is about the TERM rather than the file it is in.
+            # A term that names something answers wherever it is found - which is what finally lets a
+            # one-word `Grep` reach a doc file, and the doc files are the whole point of the lazy layer.
+            # Failing that, the line must be a co-occurrence the session actually asked for: two words of
+            # one pattern. Two ordinary words of a SENTENCE are not that, and used to be accepted in
+            # notes - "native" and "review" out of a subagent's description land together in any
+            # 400-character note about translations, and the hint called that note the answer.
+            #
+            # `carriers` is also what the hint is filed under, so it never announces a line under a word
+            # that merely rode along on it: a line taken on "CLAUDE_ENV_FILE" said "documentation is
+            # already written down", and that sentence was not true of the word in it.
+            carriers = [t for t in hit if names.get(t)]
+            if not carriers and len([t for t in hit if verbatim.get(t)]) >= 2:
+                carriers = [t for t in hit if verbatim.get(t)]
+            for t in carriers:
                 per_term.setdefault(t, []).append((recall_label(store, f), i, line.strip()))
     prior = list(m.get("recalled") or [])
     done = set(prior)
@@ -5658,21 +5782,46 @@ DOC_MISSING_DAYS = 7   # a pointer whose file has been gone this long is archive
 
 def age_docs(store, report):
     """A doc entry whose file disappeared is first shown as MISSING in the digest, and archived once it
-    has been gone for DOC_MISSING_DAYS - long enough to survive a branch switch or a rename in progress."""
+    has been gone for DOC_MISSING_DAYS - long enough to survive a branch switch or a rename in progress.
+
+    "Gone for a week" is measured from the moment the file was first FOUND missing, stamped into
+    docs.json by this function. It used to be measured from the date of the NOTE, which is a different
+    thing entirely: a pointer written a month ago whose file was deleted this morning was archived by
+    the very next hourly `gc`, and putting the file back did not bring the pointer back. The promise in
+    the line above - long enough to survive a branch switch - was not kept by the code under it, and the
+    test for it moved the note's date rather than the deletion, so it passed while measuring the wrong
+    thing."""
     t = notes_target(store, True)
+    stamps, dirty = load_doc_stamps(store), False
     with t["lock"]:
         entries = load_notes(t)
         gone = []
         for e in entries:
-            if e["tag"] != "doc" or os.path.exists(doc_path(store, e)):
+            if e["tag"] != "doc":
                 continue
-            if (now() - entry_date(e)).days >= DOC_MISSING_DAYS:
+            k = str(e["id"])
+            st = dict(stamps.get(k) or {})
+            if os.path.exists(doc_path(store, e)):
+                if st.pop("gone_since", None) is not None:   # back again: the clock starts over
+                    stamps[k], dirty = st, True
+                continue
+            if not st.get("gone_since"):
+                st["gone_since"] = ts()                      # first gc that finds it missing starts it
+                stamps[k], dirty = st, True
+                continue
+            try:
+                days = (now() - _dt.datetime.strptime(st["gone_since"][:16], "%Y-%m-%d %H:%M")).days
+            except ValueError:
+                days = 0
+            if days >= DOC_MISSING_DAYS:
                 gone.append(e)
         if gone:
             archive_notes(t, gone, "doc file gone")
             save_notes(t, [e for e in entries if e not in gone])
             report.append("docs: archived %d pointer(s) whose file has been missing for %d days"
                           % (len(gone), DOC_MISSING_DAYS))
+    if dirty:
+        write_json(docs_stamp_path(store), stamps)
 
 
 def cmd_gc(store, args, quiet=False):
@@ -6202,21 +6351,31 @@ def cmd_hook(args):
     if event == "PostToolBatch":
         # One event for a whole batch of parallel calls, and no matcher: it sees every tool, including the
         # Reads that the PostToolUse matcher deliberately does not pay a process for. Newer than PostToolUse -
-        # where the CLI does not have it, the entry is simply inert and the PostToolUse path below carries
-        # the hint on its own, with `files` holding only what this session edited.
+        # where the CLI does not have it, the entry is simply inert and nothing below is lost except the
+        # two things only this event can know.
+        #
+        # The recall hint is NOT one of them, though it used to run here too. Every tool that carries a
+        # search term - Grep, Glob, WebSearch, Task, Agent - is already in the PostToolUse matcher, so the
+        # second pass only read the same files twice and spent the same (term, file) pair a second time,
+        # on output the CLI may drop when a turn ends on a tool result and the model is not called again.
         calls = [(c.get("tool_name", ""), c.get("tool_input") or {}) for c in (inp.get("tool_calls") or [])]
         with store.shared_lock():
             m = load_meta_stamped(sid)
-            opened = list(m.get("opened") or [])
+            opened, unseen = list(m.get("opened") or []), 0
             for _t, _ti in calls:
                 fp = _ti.get("file_path") or _ti.get("notebook_path")
                 if fp and fp not in opened:   # what the session already has in front of it. Kept apart from
                     opened.append(fp)         # `files`, which means "changing" and is read back as that by
-            m["opened"] = opened[-60:]        # the compaction hint
-            rh = recall_hint(store, m, calls)
+                if not hooked_tool(_t):       # the compaction hint
+                    unseen += 1
+            m["opened"] = opened[-60:]
+            # ...and the size of the turn, counted in ALL of its calls rather than in the ones a hook
+            # happened to be paid for. A turn of nothing but Read measured zero until here, so the
+            # read-only card was blind to exactly the turn it was built for: a session reading its way to
+            # a conclusion. PostToolUse counts the tools it matches; this counts the rest, so neither
+            # call is counted twice.
+            m["turn_tools"] += unseen
             save_meta(store, sid, m)
-        if rh:
-            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolBatch", "additionalContext": rh}}))
         return 0
     if event == "PostToolUse":
         tool = inp.get("tool_name", "")

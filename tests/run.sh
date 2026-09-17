@@ -167,6 +167,36 @@ RWM="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*readonly-wrote*/70707071/met
 check "the turn Stop froze counts what was written in it instead of comparing two minute-stamps" "test -n \"\$RWM\" && grep -q '\"notes\": 1' \"\$RWM\""
 RO5="$(rw UserPromptSubmit "{$RWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}")"
 check "a read-only turn that wrote its conclusion down is not asked for it again" "! echo \"\$RO5\" | grep -q 'nothing edited'"
+# A turn spent entirely in Read measured ZERO, because a hook is a process per call and Read is
+# deliberately not in the PostToolUse matcher - so the read-only card was blind to exactly the turn it
+# was built for. PostToolBatch has no matcher and sees those calls: it counts the ones PostToolUse does
+# not, so neither event counts a call twice.
+RDP="$T/readonly-reads"; mkdir -p "$RDP"; ( cd "$RDP" && "$LR" init >/dev/null )
+RDC="\"session_id\":\"70707072-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$RDP\""
+rd(){ ( cd "$RDP" && hook "$1" "$2" ); }
+rd SessionStart "{$RDC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+rd UserPromptSubmit "{$RDC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+for i in $(seq 1 7); do rd PostToolBatch "{$RDC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RDP/f$i.go\"},\"tool_response\":{}}]}" >/dev/null; done
+rd Stop "{$RDC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"read it all\"}" >/dev/null
+RD1="$(rd UserPromptSubmit "{$RDC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}")"
+check "a turn of nothing but Read has a size at last, and the read-only card sees it" "echo \"\$RD1\" | grep -q '7 tool calls, nothing edited'"
+rd UserPromptSubmit "{$RDC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+rd PostToolUse "{$RDC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"thing\"},\"tool_response\":{}}" >/dev/null
+rd PostToolBatch "{$RDC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"thing\"},\"tool_response\":{}}]}" >/dev/null
+RDM="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*readonly-reads*/70707072/meta.json 2>/dev/null | head -1)"
+check "a call both events see is counted once, not twice" "test -n \"\$RDM\" && grep -q '\"turn_tools\": 1' \"\$RDM\""
+# The mirror only works while it IS a mirror: the matcher lives in hooks.json, the tuple lives in the script.
+check "the script's HOOKED_TOOLS is the PostToolUse matcher of hooks.json, tool for tool" "python3 - '$HERE/../skill/longrun/hooks.json' '$LR' <<'PY'
+import json,sys,re
+m=json.load(open(sys.argv[1]))['hooks']['PostToolUse'][0]['matcher'].split('|')
+src=open(sys.argv[2]).read()
+ns={}
+for name in ('EDIT_TOOLS','RUNNING_TOOLS','SEARCH_TOOLS'):
+    exec(re.search(r'^%s = \(.*?\)' % name, src, re.M|re.S).group(0), ns)
+got=ns['EDIT_TOOLS']+ns['RUNNING_TOOLS']+ns['SEARCH_TOOLS']
+assert m[-1]=='mcp__.*', m[-1]
+assert tuple(m[:-1])==got, (m[:-1], got)
+PY"
 # The other half of the question - what has STOPPED being true - used to ride on the turn card and so
 # inherited every one of its gates. A session that only read, reviewed or talked, which is exactly the
 # session with time to re-read old notes, was never asked at all. It now stands on its own.
@@ -366,6 +396,24 @@ old=(datetime.date.today()-datetime.timedelta(days=3)).strftime("%m-%d")
 open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
 PY
 DDO="$(cd "$OLDP" && "$LR" digest)"; check "a project with no stamps yet falls back to the note's date instead of going quiet" "echo \"\$DDO\" | grep -q 'this line may be stale'"
+# mtime alone cannot tell a rewrite from a branch switch: `git checkout` restamps every file it touches,
+# so every doc pointer in every worktree carried a stale warning that meant nothing. The stamp keeps the
+# file's size and hash too, and the hash is only computed once the mtime has moved.
+BSP="$T/branchswitch"; mkdir -p "$BSP/research"; ( cd "$BSP" && "$LR" init >/dev/null )
+printf 'the rollout plan, as it stands on this branch\n' > "$BSP/research/P.md"
+( cd "$BSP" && "$LR" doc add research/P.md "the rollout plan" >/dev/null )
+sleep 3; cp "$BSP/research/P.md" "$T/P.keep"
+printf 'the rollout plan, rewritten on the other branch\nwith a second line\n' > "$BSP/research/P.md"
+BS1="$(cd "$BSP" && "$LR" digest)"; check "a doc file with different bytes under it is still marked stale" "echo \"\$BS1\" | grep -q 'this line may be stale'"
+sleep 1; cp "$T/P.keep" "$BSP/research/P.md"   # back on the first branch: new mtime, the stamped bytes
+BS2="$(cd "$BSP" && "$LR" digest)"; check "coming back to the bytes the line was written against is not a change, whatever the mtime says" "! echo \"\$BS2\" | grep -q 'this line may be stale'"
+BSG="\"session_id\":\"bbbbbbbc-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$BSP\""
+( cd "$BSP" && hook SessionStart "{$BSG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+  hook UserPromptSubmit "{$BSG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"a\"}" >/dev/null )
+sleep 1; printf 'the rollout plan, rewritten on the other branch\nwith a second line\n' > "$BSP/research/P.md"
+sleep 1; cp "$T/P.keep" "$BSP/research/P.md"   # a whole branch round trip inside one session
+BS3="$(cd "$BSP" && hook UserPromptSubmit "{$BSG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"b\"}")"
+check "...and the per-turn DOCS delta says nothing about it either" "! echo \"\$BS3\" | grep -q 'DOCS changed'"
 DG="\"session_id\":\"dddddddd-2222-4333-8444-555555555555\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$DOCP\""
 ( cd "$DOCP" && hook SessionStart "{$DG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
   hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"a\"}" >/dev/null )
@@ -393,11 +441,30 @@ DTURN4="$(cd "$DOCP" && hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPr
 check "a file this session only READ is never claimed as its work: an offer to read, not a debt" "echo \"\$DTURN4\" | grep -q 'DOCS changed since you last looked' && echo \"\$DTURN4\" | grep -q '~ n2 research/N.md' && ! echo \"\$DTURN4\" | grep -q 'you changed'"
 rm "$DOCP/research/M.md"
 DD3="$(cd "$DOCP" && "$LR" digest)"; check "a pointer whose file is gone says so instead of going quiet" "echo \"\$DD3\" | grep -q 'MISSING'"
+# "Gone for a week" is a week of the FILE being gone, stamped when a gc first finds it missing. It used
+# to be the age of the NOTE, which is a different thing entirely: a pointer written a month ago whose
+# file was deleted this morning was archived by the very next hourly gc, and putting the file back did
+# not bring the pointer back. The old test moved the note's date, so it passed while measuring that.
 python3 - "$DOCP/.longrun/NOTES.md" <<'PY'
 import re,sys,datetime
 p=sys.argv[1]; s=open(p).read()
-old=(datetime.date.today()-datetime.timedelta(days=9)).strftime("%m-%d")
+old=(datetime.date.today()-datetime.timedelta(days=30)).strftime("%m-%d")
 open(p,"w").write(re.sub(r"(\[n1\]) \d{2}-\d{2}", r"\1 "+old, s))
+PY
+( cd "$DOCP" && "$LR" gc >/dev/null )
+check "a month-old pointer whose file went missing today survives the next gc" "grep -q 'research/M.md' '$DOCP/.longrun/NOTES.md'"
+check "...and that gc wrote down when the file was first found missing" "grep -q 'gone_since' '$DOCP/.longrun/docs.json'"
+printf 'the file is back, under the same name\n' > "$DOCP/research/M.md"
+( cd "$DOCP" && "$LR" gc >/dev/null )
+check "a file that comes back clears the clock instead of leaving it running" "! grep -q 'gone_since' '$DOCP/.longrun/docs.json'"
+rm "$DOCP/research/M.md"
+( cd "$DOCP" && "$LR" gc >/dev/null )
+python3 - "$DOCP/.longrun/docs.json" <<'PY'
+import json,sys,datetime
+p=sys.argv[1]; d=json.load(open(p))
+gone=(datetime.datetime.now()-datetime.timedelta(days=9)).strftime("%Y-%m-%d %H:%M")
+d["1"]["gone_since"]=gone
+json.dump(d, open(p,"w"))
 PY
 ( cd "$DOCP" && "$LR" gc >/dev/null )
 check "gc archives a pointer whose file has been missing for a week" "! grep -q 'research/M.md' '$DOCP/.longrun/NOTES.md' && grep -q 'doc file gone' '$DOCP/.longrun/archive/notes.md'"
@@ -450,10 +517,10 @@ rturn(){ hook UserPromptSubmit "{$RG,\"hook_event_name\":\"UserPromptSubmit\",\"
 printf 'The widget drawer keeps its promocode slot in a separate layout branch.\n' >> "$RCP/research/R.md"
 ( cd "$RCP" && rturn )
 RH4B="$(cd "$RCP" && ptu Grep '{"pattern":"promocode"}')"
-check "one word hitting a line of prose in a doc file is a collision, not an answer" "test -z \"\$RH4B\""
+check "a one-word Grep IS the question, so it reaches a doc file - the whole point of the lazy layer" "echo \"\$RH4B\" | grep -q 'research/R.md:4'"
 ( cd "$RCP" && rturn )
 RH4C="$(cd "$RCP" && ptu Grep '{"pattern":"promocode layout"}')"
-check "...two of them on the same line of it is not" "echo \"\$RH4C\" | grep -q 'research/R.md:4'"
+check "...and two words of one pattern are a co-occurrence the session asked for" "echo \"\$RH4C\" | grep -q 'research/R.md:4'"
 ( cd "$RCP" && rturn )
 RH5="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}}]}")"
 check "a Read carries no question, so it is never guessed at from the path" "test -z \"\$RH5\""
@@ -462,13 +529,39 @@ check "a search tool moves no counter: looking around is still not activity" "te
 printf 'x\n' > "$RCP/research/R2.md"
 RH6="$(cd "$RCP" && ptu Grep '{"pattern":"nothing_here_at_all"}')"
 check "a term nothing answers stays silent" "test -z \"\$RH6\""
-# PostToolBatch: one event for a whole batch, no matcher, and it sees the Reads too - so a file the
-# session already has open is not offered back to it.
+# A sentence is not a pattern, and this is where the hint used to spend itself. A subagent's description
+# is mostly there to be a sentence; a shared note runs to 400 characters, so two of its ordinary words
+# land in one by chance. Measured over this project's own history: 65% of every real search fired, while
+# real Grep patterns from unrelated projects fire on 1% - so the sentences were the noise, not the tool.
+# Its own project, because a Task call is real work and moves the counters the check above reads.
+SNP="$T/sentence"; mkdir -p "$SNP/research"; ( cd "$SNP" && "$LR" init >/dev/null )
+printf 'The drawer keeps a promocode slot in a separate layout branch.\nThe retry_budget_ms knob is read once at startup.\nThe fallback_window_ms knob is read with it.\n' > "$SNP/research/S.md"
+( cd "$SNP" && "$LR" doc add research/S.md "how the drawer and its knobs behave" >/dev/null )
+SNG="\"session_id\":\"5e5e5e5e-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$SNP\""
+sptu(){ hook PostToolUse "{$SNG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$1\",\"tool_input\":$2,\"tool_response\":{}}"; }
+spturn(){ hook UserPromptSubmit "{$SNG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null; }
+( cd "$SNP" && hook SessionStart "{$SNG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null && spturn )
+SN1="$(cd "$SNP" && sptu Task '{"description":"Review the promocode layout drawer"}')"
+check "ordinary words out of a subagent's sentence are not a question: no hint" "test -z \"\$SN1\""
+( cd "$SNP" && spturn )
+SN2="$(cd "$SNP" && sptu Task '{"description":"Check where retry_budget_ms is applied"}')"
+check "...but a word in that sentence that NAMES something is" "echo \"\$SN2\" | grep -q 'retry_budget_ms'"
+( cd "$SNP" && spturn )
+SN3="$(cd "$SNP" && sptu Grep '{"pattern":"\\\\bfallback_window_ms\\\\b"}')"
+check "a word-boundary pattern searches for the word, not for \"bfallback_window_ms\"" "echo \"\$SN3\" | grep -q 'fallback_window_ms'"
+# PostToolBatch does NOT carry the hint: every tool that holds a search term is already in the
+# PostToolUse matcher, so a second pass only read the same files twice and spent the same (term, file)
+# pair again, on output the CLI may drop when a turn ends on a tool result.
 printf -- '2026-09-10 11:00 pruned | - [n9] 09-10 decision: the checkout drawer was superseded by widget v3 in PR 41\n' > "$RLOCAL/archive/notes.md"
-RB1="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}},{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"supersede\"},\"tool_response\":{}}]}")"
-check "PostToolBatch reads the whole batch and finds the archived answer" "echo \"\$RB1\" | grep -q 'additionalContext' && echo \"\$RB1\" | grep -q 'widget v3 in PR 41'"
+( cd "$RCP" && rturn )
+RB1="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"superseded\"},\"tool_response\":{}}]}")"
+check "PostToolBatch does not repeat the hint PostToolUse already carried" "test -z \"\$RB1\""
+RB1B="$(cd "$RCP" && ptu Grep '{"pattern":"superseded"}')"
+check "...and the pointer was not spent, so PostToolUse still finds the archived answer" "echo \"\$RB1B\" | grep -q 'widget v3 in PR 41'"
 printf 'the drawer also owns a promocode layout slot\n' >> "$RCP/research/R.md"
-RB2="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"promocode layout\"},\"tool_response\":{}}]}")"
+( cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}}]}" >/dev/null )
+( cd "$RCP" && rturn )
+RB2="$(cd "$RCP" && ptu Grep '{"pattern":"promocode layout"}')"
 check "a file this session has already opened is not offered back to it" "test -z \"\$RB2\""
 # Two pointers in a turn is help; five is a lecture. The budget refills at the turn boundary.
 printf -- '2026-09-10 11:00 pruned | - [n8] 09-10 fact: the kassa callback signature is checked against the merchant key\n2026-09-10 11:00 pruned | - [n7] 09-10 dead: the courier eta endpoint answers 404 for a cancelled order\n2026-09-10 11:00 pruned | - [n6] 09-10 decision: the tariff matrix is rebuilt nightly, never on request\n' >> "$RLOCAL/archive/notes.md"

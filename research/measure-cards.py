@@ -24,14 +24,22 @@ import sys
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 WRITE_CMDS = ("longrun add", "longrun doc add", "longrun doc touch", "longrun replace", "longrun stale")
-# What the PostToolUse matcher in hooks.json actually fires on. `Read` is deliberately not in it - a hook
-# is a process per call - so a threshold in "tool calls" has to be read in these, not in all of them.
+# What the PostToolUse matcher in hooks.json fires on. `Read` is deliberately not in it - a hook is a
+# process per call. Since 0.6.3 `PostToolBatch`, which has no matcher, counts the calls PostToolUse does
+# not, so the size of a turn is ALL of its calls again and the `tools` table below is the one the code
+# uses. The `hooked` table is kept because it is what the threshold was originally chosen against.
 SEEN_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Agent", "Task",
               "Workflow", "Grep", "Glob", "WebSearch"}
 
 
 def seen(name):
     return name in SEEN_TOOLS or (name or "").startswith("mcp__")
+
+
+def is_interrupt(block):
+    """A command the user stopped is not a command that failed, and `PostToolUseFailure` skips it."""
+    c = block.get("content")
+    return "interrupt" in (c if isinstance(c, str) else json.dumps(c)).lower()
 
 
 def blocks(row):
@@ -50,17 +58,31 @@ def is_real_user_turn(row):
 
 
 class Turn:
-    __slots__ = ("edits", "fails", "notes", "tools", "hooked")
+    __slots__ = ("edits", "fails", "notes", "tools", "hooked", "gate")
 
     def __init__(self):
         self.edits = self.fails = self.notes = self.tools = self.hooked = 0
+        self.gate = False   # was the card's REAL gate open in this turn - see scan()
 
     def carded(self, min_edits):
+        """The gate as this script used to model it: edits made in THIS turn.
+
+        Kept only to be compared against `gate`. It is not what the code does, and the difference is not
+        academic: `edit_tools_since_note` and `fails_since_note` accumulate across turns and are reset by
+        a note write, so a read-only turn that follows an editing turn nobody wrote anything down in IS
+        carded, and this model calls it silent."""
         return (self.edits or self.fails) and (self.edits >= min_edits or self.fails)
 
 
 def scan(path, min_edits):
+    """Turns of one transcript, each with the card's real gate evaluated at the moment it matters.
+
+    For a turn that wrote a note that moment is just before the write - what the counters stood at when
+    the session decided the turn was worth recording. For a turn that wrote nothing it is the end of the
+    turn, which is when `UserPromptSubmit` reads them for the card."""
     turns, cur, pending = [], None, {}
+    es = fs = 0        # edit_tools_since_note / fails_since_note: session-wide, reset by a note write
+    gate_at_note = None
     try:
         fh = open(path, errors="replace")
     except OSError:
@@ -75,8 +97,9 @@ def scan(path, min_edits):
                 continue
             if is_real_user_turn(row):
                 if cur is not None:
+                    cur.gate = gate_at_note if cur.notes else (es >= min_edits or fs > 0)
                     turns.append(cur)
-                cur = Turn()
+                cur, gate_at_note = Turn(), None
                 continue
             if cur is None:
                 continue
@@ -90,15 +113,21 @@ def scan(path, min_edits):
                         cur.hooked += 1
                     if name in EDIT_TOOLS:
                         cur.edits += 1
+                        es += 1
                     cmd = str(ti.get("command") or "")
                     if name in ("Bash", "PowerShell"):
                         pending[b.get("id")] = cmd
                         if any(w in cmd for w in WRITE_CMDS):
+                            if gate_at_note is None:
+                                gate_at_note = es >= min_edits or fs > 0
                             cur.notes += 1
-                elif b.get("type") == "tool_result" and b.get("is_error"):
+                            es = fs = 0
+                elif b.get("type") == "tool_result" and b.get("is_error") and not is_interrupt(b):
                     if b.get("tool_use_id") in pending:
                         cur.fails += 1
+                        fs += 1
     if cur is not None:
+        cur.gate = gate_at_note if cur.notes else (es >= min_edits or fs > 0)
         turns.append(cur)
     return turns
 
@@ -129,10 +158,11 @@ def main():
                 st["turns"] += 1
                 if t.notes:
                     st["wrote"] += 1
-                    st["wrote_carded" if t.carded(a.min_edits) else "wrote_silent"] += 1
+                    st["wrote_carded" if t.gate else "wrote_silent"] += 1
+                    st["wrote_carded_perturn" if t.carded(a.min_edits) else "wrote_silent_perturn"] += 1
                     if not (t.edits or t.fails):
                         st["wrote_no_activity"] += 1
-                elif t.carded(a.min_edits):
+                elif t.gate:
                     st["carded_no_note"] += 1
         print("\n== %s: %d transcripts, %d turns" % (label, len(pop), st["turns"]))
         if not st["turns"]:
@@ -144,6 +174,11 @@ def main():
             print("   ...of those, the card would be SILENT:      %6d  (%.1f%%)  <- the gap O1 is about"
                   % (st["wrote_silent"], 100.0 * st["wrote_silent"] / w))
             print("      of which with no edit and no failure at all: %d" % st["wrote_no_activity"])
+            # The gate accumulates across turns; modelling it per turn understates the gap, and that is
+            # the direction this script used to be wrong in.
+            print("   (gate modelled per turn instead, as this script used to: %d asked / %d silent = %.1f%% silent)"
+                  % (st["wrote_carded_perturn"], st["wrote_silent_perturn"],
+                     100.0 * st["wrote_silent_perturn"] / w))
         print("   turns the card asked about and got nothing: %6d" % st["carded_no_note"])
 
     tally(per_file, "every transcript")
@@ -167,7 +202,10 @@ def main():
     # If read-only turns are to be carded at all, the rule must separate the productive ones from the
     # 2-call ones. Length is the only signal a hook has before the fact, so: does it separate them?
     print("\n== read-only turns (0 edits, 0 failures) by how much work was in them, sessions in use")
-    buckets = [(1, 2), (3, 5), (6, 10), (11, 20), (21, 10 ** 6)]
+    # Fine around the threshold on purpose. With 1-2 / 3-5 / 6-10 buckets the table below answered "6" and
+    # "4" with exactly the same number, because both fall on a bucket edge - so the reading that the
+    # threshold had been measured was more than the table could carry.
+    buckets = [(1, 2), (3, 3), (4, 4), (5, 5), (6, 7), (8, 10), (11, 20), (21, 10 ** 6)]
 
     def table(attr, title):
         print("\n   %s" % title)
@@ -191,13 +229,12 @@ def main():
         print("   %-14s %8d %8d %8s" % ("all", cum_w, cum_s, ("%.0f%%" % (100.0 * cum_w / (cum_w + cum_s))) if cum_w + cum_s else "-"))
         return rows
 
-    table("tools", "counted in ALL tool calls (what the transcript shows):")
-    hooked = table("hooked", "counted in the calls a PostToolUse hook is fired for (Read is not one):")
-    # The threshold the skill can actually use is the second one. Say what each candidate would card.
-    print("\n   a read-only card at N hooked calls would reach, per threshold:")
+    rows = table("tools", "counted in ALL tool calls - what `turn_tools` counts since 0.6.3:")
+    table("hooked", "counted in PostToolUse calls only - what it counted before, when Read was invisible:")
+    print("\n   a read-only card at N calls would reach, per threshold:")
     for n in (3, 4, 5, 6, 8):
-        w = sum(v[0] for b, v in hooked.items() if b[0] >= n)
-        s = sum(v[1] for b, v in hooked.items() if b[0] >= n)
+        w = sum(v[0] for b, v in rows.items() if b[0] >= n)
+        s = sum(v[1] for b, v in rows.items() if b[0] >= n)
         print("     >= %-3d  %4d silent turns carded, in a band whose note rate is %s"
               % (n, s, ("%.0f%%" % (100.0 * w / (w + s))) if w + s else "-"))
 
