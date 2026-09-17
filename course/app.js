@@ -4,7 +4,7 @@
   const SVGNS = 'http://www.w3.org/2000/svg';
   const I = Object.assign({ step: 'Шаг', of: 'из', prev: 'Назад', next: 'Дальше',
     fileHint: 'Нажмите на файл, чтобы узнать, что в нем и кто его пишет. + создан на этом шаге, ~ изменен, (read) прочитан.',
-    quiz: ['Свои заметки', 'Общие', 'Журнал', 'Не писать'],
+    quiz: ['Свои заметки', 'Общие', 'Файл и указатель', 'Не писать'],
     diagHead: 'Кто с кем говорит на этом шаге', termHead: 'Агент вызывает команды скилла в нужные моменты: команда и что она печатает',
     loop: ['старт сессии', 'ход: запрос человека', 'вызов инструмента', 'сессия закончилась', 'ответ модели', 'компакция', 'после компакции снова SessionStart'] }, window.LR_I18N || {});
   function el(tag, attrs, children) {
@@ -176,9 +176,9 @@
       const q = el('div', { class: 'q' });
       q.appendChild(el('div', { class: 'stmt', html: it.stmt }));
       const btns = el('div', {});
-      [['own', I.quiz[0]], ['shared', I.quiz[1]], ['log', I.quiz[2]], ['no', I.quiz[3]]].forEach(([k, label]) => {
+      [['own', I.quiz[0]], ['shared', I.quiz[1]], ['doc', I.quiz[2]], ['no', I.quiz[3]]].forEach(([k, label]) => {
         const b = el('button', { text: label });
-        b.addEventListener('click', () => { if (q.classList.contains('done')) return; q.classList.add('done'); b.classList.add(k === it.ans ? 'right' : 'wrong'); btns.querySelectorAll('button').forEach(x => { if (x.textContent === label) return; if ([...btns.children].indexOf(x) === ['own', 'shared', 'log', 'no'].indexOf(it.ans)) x.classList.add('right'); }); });
+        b.addEventListener('click', () => { if (q.classList.contains('done')) return; q.classList.add('done'); b.classList.add(k === it.ans ? 'right' : 'wrong'); btns.querySelectorAll('button').forEach(x => { if (x.textContent === label) return; if ([...btns.children].indexOf(x) === ['own', 'shared', 'doc', 'no'].indexOf(it.ans)) x.classList.add('right'); }); });
         btns.appendChild(b);
       });
       q.appendChild(btns); q.appendChild(el('div', { class: 'why', html: it.why }));

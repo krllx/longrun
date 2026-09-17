@@ -4,7 +4,7 @@ English | [Русский](REFERENCE.ru.md)
 
 # longrun - reference
 
-Version 0.5.1. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop) on macOS; the Linux half of the platform layer (the systemd and cron timers, the credentials file, the choice of dialog and notification program) was verified on Ubuntu 24.04 with python3 3.12, where all four suites pass as well. See section 12. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
+Version 0.6.0. Verified on Claude Code 2.1.238 (CLI) and 2.1.260 (desktop) on macOS; the Linux half of the platform layer (the systemd and cron timers, the choice of dialog and notification program) was verified on Ubuntu 24.04 with python3 3.12, where all four suites pass as well. See section 12. Facts about hooks and the app were captured from live runs and checked against the official docs; raw material in [research/VERIFIED.md](../research/VERIFIED.md) and [research/hook-payloads/](../research/hook-payloads/).
 
 ## 1. Entities
 
@@ -57,18 +57,18 @@ The project key is the project directory path with non-letter characters replace
 
 ## 3. Commands
 
-Exit codes: 0 ok, 1 not found / check did not pass, 2 invalid arguments or budget, 3 no project or session, 4 an HQ-layer command while the layer is off.
+Exit codes: 0 ok, 1 not found / check did not pass, 2 invalid arguments or over budget, 3 no project or session.
 
 ### Setup
 
-- `longrun init [--external]` - make cwd a project. `--external` puts the directory under `~/.claude/longrun/projects/` and registers cwd in `registry.json`. (`--hq`, which used to enable the ledger and inbox layer, is accepted and ignored since 0.6.0.)
+- `longrun init [--external]` - make cwd a project. `--external` puts the directory under `~/.claude/longrun/projects/` and registers cwd in `registry.json`. (`--hq` and `--no-hq`, which used to switch the ledger and inbox layer on, are accepted and ignored since 0.6.0.)
 - `longrun link <root | root/.longrun>` - sessions starting in cwd belong to this project. Writes only to `registry.json`. The project directory must already exist. A version 0.2 store in this cwd, if any, is folded in: its notes go to the project's `archive/notes.md`, the file is renamed to `NOTES.legacy.md`.
 - `longrun unlink` - remove the entry from the registry without deleting anything.
 - `longrun where` - project, mode, session and its directory.
 
 ### Notes
 
-- `longrun add [--own] -t dead|decision|fact|ctx|pin|doc [-s <author>] "<text>"` - one line up to 400 characters. Without `--shared` - into own notes (requires a known session: `LONGRUN_SESSION` from the session environment or the freshest heartbeat with the same cwd). A duplicate by text is not added. On overflow - exit code 2 and a list of deletion candidates.
+- `longrun add [--own] -t dead|decision|fact|ctx|pin|doc [-s <author>] "<text>"` - one line up to 400 characters, **into the project's shared notes by default** since 0.6.0: a fact worth writing down is usually worth it for whoever comes next, and `--shared` on every call was a step the model skipped. `--own` keeps an entry in this session's notes, for what belongs to this conversation alone (requires a known session: `LONGRUN_SESSION` from the session environment or the freshest heartbeat with the same cwd). `--shared` is still accepted and does nothing. A duplicate by text is not added. On overflow - exit code 2 and a list of deletion candidates.
 - `longrun rm s3 n12 ...` - delete; the lines go to the archive. A number without a prefix is treated as an own note.
 - `longrun replace s3|n12 "<text>"` - rewrite; the old text goes to the archive.
 - `longrun notes [--shared | --own | --session <who>]` - show; both files by default.
@@ -81,7 +81,7 @@ Exit codes: 0 ok, 1 not found / check did not pass, 2 invalid arguments or budge
 
 ### Sessions
 
-- `longrun status [--all]` - the project's sessions: key, name, state (`alive`, `alive+sock`, `stale Nm`, `active?`, `ended(reason)`), scope, number of own notes, counters, last reply. Sessions with no turns, calls, notes or replies are hidden as app noise. Plus budgets, ledger and inbox under HQ.
+- `longrun status [--all]` - the project's sessions: key, name, state (`alive`, `alive+sock`, `stale Nm`, `active?`, `ended(reason)`), scope, number of own notes, counters, last reply. Sessions with no turns, calls, notes or replies are hidden as app noise. `--all` also brings back the sessions the user archived or deleted in the desktop app, saying which of the two happened.
 - `longrun send [--list] [--inbox] [--resume [--max-turns N] [--model M] [--mode <permission mode>] [--timeout S]] <who> "<text>"|-` - the recipient: a sidebar title, a name from the Claude Code registry, an id or its prefix, `local_<id>`. Running - an envelope into its socket; not running - a file in the recipient's (not the sender's) project inbox; `--inbox` - always a file; `--resume` - `claude -p "<text>" --resume <id>` in the recipient's cwd, the reply is printed. An ambiguous name - refusal with a list.
 - `longrun important [on | next | N | off] [--to <who>]` - flag a session whose turn ends must not be missed: while the flag is on, the end of a turn there notifies whatever `notify_turn_end` is set to and whichever window is in front. `on` holds until `off`, `next` arms one turn end, `N` arms a counter that is spent one per turn end and clears itself at zero. No argument prints the flag of that session plus every other flagged session of the project; `--to` takes the same names as `send`. The flag is stored in the session's `meta.json` (`important: {mode, left}`), so it survives compaction, `/clear` and a resume, and it is shown as a `status` flag and in the digest head.
 - `longrun ask "<text>" [--options "A,B"] [--default A] [--text] [--wait SEC] [--expire MIN]` - a dialog in front of every window; `ask ls`, `ask answer Q3 "..."`.
@@ -118,7 +118,7 @@ Eleven entries in `~/.claude/settings.json`, all calling `longrun hook <Event>`.
 | Event | What it does | What it prints into the context |
 |---|---|---|
 | `SessionStart` (all sources) | binding the CLI id to the session (resume chain, `/clear`, fork), heartbeat, a journal line, export of `LONGRUN_SESSION`, `LONGRUN_DIR`, `LONGRUN_SCOPE`, `LONGRUN_TRANSCRIPT` via `CLAUDE_ENV_FILE`, gc once an hour, the "all shared entries shown" mark | the digest (section 5) |
-| `UserPromptSubmit` | turn counter; finishing reading the app metadata and re-binding the chain; under HQ every 5 turns - `@user` items and overdue `next:` | messages from the inbox; own notes once on re-binding; the shared notes delta; the sessions delta (one appeared, ended or said something new); the turn card: what the turn that just ended changed and what failed in it, at most once per 8 turns, only when it edited or failed something and wrote nothing down |
+| `UserPromptSubmit` | turn counter; finishing reading the app metadata and re-binding the chain | messages from the inbox; own notes once on re-binding; the shared notes delta; the sessions delta (one appeared, ended or said something new); the turn card: what the turn that just ended changed and what failed in it, at most once per 8 turns, only when it edited or failed something and wrote nothing down |
 | `PostToolUse` (Edit, Write, MultiEdit, NotebookEdit, Bash, PowerShell, Agent, Task, Workflow, mcp__*) | counters; only the four editing tools count as edits; the list of edited files | messages from the inbox as `additionalContext`; the same card for the turn in progress, once a window of 40 calls has passed since the last note or card |
 | `PostToolUseFailure` (Bash, PowerShell; async) | a `FAIL` line in the journal, the last 40 kept | - |
 | `PreToolUse` (all tools) | under `halt` a refusal `permissionDecision: deny` with a reason (except calls to `longrun` itself); for Bash, PowerShell, Agent, Task, Workflow and MCP tools an entry in the meta's `running` (command, start) | the refusal with a reason under halt, otherwise nothing |
@@ -143,9 +143,9 @@ Caveats: stdout that parses as JSON is read as a hook decision object instead (a
 
 ## 5. Digest and budgets
 
-Composition, in order: the header `<longrun v… project=… session=<name> [<key>] source=…>`; MESSAGE (undelivered messages); `SHARED notes (project X) N entries used/cap`; `OWN notes (this session)`; `SESSIONS of project X` (up to 6 other sessions: name, key, state, scope, number of own notes, last reply; live ones first); `WATCH n pending`; `LEDGER open` and `INBOX` under HQ; `HANDOFF` (only after compaction: FAIL lines, `FOCUS:` from `/compact <text>`, `ASK:` the last requests, `FILES:`); the journal tail (after compaction, resume, `/clear`, fork and on a continued chain); a line about the archived summary; a command hint.
+Composition, in order: the header `<longrun v… project=… session=<name> [<key>] source=…>`; MESSAGE (undelivered messages); `SHARED notes (project X) N entries used/cap`; `OWN notes (this session)`; `SESSIONS of project X` (up to 6 other sessions: name, key, state, scope, number of own notes, last reply; live ones first); `WATCH n pending`; `HANDOFF` (only after compaction: FAIL lines, `FOCUS:` from `/compact <text>`, `ASK:` the last requests, `FILES:`); the journal tail (after compaction, resume, `/clear`, fork and on a continued chain); a line about the archived summary; a command hint.
 
-Default budgets: shared notes 5000 bytes, own 3000, digest 9000 (the hook output limit in Claude Code is 10000 characters), sessions block 700, HANDOFF 1100, shared notes delta per turn 1200. On overflow the digest drops blocks in this order: watch, journal, the orchestrator's duties, sessions, ASKED, facts, board, HANDOFF, then the ledger is squeezed to `@user` and overdue lines, then removed.
+Default budgets: shared notes 5000 bytes, own 3000, digest 9000 (the hook output limit in Claude Code is 10000 characters), sessions block 700, HANDOFF 1100, shared notes delta per turn 1200. On overflow the digest drops blocks in this order: watch, journal, the orchestrator's duties, sessions, ASKED, facts, board, HANDOFF.
 
 Only then do the notes give way, and they give way by **shedding their oldest non-`pin` entries one at a time**, oldest first across both files, with a line saying how many were left out. Cutting the rendered tail instead - which is what happened until 0.6.0 - removed exactly the entries written last. If even that is not enough, the text is cut with a closing tag.
 
@@ -213,11 +213,11 @@ Automatic, on first access:
 
 Sessions running at the moment of the upgrade lose nothing: every hook first migrates the files of the old layout and only then reads them, and if the session has already written something in the new layout, old and new are merged (counters are summed, journal lines go in order).
 
-What changes in habits: `longrun add` without `--shared` now writes to own notes; the PR map and everything other sessions need - with `--shared`. `rm`/`replace` accept `s3` and `n12`. The shared notes budget is 5000 instead of 6000.
+What changes in habits: `rm`/`replace` accept `s3` and `n12`, the shared notes budget is 5000 instead of 6000, and a session now has notes of its own - `longrun add --own`. (In 0.3.0-0.5.1 `add` wrote to those own notes unless told `--shared`; since 0.6.0 it is the other way round, see section 3.)
 
 ## 9. Tests
 
-`bash tests/run.sh` - 211 regression checks on synthetic data without API calls: setup and worktree linking, shared and own notes (deduplication, budget, refusal at the boundary, prune, rm, replace), ledger and inbox, all hooks on real payload shapes, compaction snapshot and archive, the instructions the PreCompact hook hands to the summariser, HANDOFF, binding hooks to the session when the shell leaves for another directory, the turn card and its cadence, the digest with every budget full, recall ranking, 20 parallel writers into both files, gc and ageing, migration of three old layouts, notes-only mode, send into a socket and into an inbox with delivery by all three hooks, resume by sidebar title, watch with a tick and no timer, the config command (set, unset, --global, type check, limits from settings), onboard (the brief, the hint in the digest, done), gh/arc selection for PR checks, and the platform layer (which scheduler this OS gets, the cron schedule and crontab editing, the systemd units, which dialog program, where the OAuth credentials come from, which program draws a notification and whether the machine can say it was really shown, the click target of a notification, the turn-end rule and how the front application is read, the important-session flag through the Stop hook: arming, counting down, clearing itself, and beating both gates).
+`bash tests/run.sh` - 211 regression checks on synthetic data without API calls: setup and worktree linking, shared and own notes (deduplication, budget, refusal at the boundary, prune, rm, replace), the docs layer and the stale marks, all hooks on real payload shapes, compaction snapshot and archive, the instructions the PreCompact hook hands to the summariser, HANDOFF, binding hooks to the session when the shell leaves for another directory, the turn card and its cadence, the digest with every budget full, recall ranking, 20 parallel writers into both files, gc and ageing, migration of three old layouts, notes-only mode, send into a socket and into an inbox with delivery by all three hooks, resume by sidebar title, watch with a tick and no timer, the config command (set, unset, --global, type check, limits from settings), onboard (the brief, the hint in the digest, done), gh/arc selection for PR checks, and the platform layer (which scheduler this OS gets, the cron schedule and crontab editing, the systemd units, which dialog program, which program draws a notification and whether the machine can say it was really shown, the click target of a notification, the turn-end rule and how the front application is read, the important-session flag through the Stop hook: arming, counting down, clearing itself, and beating both gates).
 
 `bash tests/scenarios.sh` - 37 checks in nine scenarios, one per task from the README: orientation of a new session, own notes through compaction, the shared notes delta per turn, two sessions in one folder, resume under a new CLI id (immediately and with delayed app metadata), `/clear`, fork, handing over work (inbox, socket, watch by name), and the live picture of the other sessions (one appears, one ends, one is archived in the app). Output of the last runs: [tests/last-run.txt](../tests/last-run.txt), [tests/last-run-scenarios.txt](../tests/last-run-scenarios.txt).
 
@@ -237,22 +237,20 @@ A live run on `claude -p` (costs money): [tests/e2e-claude.md](../tests/e2e-clau
 
 **Simpler, if all you need is re-injection:** the line `@.longrun/NOTES.md` in `CLAUDE.md` arrives after compaction without hooks and without the hook output limit. Hooks are needed for own notes, the summary archive, the failure journal, HANDOFF, sessions and messages.
 
-## 11. Orchestration (0.4.0)
+## 11. Orchestration (0.4.0, cut back in 0.6.0)
 
-One session of the project takes the role, the others report through the board. The full design and the status of the phases are in [ORCHESTRATOR.md](ORCHESTRATOR.md).
+One session of the project takes the role, the others report through the board, and it is the one that calls the human when only the human can decide. It is not autonomous driving: one session toward one checkable condition is Claude Code's own `/goal`, which has a real evaluator. What 0.6.0 removed from this layer, and why, is section 0 of [ORCHESTRATOR.md](ORCHESTRATOR.md); the full design is the rest of that file.
 
 ### Files
 
 | File | Who writes | What is inside |
 |---|---|---|
-| `<project>/board.json` | `board`, `fact` | `goal`, `items` (tasks `T<n>`: text, state todo/doing/blocked/done/dropped, owner/owner_name, assigned, since, why, outcome, after; facts `F<n>`: text, source, task, handled, ack), counters `next_t`, `next_f` |
+| `<project>/board.json` | `board` | `goal`, `items` (tasks `T<n>`: text, state todo/doing/blocked/done/dropped, owner/owner_name, assigned, since, why, outcome, after; facts `F<n>`: text, source, task, handled, ack), counters `next_t`, `next_f` |
 | `<project>/orchestrator.json` and the mirror `~/.claude/longrun/projects/<key>/orchestrator.json` | `orchestrate start/stop` | skey, sid, name, pid, since, cwd, local; the watcher reads the mirror (a project under `~/Documents` is inaccessible to it) |
 | `~/.claude/longrun/halt.json` | `halt`, `resume` | reason, at, by, local (empty = all projects) |
 | `<session>/meta.json`, new fields | hooks | `running` {tool_use_id: tool, cmd, started}, `turn_started`, `waiting_since`, `waiting_what`, `ctx_tokens`, `ctx_model`, `ctx_window`, `ctx_at`, `ctx_warned`, `ctx_told`, `board_mtime`, `board_seen`, `asked` |
-| `~/.claude/longrun/watch/state.json`, key `stuck` | the watcher | raised flags `<project key>:<skey>:<tool|turn|wait|ask|fail|ctx>` -> time; cleared when the condition goes away |
+| `~/.claude/longrun/watch/state.json`, key `stuck` | the watcher | raised flags `<project key>:<skey>:<tool|wait|ask>` -> time; cleared when the condition goes away |
 | `<project>/archive/board.md` | `board rm` | deleted tasks |
-| `~/.claude/longrun/budget.json` | the watcher, `budget check`, `resume` | the last sample (`utilization`, `resets_at`, `elapsed_min`, `expected`, `ratio`, `breach`, `week`), 6 hours of history, `snoozed_until`, `halted_at`, `report`, `error` |
-| `~/.claude/longrun/budget-report-<ts>.md` | the watcher | the budget stop report: window, plan, time to reset, live sessions with flags |
 | `<session>/asks.json` | `ask`, the detached process `ask _wait` | questions `Q<n>`: q, options, default, free_text, state pending/answered/cancelled/expired/failed, answer, text, asked, answered, claimed (the asker is still waiting inline), delivered (socket / inbox:<file> / spool:<file>) |
 | `~/.claude/longrun/ask.log` | the detached dialog processes | output and errors of osascript, zenity or kdialog |
 
@@ -272,13 +270,10 @@ One session of the project takes the role, the others report through the board. 
 | `orchestrate [status]` | who the orchestrator is, halt, board, facts, sessions with flags |
 | `orchestrate start [--goal "..."] [--force]`, `orchestrate stop [--force]` | take the role (one per project) / give it up |
 | `halt "why" [--project]`, `resume` | forbid tools in all sessions (or only in this project) / lift |
-| `budget [status]` | the rule, the last sample, expected and ratio, pace from history, snooze, the last stop |
-| `budget check` | sample now (the token from the Keychain via `/usr/bin/security` on macOS, from `~/.claude/.credentials.json` on Linux; endpoint `api.anthropic.com/api/oauth/usage`), verdict and stop on breach |
-| `budget on|off`, `budget set pace|factor|quiet|every N` | the global config `~/.claude/longrun/config.json` |
 | `ask "question" [--options "Yes,No"] [--default Yes] [--text] [--title T] [--wait SEC] [--expire MIN] [--icon note|caution|stop]` | a dialog above all windows (osascript from its own process with a sound on macOS, zenity or kdialog on Linux); the answer inline if it arrived within `--wait` (default `ask_wait_sec`), otherwise `PENDING Q<n>` and the answer as a turn into the socket or inbox; lines `ANSWER|CANCELLED|EXPIRED|FAILED Q<n>` |
 | `ask ls`, `ask answer Q3 "..."` | this session's questions; record an answer the human gave in chat when the dialog went missing |
 | `mcp` | a stdio MCP server with the tools `ask` and `notify`; `install.sh` registers it as `longrun` in user scope (`claude mcp add --scope user longrun -- ~/.local/bin/longrun mcp`) |
-| `notify "text" [--title T]` | one desktop notification, the same call `halt`, the budget rule and a fired watch make; prints the program it went through, exit 1 when there was none |
+| `notify "text" [--title T]` | one desktop notification, the same call `halt` and a fired watch make; prints the program it went through, exit 1 when there was none |
 | `notify --test` | send a probe and say whether the screen really showed it: on macOS the answer is read back from the Notification Center database, not guessed. `presented=0` means delivered and silently dropped, and the output then says how to fix it |
 
 ### What every session sees
@@ -319,7 +314,7 @@ A timer of any kind starts a check with an almost empty environment, which is wh
 
 **The dialog behind `ask` and `mcp__longrun__ask`.** macOS: `osascript`. Linux: `zenity`, else `kdialog`, and only when `DISPLAY` or `WAYLAND_DISPLAY` is set. Neither program can show buttons and a text field at once, so with `--text` on Linux the field wins and the button reported back is the default one. zenity maps the options onto `--question` (`--ok-label` is the default option, `--extra-button` the middle one), more than three onto `--list`, and honours `--expire` through its own `--timeout`; kdialog uses `--yesno` and `--menu`, and its expiry is the kill of the process. A machine with no dialog at all - a server, an ssh session, no zenity installed - is not an error state: `ask` returns `FAILED Q<n>` with the reason, and the skill tells the agent to ask in the chat instead.
 
-**The desktop notification** behind `halt`, the budget stop, a fired watch and the MCP tool `notify`. It is optional on both systems and longrun depends on neither program: every message a notification would carry also reaches the session itself through its socket or inbox, so a machine with nothing installed is a supported configuration - all four suites run that way. The config key `notifier` pins the program; `auto` takes `terminal-notifier` whenever it is installed, otherwise `osascript` on macOS and `notify-send` on a Linux desktop, otherwise nothing at all - which is a normal state on a server, not an error: the message still reaches the session through its socket or inbox.
+**The desktop notification** behind `halt`, a fired watch and the MCP tool `notify`. It is optional on both systems and longrun depends on neither program: every message a notification would carry also reaches the session itself through its socket or inbox, so a machine with nothing installed is a supported configuration - all four suites run that way. The config key `notifier` pins the program; `auto` takes `terminal-notifier` whenever it is installed, otherwise `osascript` on macOS and `notify-send` on a Linux desktop, otherwise nothing at all - which is a normal state on a server, not an error: the message still reaches the session through its socket or inbox.
 
 terminal-notifier comes first because of a macOS trap that is invisible from the outside. `osascript -e 'display notification'` posts on behalf of Script Editor, which holds no notification authorisation of its own (no `auth` key in `com.apple.ncprefs`), so macOS files the notification and draws nothing: verified here on 2026-09-10, where 25 of 25 osascript notifications sat in the Notification Center database with `presented = 0` while the Claude app's own notifications showed fine. No error is printed anywhere - `osascript` exits 0. terminal-notifier ships its own signed bundle, so it gets its own entry and its own permission; after `brew install terminal-notifier` the bundle has to be registered once (`lsregister -f` plus one `open`), otherwise it answers `Could not request notification permission`.
 

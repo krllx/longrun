@@ -54,7 +54,7 @@ curl -fsSL https://krllx.github.io/longrun/install.sh | bash
 - `~/.claude/skills/longrun/` and the symlink `~/.local/bin/longrun`.
 - the MCP server `longrun` in user scope (`claude mcp add`), which is where the `ask` and `notify` tools come from.
 - **a background timer**, every five minutes: a launchd agent on macOS, a systemd user timer or a cron line on Linux. It checks the watches you registered and looks at the sessions - a few shell checks, no model and no tokens, and it wakes a session only when one of your conditions comes true. `--no-timer` skips it.
-- **desktop notifications**, if you answered yes to the installer's question: on macOS `brew install terminal-notifier` when it is missing, a notification sender bundle under `~/.claude/longrun/notifier/`, and one test notification that makes macOS ask for permission. On Linux it only checks for `notify-send`. `--notify` and `--no-notify` answer the question in advance.
+- **desktop notifications**, if you answered yes to the installer's question: on macOS `brew install terminal-notifier` when it is missing, plus one test notification that makes macOS ask for permission. On Linux it only checks for `notify-send`. `--notify` and `--no-notify` answer the question in advance.
 
 Needs macOS or Linux, Claude Code and python3 3.9+. From a clone it is the same [`install.sh`](install.sh).
 

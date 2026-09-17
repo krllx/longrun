@@ -29,7 +29,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.5.1"
+VERSION = "0.6.0"
 HOME = os.path.expanduser("~")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
