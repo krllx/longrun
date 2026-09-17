@@ -57,4 +57,4 @@
   ok   stop clears the lock and its mirror
   ok   digest without an orchestrator still shows the board
 
-PASS=51 FAIL=0  (tmp: /tmp/longrun-orch.VMY3sd)
+PASS=51 FAIL=0  (tmp: /tmp/longrun-orch.inzNc3)
