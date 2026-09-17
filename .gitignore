@@ -6,6 +6,10 @@
 
 # local working material, not part of the published skill
 research/docs/
+research/MANIFESTO.ru.md
+research/BACKLOG.md
+research/REWORK-PLAN.md
+research/PROMPT-explain-skill.md
 REVIEW-BRIEF.md
 
 .DS_Store
