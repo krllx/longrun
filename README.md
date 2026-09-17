@@ -28,7 +28,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-367_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-368_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -118,12 +118,13 @@ longrun is for what outlives a turn and a session. Reach for the built-in thing 
 
 ### 1. Shared documents on disk
 
-One `.longrun/` per project holds the notes every session sees. Each session also keeps its own notes, outside the repository tree. Hooks bring both back after every compaction, `/clear` and resume, and show on every turn what other sessions changed.
+One `.longrun/` per project holds the notes every session sees - that is where a note goes by default. A session can keep something to itself with `--own`, outside the repository tree. Hooks bring both back after every compaction, `/clear` and resume, and show on every turn what other sessions changed.
 
 ```bash
-longrun add --shared -t pin "PR 42 = branch feature/checkout"     # for every session
-longrun add -t dead "retry on 429 does not help, limit is per org"  # for this one
-longrun recall 429                                                  # search everything
+longrun add -t pin "PR 42 = branch feature/checkout"           # shared: every session sees it
+longrun add --own -t ctx "only the checkout drawer, not the cart"  # this conversation only
+longrun doc add research/plan.md "the rollout plan and what is open"
+longrun recall 429                                             # notes, those files, journals, transcripts
 ```
 
 ### 2. Delegation to the session that has the context
@@ -224,7 +225,8 @@ Milestones (pushed, PR opened, tests green) go to the journal: `longrun log "PR 
 
 ```bash
 longrun init [--external] | link <project> | where | onboard | config
-longrun add [--shared] -t TAG "..." | rm | replace | notes | prune | log "..." | recall <term>
+longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune | recall <term>
+longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
 longrun orchestrate start --goal "..." | board | fact | ask | halt | resume | interrupt | budget
@@ -237,7 +239,7 @@ Full flags, file formats and the facts we verified about Claude Code: [docs/REFE
 <details>
 <summary><b>FAQ</b></summary>
 
-**The agent says "the PR is not created yet" although it exists.** The fact is not in the shared notes: `longrun add --shared -t pin "PR 42 = branch feature/checkout"`.
+**The agent says "the PR is not created yet" although it exists.** The fact is not in the shared notes: `longrun add -t pin "PR 42 = branch feature/checkout"`.
 
 **A session in a worktree does not see the project notes.** `longrun where` must show the project. If it says "not initialised": `longrun link <project>` from that worktree.
 
@@ -249,7 +251,7 @@ Full flags, file formats and the facts we verified about Claude Code: [docs/REFE
 ## Development
 
 ```bash
-bash tests/run.sh            # 231 regression checks, no API calls
+bash tests/run.sh            # 232 regression checks, no API calls
 bash tests/scenarios.sh      # 37 scenarios, one per goal
 bash tests/orchestrator.sh   # 69: the orchestrator layer
 bash tests/ask.sh            # 30: the dialog and the MCP server

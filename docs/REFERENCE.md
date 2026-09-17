@@ -79,7 +79,7 @@ Exit codes: 0 ok, 1 not found / check did not pass, 2 invalid arguments or budge
 - `longrun mute n12 [n13 ...]` / `longrun unmute [n12|--all]` - stop injecting a shared entry into THIS session's digest. Nothing changes on disk and nothing changes for any other session; the block head says how many are hidden. The cheapest form of "decide what to unload".
 - `longrun log "<milestone>"` - a line in the session journal.
 - `longrun compact-hint [--set "<text>" | --clear]` - what the `PreCompact` hook will tell the summariser to keep (section 4), printed exactly as it will be sent; `--set` adds one line of this session's own, `--clear` removes it. The project-wide version of the same thing is `longrun config set compact_instructions "..."`.
-- `longrun recall <word> [...] [-n 12] [--no-transcript]` - search. Order: shared and own notes, ledger, other sessions' own notes and journals, inbox, archives; then the project's transcripts (`recall_transcripts` of them, newest first, plus the subagent transcripts of the current session). The transcript is Claude Code's internal format, the parser is defensive: if the format changes there will be fewer matches, not a crash.
+- `longrun recall <word> [...] [-n 12] [--no-transcript]` - search. Order: shared and own notes, ledger, other sessions' own notes and journals, inbox, archives; then six of the project's transcripts (newest first, plus the subagent transcripts of the current session). The transcript is Claude Code's internal format, the parser is defensive: if the format changes there will be fewer matches, not a crash.
 
 ### Sessions
 
@@ -122,13 +122,13 @@ Eleven entries in `~/.claude/settings.json`, all calling `longrun hook <Event>`.
 | `SessionStart` (all sources) | binding the CLI id to the session (resume chain, `/clear`, fork), heartbeat, a journal line, export of `LONGRUN_SESSION`, `LONGRUN_DIR`, `LONGRUN_SCOPE`, `LONGRUN_TRANSCRIPT` via `CLAUDE_ENV_FILE`, gc once an hour, the "all shared entries shown" mark | the digest (section 5) |
 | `UserPromptSubmit` | turn counter; finishing reading the app metadata and re-binding the chain; under HQ every 5 turns - `@user` items and overdue `next:` | messages from the inbox; own notes once on re-binding; the shared notes delta; the sessions delta (one appeared, ended or said something new); the turn card: what the turn that just ended changed and what failed in it, at most once per 8 turns, only when it edited or failed something and wrote nothing down |
 | `PostToolUse` (Edit, Write, MultiEdit, NotebookEdit, Bash, PowerShell, Agent, Task, Workflow, mcp__*) | counters; only the four editing tools count as edits; the list of edited files | messages from the inbox as `additionalContext`; the same card for the turn in progress, once a window of 40 calls has passed since the last note or card |
-| `PostToolUseFailure` (Bash, PowerShell; async) | a `FAIL` line in the journal, no more than `fail_keep` of them | - |
+| `PostToolUseFailure` (Bash, PowerShell; async) | a `FAIL` line in the journal, the last 40 kept | - |
 | `PreToolUse` (all tools) | under `halt` a refusal `permissionDecision: deny` with a reason (except calls to `longrun` itself); for Bash, PowerShell, Agent, Task, Workflow and MCP tools an entry in the meta's `running` (command, start) | the refusal with a reason under halt, otherwise nothing |
 | `PermissionRequest` (async) | `waiting_since` / `waiting_what = permission (<tool>)` in the meta | - |
 | `Notification` (permission_prompt, idle_prompt, agent_needs_input, elicitation_*; async) | waiting for confirmation or input in the meta; `idle_prompt` clears `turn_started` | - |
 | `PreCompact` | a snapshot in `archive/precompact/` | the instructions for the summariser (below) |
 | `PostCompact` (async) | the summary in `archive/compact/` | - |
-| `Stop` | the last reply in `last_status`; the turn is frozen into `turn_card` for the next prompt; under `strict_stop` (off by default) blocks the end of the turn with that card | - |
+| `Stop` | the last reply in `last_status`; the turn is frozen into `turn_card` for the next prompt | - |
 | `SessionEnd` | the reason in the heartbeat, a journal line | - |
 
 Order of events around compaction: `SubagentStop` (the summariser) -> `SessionStart(compact)` -> `PostCompact`. That is why the digest after compaction names the archive directory rather than a file: the current summary lands there a moment after the digest.
@@ -163,6 +163,8 @@ Cost: the digest is 350-2000 tokens depending on how full it is; per turn - only
 
 ## 6. Configuration
 
+Seven keys were retired in 0.6.0 and are now fixed numbers in the script: `strict_stop` and `auto_init` (both off, and both a mode nobody ran), `journal_tail_lines` (12), `handoff_max_bytes` (1100), `fail_keep` (40), `recall_transcripts` (6), `ctx_sample_every` (5). A setting that has never been changed is not a setting.
+
 `~/.claude/longrun/config.json` (global) and `<project>/config.json`; the project value overrides the global one. View and change: `longrun config`, `longrun config set KEY VALUE [--global]`, `longrun config unset KEY [--global]`. Keys and defaults:
 
 | Key | Value | Meaning |
@@ -170,19 +172,16 @@ Cost: the digest is 350-2000 tokens depending on how full it is; per turn - only
 | `notes_max_bytes` | 5000 | shared notes budget |
 | `session_notes_max_bytes` | 3000 | own notes budget |
 | `notes_warn_pct` | 80 | above it - PRUNE NEEDED in the digest |
-| `notes_autoprune_pct` | 90 | above it - gc archives `todo`/`ctx` down to `notes_warn_pct`; 0 disables |
+| `notes_autoprune_pct` | 90 | above it - gc archives entries marked stale, then `todo`/`ctx`, down to `notes_warn_pct`; 0 disables |
 | `notes_max_age_days` | 14 | older entries go to the archive (except `pin`) |
 | `ledger_max_bytes`, `ledger_done_keep_days` | 3000, 7 | budget of open items; how long to keep closed ones |
-| `journal_max_lines`, `journal_tail_lines` | 200, 12 | journal length; the tail in the digest |
-| `inject_max_bytes`, `handoff_max_bytes`, `sessions_block_bytes`, `shared_delta_max_bytes`, `sessions_delta_max_bytes` | 9000, 1100, 700, 1200, 500 | digest budgets; the last two are per-turn slices |
+| `journal_max_lines` | 200 | journal length before the tail is archived |
+| `inject_max_bytes`, `sessions_block_bytes`, `shared_delta_max_bytes`, `sessions_delta_max_bytes` | 9000, 700, 1200, 500 | digest budgets; the last two are per-turn slices |
 | `archive_keep_days`, `compact_keep` | 30, 40 | archive retention; maximum summaries per project |
 | `compact_hint`, `compact_hint_max_bytes` | true, 1200 | whether `PreCompact` sends the summariser its instructions, and their cap (section 4) |
 | `compact_instructions` | empty | one more line for them, the same for every session of the project ("keep every SQL query in full") |
 | `session_stale_min`, `session_dead_days` | 30, 7 | when a session is `stale`; when its directory moves to the archive |
 | `nudge_turns`, `nudge_tools`, `nudge_edit_tools` | 8, 40, 6 | the turn card: how often at most (turns), the mid-turn window (tool calls), and the edits it takes for a turn to be worth asking about. Both windows are measured from where the counters stood at the last card, never taken modulo: a counter that steps OVER the boundary (`PostToolUseFailure` charges one without looking at the card) used to skip a whole window |
-| `strict_stop` | false | block the end of the turn when notes are stale |
-| `auto_init` | false | create an external project automatically in any folder |
-| `fail_keep`, `recall_transcripts` | 40, 6 | FAIL lines per session; transcripts in recall |
 | `hq` | not set | the ledger/inbox layer; not set = enabled if the ledger is non-empty |
 | `name` | not set | project name instead of the folder name |
 | `pr_tool` | `auto` | what to query PR status with in `pr-merged`/`pr-status` checks: `gh` (GitHub CLI), `arc` (Arcadia), `auto` - by the folder the watch was registered from |
@@ -192,7 +191,7 @@ Cost: the digest is 350-2000 tokens depending on how full it is; per turn - only
 | `notify_turn_end` (global only) | `off` | a notification when a session finishes a turn: `off`, `unfocused` (only while the Claude app is not the application in front), `always`. The app sends this event itself, but silent and with `interruptionLevel: passive`, so macOS files it into Notification Center without drawing a banner - this is the loud, clickable version of the same thing |
 | `autocompact_window` | 0 | where Claude Code auto-compacts, as set by `/autocompact N`; accepts `300k`, `1M`. 0 - follow Claude Code (the `CLAUDE_CODE_AUTO_COMPACT_WINDOW` variable, then `autoCompactWindow` in settings.json, then the model's window). The key is the user's intent: a hook cannot run `/autocompact`, so `onboard` compares it with settings.json and asks the user to type the command themselves |
 | `board_block_bytes`, `facts_block_bytes` | 900, 900 | room in the digest for the board and for unhandled facts |
-| `ctx_sample_every`, `ctx_warn_before` | 5, 50000 | how often to read the context size from the transcript; how many tokens before the auto-compact window to warn |
+| `ctx_warn_before` | 50000 | how often to read the context size from the transcript; how many tokens before the auto-compact window to warn |
 | `stuck_tool_min`, `stuck_turn_min`, `stuck_wait_min`, `stuck_fail_streak` | 30, 60, 10, 3 | watcher thresholds: tool, turn, waiting for confirmation (minutes), identical FAILs in a row |
 | `wake_on_stuck` | true | a stuck report starts a turn at the orchestrator (otherwise it lands in the inbox) |
 | `budget_on`, `budget_pace_pct_per_hour`, `budget_factor`, `budget_quiet_min`, `budget_check_every` | false, 20, 1.5, 30, 300 | the 5-hour window budget rule: enabled (off by default; `longrun budget on`, or say yes when `orchestrate start` offers it), the plan in percent per hour, the breach multiplier, quiet minutes at the start of the window, sampling period |
@@ -222,7 +221,7 @@ What changes in habits: `longrun add` without `--shared` now writes to own notes
 
 ## 9. Tests
 
-`bash tests/run.sh` - 231 regression checks on synthetic data without API calls: setup and worktree linking, shared and own notes (deduplication, budget, refusal at the boundary, prune, rm, replace), ledger and inbox, all hooks on real payload shapes, compaction snapshot and archive, the instructions the PreCompact hook hands to the summariser, HANDOFF, binding hooks to the session when the shell leaves for another directory, the turn card and its cadence, the digest with every budget full, recall ranking, 20 parallel writers into both files, gc and ageing, migration of three old layouts, notes-only mode, send into a socket and into an inbox with delivery by all three hooks, resume by sidebar title, watch with a tick and no timer, the config command (set, unset, --global, type check, limits from settings), onboard (the brief, the hint in the digest, done), gh/arc selection for PR checks, and the platform layer (which scheduler this OS gets, the cron schedule and crontab editing, the systemd units, which dialog program, where the OAuth credentials come from, which program draws a notification and whether the machine can say it was really shown, the click target of a notification, the turn-end rule and how the front application is read, the important-session flag through the Stop hook: arming, counting down, clearing itself, and beating both gates).
+`bash tests/run.sh` - 232 regression checks on synthetic data without API calls: setup and worktree linking, shared and own notes (deduplication, budget, refusal at the boundary, prune, rm, replace), ledger and inbox, all hooks on real payload shapes, compaction snapshot and archive, the instructions the PreCompact hook hands to the summariser, HANDOFF, binding hooks to the session when the shell leaves for another directory, the turn card and its cadence, the digest with every budget full, recall ranking, 20 parallel writers into both files, gc and ageing, migration of three old layouts, notes-only mode, send into a socket and into an inbox with delivery by all three hooks, resume by sidebar title, watch with a tick and no timer, the config command (set, unset, --global, type check, limits from settings), onboard (the brief, the hint in the digest, done), gh/arc selection for PR checks, and the platform layer (which scheduler this OS gets, the cron schedule and crontab editing, the systemd units, which dialog program, where the OAuth credentials come from, which program draws a notification and whether the machine can say it was really shown, the click target of a notification, the turn-end rule and how the front application is read, the important-session flag through the Stop hook: arming, counting down, clearing itself, and beating both gates).
 
 `bash tests/scenarios.sh` - 37 checks in nine scenarios, one per task from the README: orientation of a new session, own notes through compaction, the shared notes delta per turn, two sessions in one folder, resume under a new CLI id (immediately and with delayed app metadata), `/clear`, fork, handing over work (inbox, socket, watch by name), and the live picture of the other sessions (one appears, one ends, one is archived in the app). Output of the last runs: [tests/last-run.txt](../tests/last-run.txt), [tests/last-run-scenarios.txt](../tests/last-run-scenarios.txt).
 

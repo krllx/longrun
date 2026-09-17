@@ -32,7 +32,9 @@ check "session state lives outside the project and the worktree" "case '$SESS' i
 
 echo "== shared notes: add / dedupe / budget / rm / replace / prune"
 cd "$WT"
-"$LR" add -t dead "no session here" >/dev/null 2>/tmp/lr-own; check "own note without a session is refused (exit 3) and points at --shared" "test \$? -eq 3 && grep -q -- '--shared' /tmp/lr-own"
+"$LR" add --own -t dead "no session here" >/dev/null 2>/tmp/lr-own; check "an --own note without a session is refused (exit 3) and points at the shared default" "test \$? -eq 3 && grep -q -- 'shared' /tmp/lr-own"
+DEF="$T/defaultproj"; mkdir -p "$DEF"; ( cd "$DEF" && "$LR" init >/dev/null && "$LR" add -t dead "no flag, no session: this goes to the project" >/dev/null 2>&1 )
+check "add without a flag writes the project's shared notes, session or no session" "grep -q 'no flag, no session' '$DEF/.longrun/NOTES.md'"
 "$LR" add --shared -t dead "arc-wt add attaches nothing: same-name server branch yields an unrelated local branch; check arc log arcadia/<br> vs HEAD" >/dev/null; check "add --shared writes [n1] into the project NOTES.md" "grep -q '\[n1\] .* dead' '$LOCAL/NOTES.md'"
 "$LR" add --shared -t decision "STQ v2 over v1 for payment callbacks: v1 queue creation needs a TPS ticket per env, v2 is self-serve" >/dev/null
 OUT="$("$LR" add --shared -t decision "STQ v2 over v1 for payment callbacks: v1 queue creation needs a TPS ticket per env, v2 is self-serve")"; check "duplicate detected" "echo '$OUT' | grep -q 'already present as n2'"
@@ -99,9 +101,9 @@ SD="$SESS/11111111"
 check "SessionStart creates the session dir with meta + journal" "test -f '$SD/meta.json' && grep -q 'session startup' '$SD/journal.md'"
 check "session index records project and key" "test -f '$CLAUDE_CONFIG_DIR/longrun/sessions/_index/$SID.json' && grep -q '\"skey\": \"11111111\"' '$CLAUDE_CONFIG_DIR/longrun/sessions/_index/$SID.json'"
 export LONGRUN_SESSION=$SID
-"$LR" add -t dead "own: personal v3 returns 403 V3 API is forbidden, use /v4/retrieve" >/dev/null; check "own note lands in the session dir as [s1], not in the project" "grep -q '\[s1\] .* dead: own: personal v3' '$SD/notes.md' && ! grep -q 'personal v3' '$LOCAL/NOTES.md'"
+"$LR" add --own -t dead "own: personal v3 returns 403 V3 API is forbidden, use /v4/retrieve" >/dev/null; check "own note lands in the session dir as [s1], not in the project" "grep -q '\[s1\] .* dead: own: personal v3' '$SD/notes.md' && ! grep -q 'personal v3' '$LOCAL/NOTES.md'"
 check "own note has no author label" "grep -q '\[s1\] [0-9-]* dead: own' '$SD/notes.md'"
-"$LR" add -t todo "own todo" >/dev/null; "$LR" rm s2 >/dev/null; check "rm s2 removes an own note and archives it in the session dir" "! grep -q '\[s2\]' '$SD/notes.md' && grep -q 'rm | - \[s2\]' '$SD/archive/notes.md'"
+"$LR" add --own -t todo "own todo" >/dev/null; "$LR" rm s2 >/dev/null; check "rm s2 removes an own note and archives it in the session dir" "! grep -q '\[s2\]' '$SD/notes.md' && grep -q 'rm | - \[s2\]' '$SD/archive/notes.md'"
 "$LR" replace s1 "own: personal v3 is 403, v4 works" >/dev/null; check "replace s1" "grep -q 's1\] .*v4 works' '$SD/notes.md'"
 check "notes shows both files" "$LR notes | grep -q 'SHARED notes' && $LR notes | grep -q 'OWN notes' && $LR notes --own | grep -q 'v4 works' && ! $LR notes --own | grep -q 'SHARED'"
 # The turn card: what the turn actually did, asked once. 39 read-only commands are not activity, so
@@ -127,14 +129,14 @@ hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"E
 hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"more\"}" >/dev/null
 UPS9="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"t9\"}")"
 check "and the next turn is quiet: a rate limit, not a card after every turn" "! echo \"\$UPS9\" | grep -q 'your last turn'"
-"$LR" add -t fact "note write resets the staleness counters" >/dev/null
+"$LR" add --own -t fact "note write resets the staleness counters" >/dev/null
 hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"/x/read-only.go\"},\"tool_response\":{}}" >/dev/null
 hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"read it\"}" >/dev/null
 UPS2="$(hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go on\"}")"
 check "a turn of pure reading gets no card, and a note write resets the counters" "! echo \"\$UPS2\" | grep -q 'your last turn' && grep -q '\"fails_since_note\": 0' '$SD/meta.json'"
 # PostToolUseFailure charges the tool counter without ever looking at the card, so it is the event that
 # steps the counter OVER the window boundary. With a modulo test that skipped the card for a whole window.
-"$LR" add -t fact "reset the counters before the window-boundary check" >/dev/null
+"$LR" add --own -t fact "reset the counters before the window-boundary check" >/dev/null
 for i in $(seq 1 6); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"/x/b$i.go\"},\"tool_response\":{}}" >/dev/null; done
 for i in $(seq 7 38); do hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls $i\"},\"tool_response\":{}}" >/dev/null; done
 NB39="$(hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls 39\"},\"tool_response\":{}}")"
@@ -180,7 +182,7 @@ OUT="$(hook SessionStart "{$COMMON,\"hook_event_name\":\"SessionStart\",\"source
 check "SessionStart(compact) digest: own notes + journal tail + archive pointer" "echo \"\$OUT\" | grep -q 's1\] .*v4 works' && echo \"\$OUT\" | grep -q 'SESSION journal tail' && echo \"\$OUT\" | grep -q 'archived verbatim in archive/compact/'"
 check "SessionStart(compact) digest carries the mechanical HANDOFF (failure + framing + files)" "echo \"\$OUT\" | grep -q 'HANDOFF (mechanical' && echo \"\$OUT\" | grep -q 'FAIL' && echo \"\$OUT\" | grep -q 'ASK: Make the /screen handler' && echo \"\$OUT\" | grep -q 'post_v_1_screen.go'"
 check "HANDOFF skips one-word replies and carries the /compact instructions as FOCUS" "! echo \"\$OUT\" | grep -q 'ASK: try again' && ! echo \"\$OUT\" | grep -q 'ASK: yes' && echo \"\$OUT\" | grep -q 'FOCUS: keep the EPMA decision'"
-"$LR" add -t fact "reset before the failure-as-activity check" >/dev/null
+"$LR" add --own -t fact "reset before the failure-as-activity check" >/dev/null
 for i in 1 2 3 4 5 6 7 8; do hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"u$i\"}" >/dev/null; done
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"make lint\"},\"error\":\"Exit code 2\\nlint failed\",\"is_interrupt\":false}"
 hook Stop "{$COMMON,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"lint is red\"}" >/dev/null
@@ -317,7 +319,7 @@ PY
 for i in $(seq 1 20); do ( "$LR" add --shared -t fact "concurrent writer $i says hello from a parallel session" >/dev/null 2>&1 ) & done; wait
 CNT=$(grep -c 'concurrent writer' "$LOCAL/NOTES.md"); check "20 parallel shared adds, none lost ($CNT)" "test $CNT -eq 20"
 IDS=$(grep -o '\[n[0-9]*\]' "$LOCAL/NOTES.md" | sort | uniq -d | wc -l | tr -d ' '); check "ids unique under concurrency" "test $IDS -eq 0"
-for i in $(seq 1 20); do ( "$LR" add -t fact "own concurrent writer $i" >/dev/null 2>&1 ) & done; wait
+for i in $(seq 1 20); do ( "$LR" add --own -t fact "own concurrent writer $i" >/dev/null 2>&1 ) & done; wait
 CNT=$(grep -c 'own concurrent writer' "$SD/notes.md"); check "20 parallel own adds, none lost ($CNT)" "test $CNT -eq 20"
 
 echo "== gc retention"
