@@ -563,7 +563,7 @@ check "pr-merged registered in a git repo picks gh, in an Arcadia checkout picks
 "$LR" config set pr_tool arc --global >/dev/null; ( cd "$GIT" && "$LR" watch add --no-test --then "forced" -- pr-merged 43 >/dev/null 2>&1 ); check "pr_tool in the config overrides the folder" "python3 -c \"import json,glob,sys; w={json.load(open(f))['then']: json.load(open(f)) for f in glob.glob('$CLAUDE_CONFIG_DIR/longrun/watch/w*.json')}; sys.exit(0 if w['forced']['check']['tool']=='arc' else 1)\""
 "$LR" config unset pr_tool --global >/dev/null
 
-echo "== the platform layer: which timer, which dialog, where the credentials are"
+echo "== the platform layer: which timer, which dialog, which metadata directory"
 PY_IMPORT="import importlib.util,sys; sp=importlib.util.spec_from_loader('lr',importlib.machinery.SourceFileLoader('lr','$LR')); m=importlib.util.module_from_spec(sp); sp.loader.exec_module(m)"
 lrpy(){ python3 -c "import importlib.machinery,importlib.util; $PY_IMPORT
 $1"; }

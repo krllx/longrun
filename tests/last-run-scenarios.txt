@@ -51,4 +51,4 @@ This session keeps its durable notes on disk and gets them back right after the 
   ok   S9.4 a window archived in the app disappears from the delta and from the block
   ok   S9.5 ...but longrun status --all still shows it, and says why it was hidden
 
-PASS=37 FAIL=0  (tmp: /tmp/longrun-scen.WnIKgX)
+PASS=37 FAIL=0  (tmp: /tmp/longrun-scen.LAZxKw)

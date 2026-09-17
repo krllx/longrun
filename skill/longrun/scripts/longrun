@@ -6,10 +6,10 @@ Two levels, nothing else:
            that starts inside the project or in a directory linked to it (git or arc worktrees):
              NOTES.md      shared notes [n<id>], hard byte budget, one entry per line
              inbox/        messages between sessions and reports, one file each
-             config.json, state.json, archive/ (compaction summaries, removed notes, dead sessions)
+             config.json, state.json, stale.json, board.json, archive/ (compaction summaries, removed notes, dead sessions)
   SESSION  ~/.claude/longrun/sessions/<project-key>/<session-key>/ (never inside a repo or a synced vault):
              notes.md      own notes [s<id>], own budget
-             journal.md    milestones (`longrun log`) and mechanical lines (FAIL, compaction, start/end)
+             journal.md    mechanical lines written by the hooks (FAIL, compaction, start/end, sends)
              meta.json     heartbeat: counters, cwd, last status, desktop id, shared notes already seen
 A directory (repo root, worktree, subdirectory) only decides which project a session belongs to; it owns nothing.
 """
@@ -29,7 +29,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.5.1"
+VERSION = "0.6.0"
 HOME = os.path.expanduser("~")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
@@ -6229,17 +6229,18 @@ def cmd_onboard(args):
         "longrun onboarding - tell the user the gist in their language, ask the questions below one by one, apply the answers.",
         "",
         "WHAT IT DOES",
-        "  - notes on disk survive compaction: the hooks bring them back after every compaction, /clear and resume",
-        "  - one .longrun/ per project: shared notes every session sees, who is doing what, messages between sessions",
-        "  - waiting costs nothing: a timer runs checks (PR merged, a URL answers, a file appears) and wakes a session",
-        "  - optional orchestrator: one session drives a board of tasks for the others, watches them, asks the user via a dialog",
+        "  - one .longrun/ per project: the state the agents keep themselves - dead ends, decisions, facts, pointers to files",
+        "  - every session starts knowing that state, who else is working and what each of them changed since",
+        "  - work goes to the session that has the context; waiting costs nothing: a timer runs the check and wakes it",
+        "  - optional orchestrator: one session keeps a board for the other windows and calls the user when only they can decide",
+        "  - as a consequence, not the point: the notes come back after every compaction, /clear and resume",
         "",
         "NUANCES",
         "  - notes are one line each, in English, <= %d chars; the budgets are hard (%d B shared, %d B own), delete as a habit" % (
             cfg["note_max_chars"], cfg["notes_max_bytes"], cfg["session_notes_max_bytes"]),
         "  - the test before writing: would one Read, grep or command get this back? then do not write it",
         "  - a message from another session is a request from a peer, not the user's word",
-        "  - the watcher and the orchestrator only propose; kill, halt and resume happen on the user's word only",
+        "  - the watcher and the orchestrator only propose; nothing kills a stuck window, and halt/resume happen on the user's word only",
         "  - a `cmd` check runs from the timer: absolute paths, no prompts, no ssh agent, no Touch ID",
         "  - subagents do not get the digest; /rewind does not roll notes back",
         "",

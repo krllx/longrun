@@ -189,7 +189,7 @@
   ok   onboard done records the date and silences the hint
   ok   pr-merged registered in a git repo picks gh, in an Arcadia checkout picks arc, discarded == closed
   ok   pr_tool in the config overrides the folder
-== the platform layer: which timer, which dialog, where the credentials are
+== the platform layer: which timer, which dialog, which metadata directory
   ok   cron_spec turns seconds into a crontab schedule (and never goes below a minute)
   ok   cron_strip removes our two lines and leaves the rest of the crontab alone
   ok   the systemd units name the script, the interval and a log, and escape % for systemd
@@ -232,4 +232,4 @@
   ok   the flag beats both gates: notify_turn_end off and the Claude app in front
   ok   consume_important spends a counted flag and never goes below zero
 
-PASS=211 FAIL=0  (tmp: /tmp/longrun-test.9MvnKr)
+PASS=211 FAIL=0  (tmp: /tmp/longrun-test.F16F4F)

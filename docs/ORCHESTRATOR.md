@@ -152,6 +152,8 @@ into the session's socket (or into the inbox), the dialog is held by a detached 
 
 ## 5a. Facts from outside: delivery and recording
 
+(0.6.0: every `longrun fact ...` below is now `longrun board add --fact ...`, `board ls --facts`, `board ack` - the same items of the same `board.json`, see section 0.)
+
 Delivery, both channels verified 2026-09-08:
 
 - the human writes straight into the orchestrator's chat, even while it is working: the message
@@ -310,24 +312,26 @@ send back the reply (the token does not get into it).
 
 ## 11. Implemented: stage 1 (2026-09-09, version 0.4.0)
 
-Everything only in longrun, no new MCP:
+Everything only in longrun, no new MCP. Read this list as it was on 2026-09-09: 0.6.0 folded `fact` into `board`, deleted `interrupt` and kept two of the watcher's five rules (section 0); the marks below say which line is which.
 
 - the board `.longrun/board.json`: `board goal|add|take|done|block|drop|release|edit|rm|assign`, dependencies `--after`, handing out with `--for`/`assign` with a message into the socket or inbox;
-- facts: `fact "..." [--task] [--source] [--wake]`, `fact ls`, `fact ack`; unhandled ones hang in the orchestrator's digest, the task's worker sees `NEW FACT`;
+- facts (0.6.0: the same items, reached through `board add --fact`, `board ls --facts`, `board ack`): `fact "..." [--task] [--source] [--wake]`, `fact ls`, `fact ack`; unhandled ones hang in the orchestrator's digest, the task's worker sees `NEW FACT`;
 - the role and lock: `orchestrate start|stop|status`, the `orchestrator.json` file in the project and a mirror in `~/.claude/longrun/projects/<key>/`; the orchestrator's digest gets `role=orchestrator`, the FACTS block and the list of duties;
 - telemetry in `meta.json`: `running` (PreToolUse/PostToolUse), `turn_started` (UserPromptSubmit/Stop), `waiting_*` (PermissionRequest, Notification), `ctx_tokens/ctx_window` (tail of the transcript, the window from `autoCompactWindow`); flags in SESSIONS and in `longrun status`;
 - a warning to the session `ctx_warn_before` (50k) before the window, once per 20k of growth, plus a message to the orchestrator;
 - `halt`/`resume`: `~/.claude/longrun/halt.json`, PreToolUse replies `permissionDecision: deny`, the only exception is `longrun` itself;
-- the watcher: `stuck_scan` on every tick, thresholds `stuck_tool_min` 30, `stuck_turn_min` 60, `stuck_wait_min` 10, `stuck_fail_streak` 3, cross-checked against the process tree, one report per episode, `wake_on_stuck` wakes by default;
-- `interrupt <session> [--match] [--yes]`: the session's process tree by the pid from the registry, the shell-snapshot wrappers and their descendants, SIGTERM then SIGKILL, a journal entry for the target and a message to it; verified live on an app session 2026-09-09;
+- the watcher: `stuck_scan` on every tick, thresholds `stuck_tool_min` 30, `stuck_turn_min` 60, `stuck_wait_min` 10, `stuck_fail_streak` 3, cross-checked against the process tree, one report per episode, `wake_on_stuck` wakes by default (0.6.0: two rules left, `stuck_tool_min` and `stuck_wait_min`; `stuck_turn_min` is gone and `stuck_fail_streak` only colours a SESSIONS flag);
+- `interrupt <session> [--match] [--yes]` (REMOVED in 0.6.0): the session's process tree by the pid from the registry, the shell-snapshot wrappers and their descendants, SIGTERM then SIGKILL, a journal entry for the target and a message to it; verified live on an app session 2026-09-09;
 - new hooks PreToolUse, PermissionRequest, Notification (11 in total), the PostToolUse matcher extended to Agent/Task/Workflow/mcp__*;
-- tests `tests/orchestrator.sh` (52 checks), the regression and scenario suites untouched.
+- tests `tests/orchestrator.sh` (52 checks then, 51 in 0.6.0), the regression and scenario suites untouched.
 
-What is needed from the human after installation: `./install.sh`, once `/autocompact 300k` in any session, `longrun orchestrate start --goal "..."` in the HQ session.
+What is needed from the human after installation: `./install.sh`, once `/autocompact 300k` in any session, `longrun orchestrate start --goal "..."` in the session that takes the role (0.6.0: there is no HQ folder any more, the role is a lock in `.longrun/`).
 
 Not included (next stages): the dialog in front of the windows (`longrun-ask`), the 5-hour window budget (after the endpoint probe), automatic fact sources, checking the confirmation hooks in the app.
 
 ## 12. Implemented: stage 3, budget (2026-09-09, version 0.4.0; REMOVED in 0.6.0, see section 0)
+
+Nothing below runs any more: the whole rule, its config keys, its report and its command were deleted in 0.6.0. Kept as the record of what was built and what it cost.
 
 - `budget_scan` on every watcher tick: a sample from the endpoint no more often than `budget_check_every` (300 s), the verdict `budget_verdict` (window start = `resets_at - 5h`, expected = `budget_pace_pct_per_hour` x hours, violation = used >= `budget_factor` x expected, the first `budget_quiet_min` minutes of the window without a verdict);
 - on violation: `halt.json` with `kind: budget` (all projects), a report in `~/.claude/longrun/budget-report-<ts>.md` and into the socket/inbox of every orchestrator (used, elapsed, expected, until reset, week, live sessions with flags), a macOS notification, a line in the watcher's journal;

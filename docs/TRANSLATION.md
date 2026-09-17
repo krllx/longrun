@@ -54,7 +54,7 @@ Keep verbatim, in Latin script, spelled exactly as the CLI spells it:
 - `worktree`, `socket`, `transcript` - the reader meets them in `git`, in the CLI and in
   Claude Code's own output, and every local rendering of them is also an ordinary word
 - every command and subcommand: `longrun add`, `longrun status`, `longrun watch add --then`
-- every note type: `dead`, `decision`, `fact`, `ctx`, `todo`, `pin`
+- every note type: `dead`, `decision`, `fact`, `ctx`, `pin`, `doc`
 - every config key: `notify_turn_end`, `compact_hint_max_bytes`, `watch_timer`
 - every hook name: `SessionStart`, `UserPromptSubmit`, `PreCompact`, `Stop`
 - every path and filename: `.longrun/`, `~/.claude/longrun/sessions/`, `meta.json`
@@ -95,12 +95,10 @@ These are translated, and translated the same way every time.
 | watch (event watch) | `watch` (kept Latin) | ウォッチ | 워치 | 事件监听 |
 | message | сообщение | メッセージ | 메시지 | 消息 |
 | task | задача | タスク | 작업 | 任务 |
-| board | борд | ボード | 보드 | 任务板 |
+| board | доска | ボード | 보드 | 任务板 |
 | orchestrator | оркестратор | オーケストレーター | 오케스트레이터 | 编排器 |
 | fact | факт | 事実 | 사실 | 事实 |
 | halt (stop everything) | остановка всех сессий (`halt`) | 全停止 | 전체 중단 | 全部停止 |
-| interrupt | прервать (`interrupt`) | 割り込み | 끼어들기 | 打断 |
-| budget (5h usage) | бюджет | 予算 | 예산 | 预算 |
 | context window | окно контекста | コンテキストウィンドウ | 컨텍스트 윈도 | 上下文窗口 |
 | turn | ход | ターン | 턴 | 轮次 |
 | timer | таймер | タイマー | 타이머 | 定时器 |
@@ -114,7 +112,7 @@ These are translated, and translated the same way every time.
 | summary (what compaction leaves) | резюме | 要約 | 요약 | 总结 |
 | digest vs summary | дайджест vs резюме - never both резюме | ダイジェスト vs 要約 - never both 要約 | 다이제스트 vs 요약 - never both 요약 | 摘要 vs 总结 - never both 摘要 |
 | dead end | тупик | 行き止まり | 막다른 길 | 死胡同 |
-| watcher (the one watching sessions) | наблюдатель | 監視役 | 감시자 | 监视器 |
+| watcher (the one watching sessions) | смотритель | 監視役 | 감시자 | 监视器 |
 | delta (of the shared notes) | дельта | 差分 | 변경분 | 差异 |
 | polling | опрос | ポーリング | 폴링 | 轮询 |
 | cheat sheet | шпаргалка | チートシート | 치트 시트 | 速查表 |
@@ -123,12 +121,11 @@ These are translated, and translated the same way every time.
 | summariser (the model compaction uses) | суммаризатор | 要約するモデル | 요약하는 모델 | 做总结的模型 |
 | background timer (the five-minute check; `launchd` in the English, any OS meant) | фоновый таймер | バックグラウンドのタイマー | 백그라운드 타이머 | 后台定时器 |
 | tick (of the timer) | тик | ティック | 틱 (틱마다, not 매 틱마다) | `tick` (kept Latin) |
-| the 5-hour window (usage) | 5-часовое окно | 5時間枠 | 5시간 윈도 - 윈도, as in 컨텍스트 윈도 | 5 小时窗口 |
-| notes limit (the byte cap `add` enforces; not the 5-hour budget) | лимит заметок | 予算; メモの容量が上限に達したとき where the 5-hour 予算 is in the same paragraph | 메모 한도 (메모 한도에 이르면, not 가득 차면) - never 예산, which is the 5-hour usage budget | 笔记预算 |
+| notes limit (the byte cap `add` enforces) | лимит заметок | メモの容量が上限に達したとき | 메모 한도 (메모 한도에 이르면, not 가득 차면) | 笔记预算 |
 | fixed check (a watch's check with no model judgement; was 'deterministic') | детерминированная проверка | 決定論的なチェック - not 決定的 | 정해진 규칙대로만 판정하는 검사 | 一项检查 (not 一段, not 一次) |
 | a watch fires | watch срабатывает | 発火する | 워치가 발동합니다 | 触发 |
 | event-driven (section 3 heading; was 'reactivity') | по событию | イベント駆動 | 이벤트 기반 - not 반응성, which a Korean developer reads as responsiveness | 事件驱动 |
-| autonomy you switch on (section 4 heading; was 'selective autonomy') | самостоятельность, которую включаете вы | オンにして初めて働く自律 | 켜야 동작하는 자율성 | 有限度的自治 |
+| one session coordinates the rest (section 4 heading; was 'autonomy you switch on' before 0.6.0) | одна сессия координирует остальные | 一つのセッションが他をまとめる | 한 세션이 나머지를 조율합니다 | 一个会话协调其余会话 |
 | control (stays with the human; was 'the levers') | управление остается у человека | 主導権 | 제어권 | 控制权 - 开关 reads as a physical switch |
 | the goal you set | к заданной цели | 決めた目標 - あなた is dropped, as everywhere | 정해진 목표 | 既定目标 |
 | user turn (a message arriving as one) | ход пользователя | ユーザーのターン | 사용자 턴 | 一轮用户输入 |
@@ -139,7 +136,10 @@ These are translated, and translated the same way every time.
 | default (setting) | по умолчанию | デフォルト - not 既定 | 기본값 - not 디폴트 | 默认 - not 預設 |
 | cleanup (the hourly job) | уборка | 片付け - distinct from prune, 整理 | 정리 | 清理 |
 | task framing (`ctx`) | рамки задачи | タスクの前提 | 작업의 배경과 조건 | 任务背景 |
-| a small thing the agent still has to do (`todo`) | короткий список незавершенного | 後で済ませるべき作業 | 짧은 후속 작업 | 还没做完的一件小事 |
+| doc pointer (a `doc` note: one line naming a file) | указатель на файл | ファイルへの指し示す一行 | 파일을 가리키는 한 줄 | 指向文件的一行 |
+| stale (mark a note no longer true) | пометить устаревшей (`stale`) | 古くなった印をつける | 더 이상 사실이 아니라고 표시 | 标记为已经不成立 |
+| mute (drop a shared note from your own digest) | заглушить (`mute`) | 自分のダイジェストから外す | 내 다이제스트에서만 감추기 | 只从自己的摘要里去掉 |
+| turn card (what the last turn changed, shown to the session) | карточка хода | ターンのカード | 턴 카드 | 上一轮的小结 |
 | banner (a desktop notification) | баннер | バナー | 배너 | 横幅 |
 | sidebar | сайдбар | サイドバー | 사이드바 | 侧边栏 |
 | laptop | ноутбук | ノートPC - not ラップトップ | 노트북 | 笔记本电脑 (never 笔记本) |
