@@ -1,0 +1,21 @@
+# Codex adapter
+
+Install from the checkout with `./install.sh --codex`, or use `--both` for both clients. The original no-flag install still selects Claude Code. Codex discovers the skill in `~/.agents/skills/longrun`; `LONGRUN_CODEX_SKILLS_DIR` overrides that directory. Hooks go in `${CODEX_HOME:-~/.codex}/hooks.json`, MCP registration goes through `codex mcp add`, and `~/.local/bin/longrun` runs the common CLI.
+
+Review and trust new hooks in Codex's `/hooks`. Restart if the skill or MCP tools do not appear. The installer leaves hook trust, sandbox and approval policy to Codex.
+
+The MCP `run` tool executes public longrun subcommands with explicit `session_id`, absolute `cwd` and an `args` array. It provides session-store writes that the normal workspace sandbox may deny to shell commands. Use it for the protocol commands, including `where` and `digest`; obtain the current ID from `CODEX_THREAD_ID`. It does not accept shell strings or the internal `hook`/`mcp` entrypoints. Direct CLI use remains available from a terminal or a shell with access to the store.
+
+Both clients share `.longrun/` and the existing `~/.claude/longrun/` registry, session directories and watches. The latter name remains for compatibility, including on a machine with only Codex. `LONGRUN_HOME` overrides that store; export the same value for both clients and the installer. A Codex resume keeps its thread ID and own notes. Claude desktop resume chains continue to work.
+
+Supported hooks: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `PreCompact`, `PostCompact`, `Stop`, `SessionEnd`, `Interrupt`. Shell calls use the `Bash` hook name, `apply_patch` records all changed paths, and nonzero shell exits are journaled from `PostToolUse`. Other local function tools are counted through the same hook. Hosted tools and subagents do not have full session telemetry here.
+
+Codex `PreCompact` saves a snapshot of user requests, changed files and failures. Its stdout does not add summarizer instructions. After compaction, `SessionStart(source=compact)` restores the notes and snapshot. Compaction summaries and context usage are read from optional rollout records when recognizable; their schema is internal and may change. Missing telemetry does not prevent notes or inbox delivery. The reported model context window is not a promise of the automatic compaction threshold. Claude-only `/autocompact` setup does not apply to Codex.
+
+Messages to Codex are stored in the shared inbox and arrive on the next hook or digest, including after a restart. `longrun send --resume WHO "text"` explicitly starts `codex exec resume`; it spends tokens and may need the client's normal approvals. `--timeout` bounds that run; keep it below 120 seconds when using MCP `run`. Claude-only `--mode` and `--max-turns` are refused for a Codex target. Watches use the same inbox; `--wake` explicitly resumes the target with its own client. Sidebar discovery, live Claude sockets and shell-process inspection remain Claude-specific. Codex notifications do not include a jump link. Address Codex by thread ID, its prefix, or a journal title (`longrun add` notes do not rename a chat).
+
+`longrun ask` works through the CLI. When using MCP, pass this conversation's `session_id` and absolute `cwd` to keep late answers bound to the right thread. A shared server without explicit session context can show an immediate dialog but cannot route a late answer. Prefer Codex's native questions for ordinary clarification.
+
+`./install.sh --codex --uninstall` removes only the Codex integration, retaining shared data and a remaining Claude installation. `--both --purge` removes both integrations and global data; project-local `.longrun/` directories remain.
+
+Sources: [Codex hooks](https://learn.chatgpt.com/docs/hooks), [skill discovery](https://learn.chatgpt.com/docs/build-skills). CLI syntax was checked with Codex 0.159.2. Hook-capable versions are required for automatic operation; older clients can use the manual protocol.

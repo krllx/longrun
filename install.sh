@@ -1,82 +1,200 @@
 #!/bin/bash
-# longrun installer: idempotent, backs up settings, never touches other hooks. `install.sh --uninstall` reverses it.
+# Idempotent install for either client. The no-flag Claude Code interface stays compatible.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-SKILLS_DIR="$CLAUDE_DIR/skills"
-DEST="$SKILLS_DIR/longrun"
-SETTINGS="$CLAUDE_DIR/settings.json"
-BACKUPS="$CLAUDE_DIR/backups"
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+CODEX_SKILLS="${LONGRUN_CODEX_SKILLS_DIR:-$HOME/.agents/skills}"
 BIN_DIR="${LONGRUN_BIN_DIR:-$HOME/.local/bin}"
-MODE="install"
-NOTIFY="ask"
+DATA_DIR="${LONGRUN_HOME:-$CLAUDE_DIR/longrun}"
+MODE=install
+CLIENTS=claude
+NOTIFY=ask
 TIMER=1
 for a in "$@"; do
   case "$a" in
-    --uninstall) MODE="uninstall" ;;
-    --purge) MODE="purge" ;;
+    --claude) CLIENTS=claude ;;
+    --codex) CLIENTS=codex ;;
+    --both) CLIENTS="claude codex" ;;
+    --uninstall) MODE=uninstall ;;
+    --purge) MODE=purge ;;
     --notify) NOTIFY=1 ;;
     --no-notify) NOTIFY=0 ;;
     --no-timer) TIMER=0 ;;
-    -h|--help) echo "usage: install.sh [--uninstall | --purge] [--notify | --no-notify] [--no-timer]
-  --notify     set up desktop notifications without asking
-  --no-notify  do not set them up (on macOS that skips installing terminal-notifier)
-  --no-timer   do not install the 5-minute timer (watches then wait until 'longrun watch install')
-  --purge      also removes ~/.claude/longrun data and the skill dir
+    -h|--help) cat <<'HELP'
+usage: install.sh [--claude | --codex | --both] [--uninstall | --purge]
+                  [--notify | --no-notify] [--no-timer]
+  --claude     Claude Code (default, existing install command unchanged)
+  --codex      Codex: ~/.agents/skills/longrun and $CODEX_HOME/hooks.json
+  --both       install or remove both clients; notes and watches are shared
+  --no-timer   skip the five-minute background timer
+  --purge      also remove shared global data; refuses while another client remains
 
-Without either notify flag the installer asks, and skips the step when nothing can answer.
+Without a notify flag, asks about desktop notifications (skips when non-interactive).
+CLAUDE_CONFIG_DIR, CODEX_HOME, LONGRUN_CODEX_SKILLS_DIR and LONGRUN_BIN_DIR override paths.
+LONGRUN_HOME relocates shared data (default: ~/.claude/longrun, including on Codex).
 
-Run it from a checkout, or without one:
-  curl -fsSL https://krllx.github.io/longrun/install.sh | bash
-The sources then come from the same repository as a tarball (LONGRUN_REPO, LONGRUN_REF override it)."; exit 0 ;;
+From a checkout: ./install.sh --codex
+Without one: curl -fsSL https://krllx.github.io/longrun/install.sh | bash -s -- --codex
+LONGRUN_REPO and LONGRUN_REF override the source repository/ref.
+HELP
+      exit 0 ;;
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac
 done
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 
-# 0. sources. Piped through a shell there is no checkout around us, so fetch one; uninstalling needs no sources.
-if [ "$MODE" = "install" ] && [ ! -f "$HERE/skill/longrun/SKILL.md" ]; then
+if [ "$MODE" = install ] && [ ! -f "$HERE/skill/longrun/SKILL.md" ]; then
   REPO="${LONGRUN_REPO:-krllx/longrun}"
   REF="${LONGRUN_REF:-main}"
-  command -v curl >/dev/null || { echo "curl is required to fetch the sources (or clone the repo and run ./install.sh)" >&2; exit 1; }
-  command -v tar >/dev/null || { echo "tar is required to fetch the sources (or clone the repo and run ./install.sh)" >&2; exit 1; }
-  TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"' EXIT
-  echo "source: $REPO@$REF (no checkout here, fetching the tarball)"
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xzf - -C "$TMP" \
-    || { echo "download failed: https://codeload.github.com/$REPO/tar.gz/$REF" >&2; exit 1; }
-  HERE="$(echo "$TMP"/*)"
-  [ -f "$HERE/skill/longrun/SKILL.md" ] || { echo "the tarball has no skill/longrun/SKILL.md" >&2; exit 1; }
-fi
-mkdir -p "$BACKUPS" "$SKILLS_DIR" "$BIN_DIR"
-STAMP="$(date +%Y%m%d-%H%M%S)"
-if [ -f "$SETTINGS" ]; then
-  cp "$SETTINGS" "$BACKUPS/settings.json.$STAMP.longrun.bak"
-  echo "backup: $BACKUPS/settings.json.$STAMP.longrun.bak"
+  command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
+  command -v tar >/dev/null || { echo "tar is required" >&2; exit 1; }
+  SOURCE_TMP="$(mktemp -d)"
+  trap 'rm -rf "$SOURCE_TMP"' EXIT
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xzf - -C "$SOURCE_TMP"
+  HERE="$(echo "$SOURCE_TMP"/*)"
+  [ -f "$HERE/skill/longrun/SKILL.md" ] || { echo "tarball has no longrun skill" >&2; exit 1; }
 fi
 
-if [ "$MODE" = "install" ]; then
-  # 1. skill files (copy, not symlink: the skill must keep working if this checkout moves)
-  mkdir -p "$DEST/scripts"
-  cp "$HERE/skill/longrun/SKILL.md" "$DEST/SKILL.md"
-  cp "$HERE/skill/longrun/hooks.json" "$DEST/hooks.json"
-  cp "$HERE/skill/longrun/scripts/longrun" "$DEST/scripts/longrun"
-  chmod +x "$DEST/scripts/longrun"
-  ln -sfn "$DEST/scripts/longrun" "$BIN_DIR/longrun"
-  echo "skill:  $DEST"
-  echo "cli:    $BIN_DIR/longrun -> $DEST/scripts/longrun"
-  # 1a. the MCP server behind the `ask` / `notify` tools, user scope: every session of every project gets it.
-  # Re-added on every install so the command follows BIN_DIR; only new sessions see a (re)registered server.
-  if command -v claude >/dev/null 2>&1; then
-    claude mcp remove --scope user longrun >/dev/null 2>&1 || true
-    if claude mcp add --scope user longrun -- "$BIN_DIR/longrun" mcp >/dev/null 2>&1; then
-      echo "mcp:    server 'longrun' (tools ask, notify) registered in user scope; sessions started from now on get it"
-    else
-      echo "mcp:    registration failed; run by hand: claude mcp add --scope user longrun -- $BIN_DIR/longrun mcp"
-    fi
-  else
-    echo "mcp:    'claude' is not on PATH; register the server by hand: claude mcp add --scope user longrun -- $BIN_DIR/longrun mcp"
+# Refuse a data purge before modifying either installation.
+if [ "$MODE" = purge ]; then
+  if { [ "$CLIENTS" = claude ] && [ -f "$CODEX_SKILLS/longrun/SKILL.md" ]; } ||
+     { [ "$CLIENTS" = codex ] && [ -f "$CLAUDE_DIR/skills/longrun/SKILL.md" ]; }; then
+    echo "shared data is still used by the other client; use --uninstall or --both --purge" >&2
+    exit 2
   fi
+fi
+mkdir -p "$BIN_DIR"
+STAMP="$(date +%Y%m%d-%H%M%S).$$"
+
+# Validate all selected config files before copying files or registering servers.
+for CLIENT in $CLIENTS; do
+  if [ "$CLIENT" = claude ]; then
+    SETTINGS="$CLAUDE_DIR/settings.json"
+  else
+    SETTINGS="$CODEX_DIR/hooks.json"
+  fi
+  python3 - "$SETTINGS" <<'PY_VALIDATE'
+import json, os, sys
+p = sys.argv[1]
+if os.path.exists(p):
+    try:
+        d = json.load(open(p))
+        if not isinstance(d, dict) or not isinstance(d.get("hooks", {}), dict):
+            raise ValueError("expected an object with a hooks object")
+        for entries in d.get("hooks", {}).values():
+            if not isinstance(entries, list):
+                raise ValueError("hook events must contain arrays")
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("hooks"), list) or not all(isinstance(h, dict) for h in entry["hooks"]):
+                    raise ValueError("hook entries must contain arrays of handler objects")
+    except ValueError as e:
+        sys.exit("%s is not valid hook configuration (%s); nothing was changed" % (p, e))
+PY_VALIDATE
+done
+
+for CLIENT in $CLIENTS; do
+  if [ "$CLIENT" = claude ]; then
+    CONFIG_DIR="$CLAUDE_DIR"
+    DEST="$CLAUDE_DIR/skills/longrun"
+    SETTINGS="$CLAUDE_DIR/settings.json"
+    ENTRY=SKILL.md
+    SPEC=hooks.json
+  else
+    CONFIG_DIR="$CODEX_DIR"
+    DEST="$CODEX_SKILLS/longrun"
+    SETTINGS="$CODEX_DIR/hooks.json"
+    ENTRY=SKILL.codex.md
+    SPEC=hooks.codex.json
+  fi
+  mkdir -p "$CONFIG_DIR/backups"
+  if [ -f "$SETTINGS" ]; then
+    cp "$SETTINGS" "$CONFIG_DIR/backups/$(basename "$SETTINGS").$STAMP.longrun.bak"
+  fi
+  if [ "$MODE" = install ]; then
+    mkdir -p "$DEST/scripts" "$DEST/references"
+    cp "$HERE/skill/longrun/$ENTRY" "$DEST/SKILL.md"
+    cp "$HERE/skill/longrun/$SPEC" "$DEST/hooks.json"
+    cp "$HERE/skill/longrun/references/"*.md "$DEST/references/"
+    cp "$HERE/skill/longrun/scripts/longrun" "$DEST/scripts/longrun"
+    chmod +x "$DEST/scripts/longrun"
+    ln -sfn "$DEST/scripts/longrun" "$BIN_DIR/longrun"
+    echo "$CLIENT skill: $DEST"
+  fi
+
+  # Only our handlers are removed, even inside a group with another owner's hook.
+  python3 - "$SETTINGS" "$DEST/scripts/longrun" "$HERE/skill/longrun/$SPEC" "$MODE" "$CLIENT" "$DATA_DIR" <<'PY_HOOKS'
+import json, os, shlex, sys
+settings_path, bin_path, spec_path, mode, client, data_path = sys.argv[1:]
+settings = json.load(open(settings_path)) if os.path.exists(settings_path) else {}
+hooks = settings.setdefault("hooks", {})
+def ours(h):
+    try:
+        return any(p.endswith("/longrun/scripts/longrun") for p in shlex.split(h.get("command") or ""))
+    except ValueError:
+        return False
+removed = added = 0
+for event in list(hooks):
+    kept = []
+    for entry in hooks[event]:
+        remaining = [h for h in entry.get("hooks", []) if not ours(h)]
+        removed += len(entry.get("hooks", [])) - len(remaining)
+        if remaining:
+            kept.append(dict(entry, hooks=remaining))
+    if kept:
+        hooks[event] = kept
+    else:
+        del hooks[event]
+if mode == "install":
+    for event, entries in json.load(open(spec_path))["hooks"].items():
+        for entry in entries:
+            entry = json.loads(json.dumps(entry))
+            for h in entry["hooks"]:
+                h["command"] = "LONGRUN_HOME=%s %s" % (shlex.quote(data_path), h["command"].replace("LONGRUN_BIN", shlex.quote(bin_path)))
+            hooks.setdefault(event, []).append(entry)
+            added += 1
+if client == "claude":
+    perms = settings.setdefault("permissions", {}).setdefault("allow", [])
+    if mode == "install":
+        for rule in ("Bash(longrun:*)", "Bash(%s:*)" % bin_path):
+            if rule not in perms:
+                perms.append(rule)
+    else:
+        settings["permissions"]["allow"] = [p for p in perms if p != "Bash(longrun:*)" and "/skills/longrun/scripts/longrun" not in p]
+if not hooks:
+    settings.pop("hooks", None)
+os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+with open(settings_path + ".tmp", "w") as f:
+    json.dump(settings, f, indent=2, ensure_ascii=False)
+os.replace(settings_path + ".tmp", settings_path)
+print("%s hooks: removed %d old handlers, added %d entries" % (client, removed, added))
+PY_HOOKS
+
+  if command -v "$CLIENT" >/dev/null 2>&1; then
+    if [ "$CLIENT" = claude ]; then
+      claude mcp remove --scope user longrun >/dev/null 2>&1 || true
+      if [ "$MODE" = install ]; then
+        claude mcp add --scope user longrun --env "LONGRUN_HOME=$DATA_DIR" -- "$DEST/scripts/longrun" mcp >/dev/null 2>&1 ||
+          echo "mcp: register manually: claude mcp add --scope user longrun --env 'LONGRUN_HOME=$DATA_DIR' -- '$DEST/scripts/longrun' mcp"
+      fi
+    else
+      # `mcp add` replaces this named entry; other config.toml settings are preserved.
+      if [ "$MODE" = install ]; then
+        if [ -f "$CONFIG_DIR/config.toml" ]; then
+          cp "$CONFIG_DIR/config.toml" "$CONFIG_DIR/backups/config.toml.$STAMP.longrun.bak"
+        fi
+        codex mcp add longrun --env LONGRUN_CLIENT=codex --env "LONGRUN_HOME=$DATA_DIR" -- "$DEST/scripts/longrun" mcp >/dev/null 2>&1 ||
+          echo "mcp: register manually: codex mcp add longrun --env LONGRUN_CLIENT=codex --env 'LONGRUN_HOME=$DATA_DIR' -- '$DEST/scripts/longrun' mcp"
+      else
+        codex mcp remove longrun >/dev/null 2>&1 || true
+      fi
+    fi
+  elif [ "$MODE" = install ]; then
+    echo "mcp: '$CLIENT' is not on PATH; register longrun with '$CLIENT mcp add' later"
+  fi
+done
+
+if [ "$MODE" = install ]; then
   # 1b. desktop notifications. Asked for, not assumed: they install software on macOS and ask the system for
   # a permission, and longrun never depends on them - a halt and a fired watch reach the
   # session through its socket or inbox either way. Neither OS can draw one unaided: macOS has no working
@@ -134,90 +252,60 @@ if [ "$MODE" = "install" ]; then
     echo "notify: no notify-send (libnotify) - halts and fired watches still reach the sessions"
     echo "        themselves; 'apt install libnotify-bin' (or 'dnf install libnotify') to also see them on screen."
   fi
-  # 1c. the timer that runs the tick every 5 minutes: the watches this machine is waiting on, and the watcher
-  # that looks at the other sessions. Installed here so nothing has to be remembered; `--no-timer` skips it,
-  # and the first `longrun watch add` installs it anyway.
-  if [ "$TIMER" = "0" ]; then
-    echo "timer:  skipped (--no-timer); 'longrun watch install' whenever you want it"
+  if [ "$TIMER" = 0 ]; then
+    echo "timer: skipped (--no-timer)"
   elif TIMER_OUT="$("$BIN_DIR/longrun" watch install 2>&1)"; then
-    echo "timer:  $(printf '%s' "$TIMER_OUT" | head -n1)"
+    echo "timer: $(printf '%s' "$TIMER_OUT" | head -n1)"
   else
-    printf '%s\n' "$TIMER_OUT" | sed 's/^/timer:  /'
-    echo "timer:  not installed - everything else works; watches will not be checked until it is"
+    printf '%s\n' "$TIMER_OUT" | sed 's/^/timer: /'
   fi
   case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
-    *) echo "PATH:   $BIN_DIR is not on your PATH - add it (e.g. 'export PATH=\"\$HOME/.local/bin:\$PATH\"' in"
-       echo "        ~/.zshrc or ~/.bashrc), otherwise the 'longrun' command below is not found. The hooks are"
-       echo "        unaffected: they call the script by its absolute path." ;;
+    *) echo "PATH: add $BIN_DIR to PATH; hooks already use absolute paths" ;;
   esac
-fi
-
-# 2. merge/remove hook entries in settings.json (identified by the script path)
-python3 - "$SETTINGS" "$DEST/scripts/longrun" "$HERE/skill/longrun/hooks.json" "$MODE" <<'PY'
-import json, os, sys
-settings_path, bin_path, hooks_path, mode = sys.argv[1:5]
-try:
-    settings = json.load(open(settings_path))
-except FileNotFoundError:
-    settings = {}
-except ValueError as e:
-    sys.exit("settings.json is not valid JSON (%s); fix it first, nothing was changed" % e)
-hooks = settings.setdefault("hooks", {})
-def is_ours(entry):
-    return any("/skills/longrun/scripts/longrun" in (h.get("command") or "") for h in entry.get("hooks", []))
-removed = 0
-for ev in list(hooks):
-    before = len(hooks[ev])
-    hooks[ev] = [e for e in hooks[ev] if not is_ours(e)]
-    removed += before - len(hooks[ev])
-    if not hooks[ev]:
-        del hooks[ev]
-added = 0
-if mode == "install":
-    spec = json.load(open(hooks_path))["hooks"]
-    for ev, entries in spec.items():
-        for e in entries:
-            e = json.loads(json.dumps(e).replace("LONGRUN_BIN", bin_path))
-            hooks.setdefault(ev, []).append(e)
-            added += 1
-    perms = settings.setdefault("permissions", {}).setdefault("allow", [])
-    for rule in ("Bash(longrun:*)", "Bash(%s:*)" % bin_path):
-        if rule not in perms:
-            perms.append(rule)
-else:
-    perms = settings.get("permissions", {}).get("allow", [])
-    ours = lambda p: p == "Bash(longrun:*)" or "/skills/longrun/scripts/longrun" in p  # only the two rules we add
-    settings.setdefault("permissions", {})["allow"] = [p for p in perms if not ours(p)]
-if not settings.get("hooks"):
-    settings.pop("hooks", None)
-tmp = settings_path + ".tmp"
-json.dump(settings, open(tmp, "w"), indent=2, ensure_ascii=False)
-os.replace(tmp, settings_path)
-print("hooks:  removed %d old longrun entries, added %d" % (removed, added))
-PY
-
-if [ "$MODE" != "install" ]; then
-  # the timer goes first: it runs the script we are about to delete
+  echo "next: cd <project> && longrun init"
+  if [ "$CLIENTS" != claude ]; then
+    echo 'Codex: open /hooks to review and trust the installed hooks, then invoke $longrun.'
+    echo 'Restart Codex if the skill or MCP server is not visible. No hook trust or sandbox settings were changed.'
+  fi
+  if [ "$CLIENTS" != codex ]; then
+    echo 'Claude Code: type /longrun to load the digest in an existing session.'
+  fi
+else
+  SURVIVOR=""
+  if [ "$CLIENTS" = claude ] && [ -x "$CODEX_SKILLS/longrun/scripts/longrun" ]; then
+    SURVIVOR="$CODEX_SKILLS/longrun/scripts/longrun"
+  elif [ "$CLIENTS" = codex ] && [ -x "$CLAUDE_DIR/skills/longrun/scripts/longrun" ]; then
+    SURVIVOR="$CLAUDE_DIR/skills/longrun/scripts/longrun"
+  fi
+  RESTART_TIMER=0
   if [ -x "$BIN_DIR/longrun" ]; then
-    "$BIN_DIR/longrun" watch uninstall >/dev/null 2>&1 && echo "timer:  removed" || true
+    if ! "$BIN_DIR/longrun" watch status | head -n1 | grep -q 'NOT INSTALLED'; then
+      RESTART_TIMER=1
+    fi
+    "$BIN_DIR/longrun" watch uninstall >/dev/null 2>&1 || true
   fi
-  command -v claude >/dev/null 2>&1 && claude mcp remove --scope user longrun >/dev/null 2>&1 && echo "mcp:    server 'longrun' unregistered"
-  rm -f "$BIN_DIR/longrun"
-  rm -rf "$DEST"
-  # 0.5 built a copy of the terminal-notifier bundle here so banners carried a longrun icon; 0.6.0 dropped it
-  rm -rf "$CLAUDE_DIR/longrun/notifier"
-  echo "removed $DEST and $BIN_DIR/longrun"
-  if [ "$MODE" = "purge" ]; then
-    rm -rf "$CLAUDE_DIR/longrun"
-    echo "removed $CLAUDE_DIR/longrun (registry, external project dirs). Project-local .longrun/ dirs are left alone."
+  for CLIENT in $CLIENTS; do
+    if [ "$CLIENT" = claude ]; then
+      rm -rf "$CLAUDE_DIR/skills/longrun"
+    else
+      rm -rf "$CODEX_SKILLS/longrun"
+    fi
+  done
+  if [ -n "$SURVIVOR" ]; then
+    ln -sfn "$SURVIVOR" "$BIN_DIR/longrun"
+    if [ "$RESTART_TIMER" = 1 ]; then
+      "$BIN_DIR/longrun" watch install >/dev/null 2>&1 || true
+    fi
+    echo "cli kept for the other client: $SURVIVOR"
   else
-    echo "data kept: $CLAUDE_DIR/longrun and any project .longrun/ dirs (use --purge to delete the global part)"
+    rm -f "$BIN_DIR/longrun"
+  fi
+  if [ "$MODE" = purge ]; then
+    rm -rf "$DATA_DIR"
+    echo "removed shared data: $DATA_DIR (project .longrun/ directories are kept)"
+  else
+    echo "shared data kept: $DATA_DIR"
   fi
 fi
-if [ "$MODE" = "install" ]; then
-  echo "next:   cd <the folder you open in Claude Code> && longrun init   (then say \"set up longrun\" in a session)"
-fi
-echo "done. Already-running sessions pick the hooks up without a restart (verified on 2.1.260), but their"
-echo "SessionStart digest only appears at the next SessionStart: after a compaction, /clear, resume, or in a new session."
-echo "To see it right away in a running session, type /longrun."
+echo done.

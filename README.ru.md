@@ -7,7 +7,7 @@
 <h1 align="center">longrun</h1>
 
 <p align="center">
-  Память и координация сессий Claude Code.<br>
+  Память и координация сессий Claude Code и Codex.<br>
   Проект держит свое состояние на диске, а пишут и разбирают его сами агенты.<br>
   Каждая сессия видит, что известно проекту и кто еще над ним работает.<br>
   Работа уходит той сессии, у которой есть контекст; ожидание надежно и ничего не стоит.<br>
@@ -25,10 +25,11 @@
 
 <p align="center">
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-skill-d97757">
+  <img alt="Codex" src="https://img.shields.io/badge/Codex-skill-10a37f">
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-337_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-435_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -42,23 +43,42 @@
 
 ## Быстрый старт
 
+Установка для Claude Code по умолчанию:
+
 ```bash
 curl -fsSL https://krllx.github.io/longrun/install.sh | bash
 ```
 
+Для Codex из клонированного репозитория:
+
+```bash
+./install.sh --codex          # --both устанавливает Claude Code и Codex
+```
+
+Или без клонирования:
+
+```bash
+curl -fsSL https://krllx.github.io/longrun/install.sh | bash -s -- --codex
+```
+
+В Codex откройте `/hooks`, проверьте установленные хуки и разрешите их запуск, затем вызовите `$longrun` в проекте. Скилл находится в `~/.agents/skills/longrun`, хуки в `${CODEX_HOME:-~/.codex}/hooks.json`, MCP-инструменты регистрируются через `codex mcp add`. Обе программы используют общие `.longrun/` и существующий каталог `~/.claude/longrun/`. Команда `--codex --uninstall` удаляет только интеграцию Codex. [Настройка и совместимость Codex](skill/longrun/references/codex.md) описаны на английском.
+
+Примеры жизненного цикла ниже относятся к Claude Code. Codex тоже восстанавливает заметки после compaction и получает сообщения из общей очереди. Его MCP-инструмент `run` выполняет команды скилла, когда песочница не разрешает терминалу записывать состояние сессий. `PreCompact` сохраняет снимок состояния, но не передает инструкции модели, которая сжимает контекст. `send --resume` и watch с `--wake` запускают `codex exec resume` для сессий Codex с обычными разрешениями программы.
+
 > [!NOTE]
-> Установщик добавляет скилл с командой `longrun` для терминала, хуки в `~/.claude/settings.json` и фоновый таймер, который срабатывает раз в пять минут. Спросит про установку уведомлений. `install.sh --uninstall` убирает все, что добавил.
+> Установщик добавляет скилл и хуки выбранной программы, команду `longrun` для терминала и фоновый таймер раз в пять минут. Спросит про установку уведомлений. Для удаления интеграции используйте тот же флаг программы с `--uninstall`.
 
 <details>
 <summary>Что именно происходит на машине</summary>
 
-- `~/.claude/settings.json` - 11 хуков и два правила в permissions, которые разрешают агенту вызывать `longrun`. Файл сначала копируется в `~/.claude/backups/`, хуки, добавленные не longrun, не трогаются.
-- `~/.claude/skills/longrun/` и симлинк `~/.local/bin/longrun`.
-- MCP-сервер `longrun` в user scope (`claude mcp add`) - он дает агенту инструменты `ask` и `notify`.
+- Claude Code: в `~/.claude/settings.json` добавляются 12 хуков и два правила permissions для вызова `longrun`; скилл копируется в `~/.claude/skills/longrun/`.
+- Codex: в `${CODEX_HOME:-~/.codex}/hooks.json` добавляются 10 хуков; скилл копируется в `~/.agents/skills/longrun/`. Разрешите запуск хуков через `/hooks`.
+- Существующие конфигурации сначала сохраняются в резервные копии, чужие хуки сохраняются. Общий симлинк команды для терминала находится в `~/.local/bin/longrun`.
+- MCP-сервер `longrun` регистрируется через CLI выбранной программы и дает инструменты `run`, `ask` и `notify`.
 - **фоновый таймер** раз в пять минут: агент launchd на macOS, systemd user timer или строка в cron на Linux. Он проверяет заведенные watch и состояние сессий. Это несколько shell-проверок без модели и без токенов; сессию он будит, только когда ваше условие выполнилось. Флаг `--no-timer` отключает таймер.
 - **уведомления на рабочем столе**, если ответить да на вопрос установщика: на macOS `brew install terminal-notifier`, если его нет, и одно тестовое уведомление, чтобы macOS запросила разрешение. На Linux только проверяется наличие `notify-send`. Флаги `--notify` и `--no-notify` задают ответ заранее.
 
-Нужны macOS или Linux, Claude Code и python3 3.9+. Из клонированного репозитория запускается тот же [`install.sh`](install.sh).
+Нужны macOS или Linux, Claude Code или Codex и python3 3.9+. Из клонированного репозитория запускается тот же [`install.sh`](install.sh).
 
 </details>
 
@@ -253,13 +273,14 @@ longrun orchestrate start --goal "..." | board [add --fact|ack] | ask | halt | r
 ## Разработка
 
 ```bash
-bash tests/run.sh            # 222 регрессионных проверок, без API
-bash tests/scenarios.sh      # 37 сценариев, по одному на задачу
-bash tests/orchestrator.sh   # 51: слой оркестратора
+bash tests/run.sh            # 293 регрессионных проверки, без API
+bash tests/scenarios.sh      # 47 сценариев, по одному на задачу
+bash tests/orchestrator.sh   # 53: слой оркестратора
 bash tests/ask.sh            # 27: диалог и MCP-сервер
+python3 tests/codex.py       # 15: Codex и совместная работа клиентов
 ```
 
-Установщик копирует файлы в `~/.claude/skills/longrun/`; правки в репозитории сами по себе не применяются. Уже запущенная сессия подхватывает обновление без перезапуска, потому что хук - отдельный процесс на каждое событие.
+Установщик копирует файлы в каталог скиллов выбранной программы; правки в репозитории сами по себе не применяются. Уже подключенные хуки запускают обновленный скрипт при следующем событии. В Codex проверьте новые хуки через `/hooks` и перезапустите программу, если скилл или MCP-инструменты не появились.
 
 ## Лицензия
 

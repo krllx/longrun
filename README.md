@@ -7,7 +7,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
 <h1 align="center">longrun</h1>
 
 <p align="center">
-  Memory and coordination for Claude Code sessions.<br>
+  Memory and coordination for Claude Code and Codex sessions.<br>
   A project that keeps its own state on disk, written and kept in order by the agents themselves.<br>
   Every session sees what the project knows and who else is working on it.<br>
   Work goes to the session that has the context; waiting is reliable and costs nothing.<br>
@@ -25,10 +25,11 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
 
 <p align="center">
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-skill-d97757">
+  <img alt="Codex" src="https://img.shields.io/badge/Codex-skill-10a37f">
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-337_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-435_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -40,23 +41,42 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
 
 ## Quick start
 
+For Claude Code (the existing default):
+
 ```bash
 curl -fsSL https://krllx.github.io/longrun/install.sh | bash
 ```
 
+For Codex, from a checkout:
+
+```bash
+./install.sh --codex          # --both installs Claude Code and Codex
+```
+
+Or without a checkout:
+
+```bash
+curl -fsSL https://krllx.github.io/longrun/install.sh | bash -s -- --codex
+```
+
+In Codex, review and trust the installed hooks in `/hooks`, then invoke `$longrun` in your project. The skill goes in `~/.agents/skills/longrun`, hooks in `${CODEX_HOME:-~/.codex}/hooks.json`, and MCP tools are registered with `codex mcp add`. Both clients share the same `.longrun/` and existing `~/.claude/longrun/` data. `--codex --uninstall` removes only the Codex integration. [Codex setup and compatibility](skill/longrun/references/codex.md) covers manual operation on older clients and the differences below.
+
+The lifecycle examples below describe Claude Code. Codex also restores notes after compaction and receives messages through the shared inbox. Its MCP `run` tool runs the protocol commands when the shell sandbox cannot write the session store. Codex's `PreCompact` saves a snapshot; it does not steer its summarizer. `send --resume` and watch `--wake` use `codex exec resume` for Codex targets, with normal client permissions.
+
 > [!NOTE]
-> The installer adds the skill with its `longrun` command for the terminal, hooks in `~/.claude/settings.json`, and a five-minute timer in the background. It asks whether to set up desktop notifications. `install.sh --uninstall` takes it all back.
+> The installer adds the selected client's skill and hooks, the `longrun` terminal command, and a five-minute background timer. It asks whether to set up desktop notifications. Use the same client flag with `--uninstall` to remove that integration.
 
 <details>
 <summary>What exactly it changes on this machine</summary>
 
-- `~/.claude/settings.json` - 12 hook entries and two permission rules that let the agent call `longrun`. The file is copied to `~/.claude/backups/` first, and hooks that longrun did not add are left untouched.
-- `~/.claude/skills/longrun/` and the symlink `~/.local/bin/longrun`.
-- the MCP server `longrun` in user scope (`claude mcp add`), which is where the `ask` and `notify` tools come from.
+- Claude Code: `~/.claude/settings.json` gets 12 hook entries and two permission rules that let the agent call `longrun`; the skill goes in `~/.claude/skills/longrun/`.
+- Codex: `${CODEX_HOME:-~/.codex}/hooks.json` gets 10 hook entries; the skill goes in `~/.agents/skills/longrun/`. Trust the hooks through `/hooks`.
+- Existing configuration files are backed up first, and other hooks are preserved. The shared terminal symlink is `~/.local/bin/longrun`.
+- The MCP server `longrun` is registered through the selected client's CLI. It exposes `run`, `ask` and `notify`.
 - **a background timer**, every five minutes: a launchd agent on macOS, a systemd user timer or a cron line on Linux. It checks the watches you registered and looks at the sessions - a few shell checks, no model and no tokens, and it wakes a session only when one of your conditions comes true. `--no-timer` skips it.
 - **desktop notifications**, if you answered yes to the installer's question: on macOS `brew install terminal-notifier` when it is missing, plus one test notification that makes macOS ask for permission. On Linux it only checks for `notify-send`. `--notify` and `--no-notify` answer the question in advance.
 
-Needs macOS or Linux, Claude Code and python3 3.9+. From a clone it is the same [`install.sh`](install.sh).
+Needs macOS or Linux, Claude Code or Codex, and python3 3.9+. From a clone it is the same [`install.sh`](install.sh).
 
 </details>
 
@@ -251,13 +271,14 @@ Full flags, file formats and the facts we verified about Claude Code: [docs/REFE
 ## Development
 
 ```bash
-bash tests/run.sh            # 222 regression checks, no API calls
-bash tests/scenarios.sh      # 37 scenarios, one per goal
-bash tests/orchestrator.sh   # 51: the orchestrator layer
+bash tests/run.sh            # 293 regression checks, no API calls
+bash tests/scenarios.sh      # 47 scenarios, one per goal
+bash tests/orchestrator.sh   # 53: the orchestrator layer
 bash tests/ask.sh            # 27: the dialog and the MCP server
+python3 tests/codex.py       # 15: Codex and mixed-client integration
 ```
 
-The installer copies files into `~/.claude/skills/longrun/`; nothing is loaded from the checkout. A running session picks an update up without a restart, because a hook is a separate process per event.
+The installer copies files into the selected client's skill directory; nothing is loaded from the checkout. Existing hook commands run the updated script on their next event. In Codex, review newly registered hooks in `/hooks` and restart if the skill or MCP tools do not appear.
 
 ## License
 
