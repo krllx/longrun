@@ -82,6 +82,28 @@ printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PermissionRequest","too
 check "PermissionRequest marks waiting" "meta $B | grep -q '\"waiting_what\": \"permission (Bash)\"'"
 printf '{"session_id":"%s","cwd":"%s","hook_event_name":"Notification","notification_type":"agent_needs_input","message":"x"}' "$B" "$P" | "$LR" hook Notification
 check "Notification(agent_needs_input) marks waiting for input" "meta $B | grep -q '\"waiting_what\": \"input\"'"
+post $B t8b >/dev/null
+printf '{"session_id":"%s","cwd":"%s","hook_event_name":"Notification","notification_type":"worker_permission_prompt","tool_name":"Bash","message":"worker-1 needs permission for Bash"}' "$B" "$P" | "$LR" hook Notification
+check "a teammate asking the LEADER for permission is a session waiting for the user too" "meta $B | grep -q '\"waiting_what\": \"permission (Bash)\"'"
+# ...and the type has to be in the hooks.json matcher by its full name. That matcher is word characters
+# and pipes only, which is the one case where Claude Code does not compile a regex: it splits on "|" and
+# compares for equality, so being a substring of permission_prompt buys nothing.
+check "the notification matcher names exactly the types the hook acts on, no fewer and no more" "python3 - '$HERE/../skill/longrun/hooks.json' '$LR' <<'PY'
+import json,re,sys
+m=json.load(open(sys.argv[1]))['hooks']['Notification'][0]['matcher']
+src=open(sys.argv[2]).read()
+ns={}
+for name in ('NOTIFY_PERMISSION_TYPES','NOTIFY_INPUT_TYPES','NOTIFY_IDLE_TYPE'):
+    exec(re.search(r'^%s = .*\$' % name, src, re.M).group(0), ns)
+assert re.match(r'^[a-zA-Z0-9_|]+\$', m), 'the CLI would compile this one as a regex: rethink the check'
+named = set(m.split('|'))
+want = set(ns['NOTIFY_PERMISSION_TYPES'] + ns['NOTIFY_INPUT_TYPES'] + (ns['NOTIFY_IDLE_TYPE'],)) - {'permission_request'}
+assert want <= named, want - named
+# ...and nothing else is named. The CLI knows more types than these - agent_completed, push_notification,
+# the computer_use_* family - and a matcher that named one of those would start a process per event for
+# a handler that does nothing with it.
+assert named <= want, named - want
+PY"
 post $B t9 >/dev/null; check "PostToolUse clears waiting" "! meta $B | grep -q 'waiting_since'"
 turn $B >/dev/null; check "UserPromptSubmit stamps turn_started" "meta $B | grep -q 'turn_started'"
 TR="$T/tr.jsonl"; python3 - "$TR" <<'PY'

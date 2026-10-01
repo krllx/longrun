@@ -78,6 +78,20 @@ TB3="$(turn $B "$WT_C")"; check "S3.3 B's own shared write is not reported back 
 TA="$(cd "$WT_E" && turn $A "$WT_E")"; check "S3.4 ...but A hears about it on A's next turn" "echo \"\$TA\" | grep -q '+ - \[n4\] .*PR C = 15473925'"
 ( cd "$WT_E" && as $A replace n1 "PR E = 15526210, branch EDAINAPP-1375-screen, merged r21056999 2026-09-08" >/dev/null && as $A rm n2 >/dev/null )
 TB4="$(turn $B "$WT_C")"; check "S3.5 a rewrite shows as ~ and a removal as removed" "echo \"\$TB4\" | grep -q '~ - \[n1\] .*merged r21056999' && echo \"\$TB4\" | grep -q 'removed: n2'"
+# The user edits NOTES.md in an editor, which is a supported way to write them. Every hand-written line
+# parses as id 0, so a delta keyed by id kept one of them and dropped the rest.
+printf -- '- the staging token is in 1Password, not in the repo\n- the nightly job is disabled until the cron host moves\n' >> "$HQ/.longrun/NOTES.md"
+TB4B="$(turn $B "$WT_C")"
+check "S3.5a two lines the user added by hand both reach the other session, not just the last one" "echo \"\$TB4B\" | grep -q 'staging token is in 1Password' && echo \"\$TB4B\" | grep -q 'nightly job is disabled'"
+TB4C="$(turn $B "$WT_C")"; check "S3.5b ...and they are not re-reported as a rewrite on the next turn" "test -z \"\$TB4C\""
+# The deltas also run mid-turn, and mid-turn a hand-written line has no id yet - nothing adopts it until
+# the next turn boundary. Reported as it stands, it would arrive twice: once under the id 0 every
+# unnumbered line parses as, and once more under the real id it is about to be given.
+printf -- '- the payment cycle is frozen until the tariff import lands\n' >> "$HQ/.longrun/NOTES.md"
+MID=""; for i in 1 2 3 4 5 6; do MID="$MID$(tool $B "$WT_C")"; done
+check "S3.5c a line added by hand is not reported mid-turn, under an id it does not have yet" "! echo \"\$MID\" | grep -q 'tariff import'"
+TB4D="$(turn $B "$WT_C")"
+check "S3.5d ...the turn boundary adopts it, and then it arrives once, under a real id" "echo \"\$TB4D\" | grep -qE '\+ - \[n[1-9][0-9]*\].*tariff import'"
 # More changed at once than one turn's slice can carry: the rest must come on the following turns.
 # Clipping the text and marking everything seen - what this used to do - hid them from B for good.
 python3 - "$HQ/.longrun/config.json" <<'PY'
@@ -99,7 +113,12 @@ check "S3.8 a peer's note reaches a session INSIDE its turn, between two tool ca
 MT2=""; for i in 1 2 3 4 5 6; do MT2="$MT2$(tool $B "$WT_C")"; done
 check "S3.9 ...and once only: the mid-turn delta marks it seen like the boundary one does" "! echo \"\$MT2\" | grep -q 'past 128 kB'"
 TB9="$(turn $B "$WT_C")"; check "S3.10 ...so the turn boundary does not repeat it either" "! echo \"\$TB9\" | grep -q 'past 128 kB'"
-MT3="$(tool $B "$WT_C")"; check "S3.11 the check is rate-limited: not on every single tool call" "test -z \"\$MT3\""
+# Rate-limited, and asked with something waiting to be delivered: with nothing new to say, the delta is
+# empty whether the limit exists or not, and the check passed with the limit taken out altogether.
+( cd "$WT_E" && as $A add --shared -t fact "the settlement cron runs at 03:15 UTC, not at midnight" >/dev/null )
+MT3="$(tool $B "$WT_C")"; check "S3.11 the check is rate-limited: a peer's fresh note does not come on the very next call" "! echo \"\$MT3\" | grep -q '03:15 UTC'"
+MT4=""; for i in 1 2 3 4 5; do MT4="$MT4$(tool $B "$WT_C")"; done
+check "S3.12 ...and it does come once the window has passed, instead of being lost" "echo \"\$MT4\" | grep -q '03:15 UTC'"
 
 echo "== S4: two sessions started in the same directory keep separate own notes"
 cd "$HQ"; start $C "$HQ" startup >/dev/null

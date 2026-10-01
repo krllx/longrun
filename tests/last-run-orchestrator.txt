@@ -38,6 +38,8 @@
   ok   PostToolUse clears it by tool_use_id
   ok   PermissionRequest marks waiting
   ok   Notification(agent_needs_input) marks waiting for input
+  ok   a teammate asking the LEADER for permission is a session waiting for the user too
+  ok   the notification matcher names exactly the types the hook acts on, no fewer and no more
   ok   PostToolUse clears waiting
   ok   UserPromptSubmit stamps turn_started
   ok   Stop samples ctx: 262k of the 300k window from the user settings
@@ -57,4 +59,4 @@
   ok   stop clears the lock and its mirror
   ok   digest without an orchestrator still shows the board
 
-PASS=51 FAIL=0  (tmp: /tmp/longrun-orch.yy9MOR)
+PASS=53 FAIL=0  (tmp: /tmp/longrun-orch.ESwoAR)

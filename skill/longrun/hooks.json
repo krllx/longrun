@@ -1,5 +1,5 @@
 {
-  "_comment": "12 hook entries installed into ~/.claude/settings.json by install.sh. LONGRUN_BIN is replaced with the absolute path of scripts/longrun. Entries are recognised on uninstall by that path. PostToolBatch is newer than the rest: where the CLI does not know the event, the entry is inert and PostToolUse carries the same hint.",
+  "_comment": "12 hook entries installed into ~/.claude/settings.json by install.sh. LONGRUN_BIN is replaced with the absolute path of scripts/longrun. Entries are recognised on uninstall by that path. PostToolBatch is newer than the rest: where the CLI does not know the event, the entry is inert and PostToolUse carries the same hint. The PostToolUse matcher below is NOT a list of tool names: because it contains mcp__.*, Claude Code compiles it and runs an unanchored regex test, so TodoWrite matches on Write and BashOutput on Bash. HOOKED_RE in the script mirrors that as a fallback, and tests/run.sh compares the two answer for answer - change this string and that check tells you what moved. What a call was really counted by is recorded per tool_use_id, because a call that FAILS never reaches PostToolUse at all: the CLI sends PostToolUseFailure, whose matcher here is Bash|PowerShell. The Notification matcher is the opposite case: it is word characters and pipes only, so the CLI splits it and compares for EQUALITY, and worker_permission_prompt (a teammate asking the leader) has to be named in full even though permission_prompt is a substring of it. It names exactly the types the handler acts on: the CLI knows more of them (agent_completed, push_notification, the computer_use_* family), and naming one of those would pay for a process per event to do nothing.",
   "hooks": {
     "SessionStart": [
       {
@@ -85,7 +85,7 @@
     ],
     "Notification": [
       {
-        "matcher": "permission_prompt|idle_prompt|agent_needs_input|elicitation_dialog|elicitation_url_dialog",
+        "matcher": "permission_prompt|worker_permission_prompt|idle_prompt|agent_needs_input|elicitation_dialog|elicitation_url_dialog",
         "hooks": [
           {
             "type": "command",

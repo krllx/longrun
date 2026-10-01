@@ -243,8 +243,9 @@ blocked, вопрос), будит оркестратора через соке�
   границы окна модели;
 - `claude --bg "prompt"`, `claude agents --json`, `claude attach|logs|stop|respawn`,
   состояние в `~/.claude/jobs/<id>/state.json`;
-- типы уведомлений `permission_prompt` (после ~6 с ожидания), `idle_prompt` (60 с после
-  ответа), `agent_needs_input`, `quota_auto_resume_*`; событие `PermissionRequest`;
+- типы уведомлений `permission_prompt` (после ~6 с ожидания), `worker_permission_prompt` (напарник
+  спрашивает разрешение у ведущего), `idle_prompt` (60 с после ответа), `agent_needs_input`,
+  `quota_auto_resume_*`; событие `PermissionRequest`;
 - эндпоинт usage отдает данные по локальному токену (проба пользователя 2026-09-09: 5h 11%,
   неделя 42%; чтение Keychain из сессии агента классификатор блокирует, поэтому пробу и первый
   `longrun budget check` запускает человек);

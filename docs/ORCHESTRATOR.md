@@ -242,8 +242,9 @@ Verified (documentation or live on this machine, 2026-09-08):
   the edge of the model window;
 - `claude --bg "prompt"`, `claude agents --json`, `claude attach|logs|stop|respawn`,
   state in `~/.claude/jobs/<id>/state.json`;
-- notification types `permission_prompt` (after ~6 s of waiting), `idle_prompt` (60 s after
-  the reply), `agent_needs_input`, `quota_auto_resume_*`; the `PermissionRequest` event;
+- notification types `permission_prompt` (after ~6 s of waiting), `worker_permission_prompt` (a teammate
+  asking the leader), `idle_prompt` (60 s after the reply), `agent_needs_input`, `quota_auto_resume_*`;
+  the `PermissionRequest` event;
 - the usage endpoint returns data for the local token (the user's probe 2026-09-09: 5h 11%,
   week 42%; reading the Keychain from an agent session is blocked by the classifier, so the probe and
   the first `longrun budget check` are run by the human);
