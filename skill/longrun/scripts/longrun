@@ -29,7 +29,7 @@ import sys
 import time
 import uuid
 
-VERSION = "0.6.3"
+VERSION = "0.6.4"
 HOME = os.path.expanduser("~")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
@@ -423,6 +423,25 @@ def save_notes(t, entries):
     write_atomic(t["path"], t.get("header", NOTES_HEADER) + notes_body(entries, t["prefix"]))
 
 
+def adopt_hand_edits(t):
+    """Give an id to every line the user wrote into the notes file by hand.
+
+    Editing NOTES.md in an editor is a supported way to write a note, and `add` already adopts what it
+    finds there on its next write. Until something writes, though, every hand-written line parses as id 0,
+    and that is not an identity: the delta keyed entries by it, so two lines added by hand reached the
+    other sessions as one. Done at the turn boundary, before anybody is told what changed."""
+    t = _tgt(t)
+    with t["lock"]:
+        entries = load_notes(t)
+        if not any(e["id"] == 0 for e in entries):
+            return False
+        for e in entries:
+            if e["id"] == 0:
+                e["id"] = next_id_in(t["state"], "note")
+        save_notes(t, entries)
+        return True
+
+
 def archive_notes(t, entries, why):
     t = _tgt(t)
     for e in entries:
@@ -686,8 +705,22 @@ def doc_fingerprint(path):
 
 
 def same_doc_bytes(fp, st):
-    """Is the file `fp` describes byte for byte the one the stamp `st` was taken on?"""
-    return bool(fp and fp[2] and st.get("sha") and fp[2] == st["sha"] and fp[1] == st.get("size"))
+    """Is the file `fp` describes the one the stamp `st` was taken on - byte for byte where a hash is
+    affordable, by size where it is not?
+
+    Past DOC_HASH_MAX_BYTES neither side carries a hash, and then the size is the whole identity. Weaker
+    on purpose, and said so in REFERENCE: a 5 MB file rewritten to exactly its old length reads as
+    unchanged. What this used to do was worse and undocumented - it demanded a hash that is never computed
+    for such a file, so it answered False every time, and the biggest doc pointers got a stale warning back
+    on every branch switch, which is the one thing this function exists to prevent.
+
+    A stamp written before 0.6.3 carries neither size nor hash; it fails here and falls back to the mtime,
+    the way that version compared, until the next `doc touch` re-stamps."""
+    if not fp or fp[1] != st.get("size"):
+        return False
+    if fp[2] or st.get("sha"):
+        return fp[2] == st.get("sha")
+    return True
 
 
 def stamp_doc(store, e):
@@ -702,8 +735,11 @@ def stamp_doc(store, e):
     fp = doc_fingerprint(doc_path(store, e))
     if fp:   # the file is here, so any "missing since" clock on this entry starts over
         d[k] = {"mtime": fp[0], "size": fp[1], "sha": fp[2], "at": ts()}
-    else:
-        d.pop(k, None)
+    elif k in d:
+        # The file is NOT here and the description was rewritten anyway. Dropping the whole record would
+        # take `gone_since` with it and restart the week `age_docs` counts, so a pointer could be kept
+        # alive indefinitely by re-describing it. Keep the clock, drop what described bytes that are gone.
+        d[k] = {x: d[k][x] for x in ("gone_since",) if x in d[k]} or {"gone_since": ts()}
     write_json(docs_stamp_path(store), d)
 
 
@@ -783,10 +819,18 @@ def cmd_doc(store, args):
         p = os.path.abspath(os.path.expanduser(raw))
         if not os.path.isfile(p):
             die("no such file: %s. A doc points at a file that exists; write the file first." % raw, 2)
-        try:
-            rel = os.path.relpath(p, store.root())
-        except ValueError:
-            rel = p
+        def rel_to_root(path):
+            try:
+                return os.path.relpath(path, store.root())
+            except ValueError:
+                return path
+        rel = rel_to_root(p)
+        if rel.startswith(".."):
+            # The project root was resolved through its symlinks when it was created, the path just typed
+            # was not - so a file genuinely inside the project reads as outside whenever anything above it
+            # is a symlink (/tmp on macOS is exactly that). Ask again with both sides resolved before
+            # refusing; a file that is still outside then really is outside.
+            rel = rel_to_root(os.path.realpath(p))
         if rel.startswith(".."):
             die("%s is outside the project (%s). Keep long material inside the project, so every session "
                 "and every worktree resolves the same path." % (raw, store.root()), 2)
@@ -1202,6 +1246,8 @@ def load_meta(store, sid):
     m.setdefault("turn_tools", 0)    # ...and how much work was in it, which is what makes a turn that
     m.setdefault("turn_notes", 0)    # edited nothing still worth a card; and what it wrote down, counted
                                      # rather than inferred from two timestamps stamped to the minute
+    m.setdefault("counted", [])      # tool_use_ids already charged to this turn by whichever of the three
+                                     # events saw the call first; emptied at the turn boundary - see charged
     return m
 
 
@@ -2712,13 +2758,68 @@ RUNNING_TOOLS = ("Bash", "PowerShell", "Agent", "Task", "Workflow")  # tools tha
 # The PostToolUse matcher of hooks.json, mirrored here so `PostToolBatch` can count the calls it does NOT
 # fire for. A hook is a process per call, so `Read` is deliberately not in the matcher - which meant a turn
 # spent entirely reading had a measured size of zero, and the read-only turn card could never see the very
-# population it was built for. tests/run.sh checks this tuple against the matcher string in hooks.json.
+# population it was built for.
 HOOKED_TOOLS = tuple(EDIT_TOOLS) + RUNNING_TOOLS + SEARCH_TOOLS
+# ...and it has to be mirrored the way the CLI READS that string, which is not as a list of tool names.
+# Claude Code only takes the fast exact-match path when the whole matcher is `^[a-zA-Z0-9_|]+$`; ours holds
+# `mcp__.*`, so it falls through to `new RegExp(matcher).test(toolName)` - an UNANCHORED search (function
+# J6T in 2.1.238). `TodoWrite` therefore matches on "Write", `BashOutput` and `TaskOutput` on "Bash"/"Task",
+# and a PostToolUse hook does fire for them. Comparing names for equality here counted every one of those
+# twice: once by PostToolUse and once more by PostToolBatch as a call "no hook saw". Three `TodoWrite`
+# calls read as six, and the read-only card, whose whole threshold is six, fired on half the work.
+# tests/run.sh compares this against the matcher in hooks.json answer for answer, not name for name.
+HOOKED_RE = re.compile("|".join(list(HOOKED_TOOLS) + ["mcp__.*"]))
 
 
 def hooked_tool(name):
-    """Does a PostToolUse hook fire for this tool? MCP tools match by prefix, as `mcp__.*` does."""
-    return name in HOOKED_TOOLS or (name or "").startswith("mcp__")
+    """Does a PostToolUse hook fire for this tool? Asked exactly as the CLI asks it: a substring search,
+    not an equality test - see HOOKED_RE. Only the fallback now: what a per-call event really counted is
+    recorded by id, and the name is consulted for a call that arrives without one - see count_call."""
+    return bool(HOOKED_RE.search(name or ""))
+
+
+COUNTED_IDS = 256   # ids of the calls already counted into this turn, kept until the turn ends.
+                    # They used to be emptied by PostToolBatch, on the assumption that a call's own event
+                    # always arrives before the batch it belongs to. It does not: PostToolUseFailure is
+                    # installed `async` (hooks.json), which Claude Code reads as "runs in background
+                    # without blocking", while PostToolBatch blocks - so the failure hook can land after
+                    # the batch has already counted its call and emptied the list, and the same failed
+                    # command was charged to the turn twice. Held for the whole turn, the cap stops
+                    # bounding a batch and starts bounding the gap a late event may arrive across: 256
+                    # calls of the same turn between the two events, which no background process is.
+
+# What a Notification says the session is waiting for. `permission_request` is the PermissionRequest
+# event's own name for it and belongs to no matcher; the rest are notification_type values and every one
+# of them has to be named in the hooks.json matcher in full. That matcher is word characters and pipes
+# only, which is the case where Claude Code does NOT compile a regex: it splits on "|" and compares for
+# equality (function J6T in 2.1.238). `worker_permission_prompt` - a teammate asking the leader - is
+# therefore not covered by `permission_prompt` being a substring of it, and went unheard until it was
+# named. tests/orchestrator.sh compares these tuples against the matcher.
+NOTIFY_PERMISSION_TYPES = ("permission_request", "permission_prompt", "worker_permission_prompt")
+NOTIFY_INPUT_TYPES = ("agent_needs_input", "elicitation_dialog", "elicitation_url_dialog")
+NOTIFY_IDLE_TYPE = "idle_prompt"
+
+
+def charged(m, tid):
+    """Has this call already been counted into the size of the turn by one of the other events?
+
+    Three events can see one call - PostToolUse, PostToolUseFailure and PostToolBatch - and exactly one of
+    them must charge it. Which one gets there first is not ours to choose: the failure hook runs in the
+    background. So the question is asked of the record, not of the order."""
+    return bool(tid) and tid in (m.get("counted") or [])
+
+
+def count_call(m, tid):
+    """This call has now been charged to the turn: remember its `tool_use_id` so nobody charges it again.
+
+    Mirroring the matcher answered the wrong question. Which tools a PostToolUse hook is CONFIGURED for is
+    not which calls it FIRED for: a call that fails never reaches PostToolUse at all (the CLI sends
+    PostToolUseFailure instead, and ours is matched on Bash|PowerShell), so a failed Edit, Grep, Task or
+    MCP call was counted by nobody - PostToolBatch skipped it because the matcher says "Edit is ours".
+    An id is the fact instead of a prediction of it, and it covers a hook that simply did not run."""
+    if tid:
+        ids = [i for i in (m.get("counted") or []) if i != tid]
+        m["counted"] = (ids + [tid])[-COUNTED_IDS:]
 
 
 RESUME_RE = re.compile(r"(?:^|[\s;&|(\"'])(?:[\w./-]*/)?longrun\s+resume\b")
@@ -2939,13 +3040,16 @@ def deliver_inbox(store, sid):
         arch = os.path.join(base, ".archive")
         os.makedirs(arch, exist_ok=True)
         for f in files:
-            head, _, body = read(f).strip().partition("\n\n")
-            body = body.strip()
             dst = os.path.join(arch, os.path.basename(f))
+            try:
+                os.rename(f, dst)   # claimed before it is read, and the rename is what makes "once" true:
+            except OSError:         # PostToolUse hooks run in parallel for a parallel batch, and two of them
+                continue            # reading first would deliver the same message twice and then trip over
+            head, _, body = read(dst).strip().partition("\n\n")
+            body = body.strip()
             if len(body) > INBOX_BODY_MAX:  # say so: a message cut off mid-sentence reads like a complete one
                 body = body[:INBOX_BODY_MAX] + "\n... (cut off here, %d chars in all; the whole message: %s)" % (len(body), dst)
             out.append("MESSAGE %s\n%s" % (head.lstrip("# ").strip(), body))
-            shutil.move(f, dst)
     return "\n".join(out)
 
 
@@ -3602,8 +3706,16 @@ def load_watches():
     return [read_json(p) for p in watch_files()]
 
 
+WATCH_KEEP_DONE = 7 * 86400   # how long a watch that is over stays readable in `watch ls --all`
+
+
 def save_watch(w):
-    write_json(os.path.join(WATCH_DIR, "%s.json" % w["id"]), w)
+    if w.get("state") not in (None, "", "pending") and not w.get("done_at"):
+        w["done_at"] = time.time()   # when it was OVER. The week it is kept used to be counted from
+    write_json(os.path.join(WATCH_DIR, "%s.json" % w["id"]), w)   # `expires`, which is when it would have
+    # given up instead - so one registered with `--for 30d` and fired on its first tick sat in the list
+    # for five weeks, and one that expired was dropped a week after the moment it stopped being useful
+    # rather than a week after anybody could still read what happened to it.
 
 
 def next_watch_id():
@@ -4056,9 +4168,9 @@ def watch_tick(force=False, only=None, quiet=False):
                 how = deliver_or_log(w, "expired", out)
                 watch_log("%s EXPIRED %s via %s" % (w["id"], w["check"]["desc"], how))
         save_watch(w)
-    # done records are kept a week for `watch ls --all`, then dropped
+    # done records are kept a week for `watch ls --all`, counted from when they were done, then dropped
     for w in load_watches():
-        if w.get("state") != "pending" and time.time() - float(w.get("expires") or 0) > 7 * 86400:
+        if w.get("state") != "pending" and time.time() - float(w.get("done_at") or w.get("expires") or 0) > WATCH_KEEP_DONE:
             try:
                 os.remove(os.path.join(WATCH_DIR, "%s.json" % w["id"]))
             except OSError:
@@ -4667,7 +4779,7 @@ def watch_ls(store, args):
         when = ("next " + fmt_epoch(w.get("next"))) if st == "pending" else (st + " " + (w.get("fired_at") or (w.get("delivered") or {}).get("at") or ""))
         last = w.get("last") or {}
         print("%s %-4s %-8s -> %-34s %s every %s, %s, expires %s" % (
-            "*" if w["to"]["sid"] == me else " ", w["id"], st, clip("%s [%s]" % (w["to"].get("name"), sid8(w["to"]["sid"])), 34),
+            "*" if watch_targets(w, me) else " ", w["id"], st, clip("%s [%s]" % (w["to"].get("name"), sid8(w["to"]["sid"])), 34),
             w["check"]["desc"], fmt_duration(w["every"]), when, fmt_epoch(w.get("expires"))[5:]))
         print("        then: %s" % clip(w["then"], 150))
         if last:
@@ -4678,11 +4790,24 @@ def watch_ls(store, args):
     return 0
 
 
+def watch_targets(w, sid):
+    """Is this watch waiting for THIS session? By the chain, not by the CLI id written into the record.
+
+    The desktop app gives a resumed session a new CLI id behind the same sidebar entry, and the record
+    keeps the id it was registered with until the watch fires (`watch_deliver` follows the entry and
+    rewrites it there). Comparing the two ids dropped the block out of the digest for exactly the session
+    that had just come back and no longer remembered it was waiting for anything."""
+    to = w.get("to") or {}
+    if not sid or not to.get("sid"):
+        return False
+    return to["sid"] == sid or session_key(to["sid"]) == session_key(sid)
+
+
 def watch_block(sid, budget=700):
     """Digest line(s): the watches waiting for this session, so an agent never re-registers or polls by hand."""
     if not sid:
         return ""
-    mine = [w for w in load_watches() if w.get("state") == "pending" and w["to"]["sid"] == sid]
+    mine = [w for w in load_watches() if w.get("state") == "pending" and watch_targets(w, sid)]
     if not mine:
         return ""
     lines = ["WATCH %d pending for this session (checked on a timer, no tokens spent; you will get a message when one fires):" % len(mine)]
@@ -4774,7 +4899,7 @@ def notes_block(t, budget, label="", drop_oldest=0, muted=()):
 def shared_state_map(store):
     marks = load_stale(store)
     return {str(e["id"]): hashlib.md5((e["text"] + (marks.get(str(e["id"]), {}) or {}).get("why", "")).encode("utf-8")).hexdigest()[:8]
-            for e in load_notes(notes_target(store, True))}
+            for e in load_notes(notes_target(store, True)) if e["id"]}
 
 
 def mark_shared_seen(store, m, ids=None, drop=None):
@@ -4800,7 +4925,11 @@ def shared_delta(store, m, budget):
     Only what actually fits in `budget` is marked as seen. Marking everything and then clipping the
     text, which is what this used to do, meant the entries past the budget were never shown to this
     session at all - not now, not on any later turn."""
-    entries = {str(e["id"]): e for e in load_notes(notes_target(store, True))}
+    # An entry with no id is a line the user has just written into the file by hand and nobody has adopted
+    # yet (`adopt_hand_edits` does that at the next turn boundary). It is left out rather than reported:
+    # every one of them parses as id 0, so keyed by that a dict kept only the last - and reporting it under
+    # id 0 would only mean reporting it again under the real id it is about to get.
+    entries = {str(e["id"]): e for e in load_notes(notes_target(store, True)) if e["id"]}
     marks = load_stale(store)
     cur = {k: hashlib.md5((e["text"] + (marks.get(k, {}) or {}).get("why", "")).encode("utf-8")).hexdigest()[:8]
            for k, e in entries.items()}   # a stale mark changes an entry's standing without changing its text
@@ -4809,15 +4938,15 @@ def shared_delta(store, m, budget):
         m["shared_seen"] = cur
         return ""
     ids = sorted(entries, key=int)
-    todo = [("+", entries[k]) for k in ids if k not in seen] + \
-           [("~", entries[k]) for k in ids if k in seen and seen[k] != cur[k]]
+    todo = [("+", k, entries[k]) for k in ids if k not in seen] + \
+           [("~", k, entries[k]) for k in ids if k in seen and seen[k] != cur[k]]
     removed = sorted([k for k in seen if k not in cur], key=int)
     if not (todo or removed):
         return ""
     head = "SHARED notes of project %s changed since you last saw them:" % store.name
     lines, used, left = [head], len(head.encode("utf-8")), 0
     shown = dict(seen)
-    for mark, e in todo:
+    for mark, k, e in todo:
         line = "  %s %s%s" % (mark, fmt_note(e), stale_suffix(store, e, marks))
         n = len(line.encode("utf-8")) + 1
         if used + n > budget and len(lines) > 1:  # the first entry always goes, or nothing ever would
@@ -4825,7 +4954,7 @@ def shared_delta(store, m, budget):
             break
         lines.append(line)
         used += n
-        shown[str(e["id"])] = cur[str(e["id"])]
+        shown[k] = cur[k]
     if removed:
         line = "  - removed: " + ", ".join("n" + k for k in removed)
         if used + len(line.encode("utf-8")) + 1 <= budget or len(lines) == 1:
@@ -4933,13 +5062,17 @@ RECALL_PER_TURN = 2        # hints per turn, counted from the turn boundary. The
                            # stops the same pointer twice; this stops a wide search turning into a lecture
 RECALL_HINT_LINES = 2      # lines quoted per hint; the rest is what `longrun recall` is for
 RECALL_SCAN_BYTES = 600000  # hard ceiling on what one hint may read, whatever the project holds
+RECALL_SCAN_FLOOR = 4096   # ...and what must be left for everything after a big file in the list
 RECALL_SPECIFIC_LEN = 12   # a plain word this long names something on its own
 RECALL_TAGS = ("dead", "decision", "fact", "pin", "doc")   # what another session is owed; `ctx` and `todo`
 RECALL_TAG_RE = re.compile(r"\[[ns]\d+\]\s+\d\d-\d\d\s+(\w+)")   # are one conversation's own bookkeeping
 RECALL_ESCAPE_RE = re.compile(r"\\[A-Za-z]")   # \b \s \d \w: the letter is regex syntax, not part of a word
 RECALL_WORD_RE = re.compile(r"[^0-9A-Za-z_Ѐ-ӿ]+")
 RECALL_NAMED_TOOLS = ("Grep", "Glob")   # the pattern IS the string the session is looking for, verbatim
-MIDTURN_DELTA_TOOLS = 5   # tool calls between two mid-turn checks of what the other sessions changed
+MIDTURN_DELTA_TOOLS = 5   # tool calls between two mid-turn checks of what the other sessions changed,
+                          # counted in `turn_tools` - every call of the turn - and not in `tools`, which a
+                          # search deliberately does not move. Gated on `tools`, this never fired in a turn
+                          # made of searches, which is precisely the hour-long turn it exists for.
 
 
 def term_names_something(raw):
@@ -5075,13 +5208,16 @@ def recall_hint(store, m, calls):
     pat = re.compile("|".join(re.escape(t) for t in terms), re.I)
     per_term, budget = {}, RECALL_SCAN_BYTES
     for f, kind in files:
-        if budget < 4096:     # out of room; one oversized file must not cost the rest their turn
-            break
         try:
             size = os.path.getsize(f)
         except OSError:
             continue
-        if size > budget:
+        # "One oversized file must not cost the rest their turn" was the intent, and skipping only files
+        # BIGGER than the remaining budget did not achieve it: a 597 kB doc pointer fitted under the 600 kB
+        # ceiling, left 2 kB behind it, and every doc, every peer's notes and the whole archive after it in
+        # the list went unread - silently, since doc pointers are scanned first. A file is skipped unless
+        # what it leaves is still worth a pass.
+        if size > budget - RECALL_SCAN_FLOOR:
             continue
         budget -= size
         body = read(f)
@@ -5143,9 +5279,17 @@ def midturn_deltas(store, m):
     warning; the two deltas were simply not in that list.
 
     Only somebody else's work is carried here. This session's own debt - a doc line it owes an update -
-    waits for the turn boundary, because mid-turn it would fire after every save of the same file."""
-    n = int(m.get("tools") or 0)
-    if n - int(m.get("midturn_at") or 0) < MIDTURN_DELTA_TOOLS:
+    waits for the turn boundary, because mid-turn it would fire after every save of the same file.
+
+    The window is counted in the calls of THIS turn, all of them. It used to be counted in `tools`, the
+    session's lifetime count of the calls a note counter cares about - and a search moves none of those
+    on purpose, so a turn of twenty Greps stood at the same number from its first call to its last and
+    the window never came round. A turn of twenty Greps is the one a peer's note is most needed in."""
+    n = int(m.get("turn_tools") or 0)
+    at = int(m.get("midturn_at") or 0)
+    if at > n:    # writing a note restarts the turn's count of calls: the window restarts with it,
+        at = 0    # rather than holding the delta back for another window's worth of work
+    if n - at < MIDTURN_DELTA_TOOLS:
         return ""
     m["midturn_at"] = n
     out = [shared_delta(store, m, int(store.cfg["shared_delta_max_bytes"])),
@@ -6037,10 +6181,12 @@ def cmd_compact_hint(store, args):
 
 SWEEP_AFTER_TURNS = 4   # turns a session takes before the housekeeping question is worth asking it
 # Tool calls in a turn that edited and broke nothing, before that turn is worth a card of its own. Not a
-# setting and not a guess: `research/measure-cards.py` over 725 transcripts put the note rate of a
-# read-only turn at 9% up to 2 calls, 17% at 3-5 and 38-51% past 6, counted in the calls a PostToolUse
-# hook is actually fired for. Six is where the band the card is aimed at begins; re-run the script to
-# move it rather than arguing about the number.
+# setting and not a guess: `research/measure-cards.py` over 661 transcripts and 3614 turns (re-run
+# 2026-09-21) puts the note rate of a read-only turn at 11% up to 2 calls and 12-27% from three to five,
+# against 28-58% from six up - counted in ALL of the turn's calls, which is what `turn_tools` holds now
+# that PostToolBatch supplies the ones no PostToolUse fires for. Six is where the upper band begins. The
+# separation is real but not sharp (the 8-10 bucket sits at 28%), so re-run the script to move this
+# rather than arguing about the number.
 NUDGE_READ_TOOLS = 6
 POLL_SLEEP_SEC = 30     # a sleep this long is a session waiting for the world, not pacing a command
 POLL_REPEATS = 3        # the same command this many times in a session's recent history is a poll loop
@@ -6166,17 +6312,22 @@ def turn_card(store, m, closed=False):
 
     There are two ways in, and the second was measured before it was built. The first is a turn that
     edited or broke something, gated on `nudge_edit_tools` because 40 `ls` calls prove nothing. That gate
-    turned out to be aimed at less than half the territory: over 725 transcripts, 52% of every note ever
-    written was written in a turn this card is silent in, and 124 of 351 in turns with no edit and no
-    failure at all (`research/measure-cards.py`). Reading is not idle - it ends in a conclusion, and the
-    conclusion is exactly what dies with the conversation.
+    turned out to be aimed at less than half the territory: over 661 transcripts, 54% of every note ever
+    written was written in a turn this card is silent in, and 139 of 446 in turns with no edit and no
+    failure at all (`research/measure-cards.py`, re-run 2026-09-21; the counts move with the corpus, the
+    proportions have not). Reading is not idle - it ends in a
+    conclusion, and the conclusion is exactly what dies with the conversation.
 
     So the second way in is a turn that edited and broke nothing but did real work: at least
-    `NUDGE_READ_TOOLS` tool calls. Length is the only thing a hook knows before the fact and it separates
-    the two populations cleanly - a read-only turn of 1-2 calls writes a note 9% of the time, one past six
-    38-51%. Boundary only, never mid-turn: a turn that has read six things may still be on its way to
-    editing the seventh, and only at `Stop` is it known to have been reading all along. `card_due` keeps
-    both ways to one card per window between them, so an editing session is not asked twice."""
+    `NUDGE_READ_TOOLS` tool calls. Length is the only thing a hook knows before the fact, and it separates
+    the two populations - a read-only turn of 1-2 calls writes a note 11% of the time, one past six 28-58%.
+    Boundary only, never mid-turn: a turn that has read six things may still be on its way to editing the
+    seventh, and only at `Stop` is it known to have been reading all along.
+
+    `card_due` keeps both ways to one card per window between them, so an editing session is not asked
+    twice - and that window is the real limit on all of this. `nudge_turns` is 8, so of the 307 turns
+    where a gate is open in the measured corpus, 137 get a card. The gap this docstring is about is what
+    the card is AIMED at; what it reaches is smaller again."""
     files, fails, wrote, tools = turn_card_data(m, closed)
     if closed and wrote:   # the turn already wrote something down; mid-turn the counters below cover that,
         return ""          # because a note write resets them (and clears what the card would describe)
@@ -6243,6 +6394,7 @@ def cmd_hook(args):
 
     if event == "SessionStart":
         continued = False
+        adopt_hand_edits(notes_target(store, True))   # outside the shared lock: it takes the notes file's own
         with store.shared_lock():
             migrate_sessions(store)
             if sid:
@@ -6289,6 +6441,7 @@ def cmd_hook(args):
         return 0
     if event == "UserPromptSubmit":
         out, own_note = [], ""
+        adopt_hand_edits(notes_target(store, True))   # outside the shared lock: it takes the notes file's own
         with store.shared_lock():
             m = load_meta_stamped(sid)
             if sid and not m.get("desktop_id"):  # the app writes its metadata after SessionStart: learn it on a turn
@@ -6317,9 +6470,11 @@ def cmd_hook(args):
             sw = sweep_hint(store, m)  # its own gates, not the card's: a session that only reads is asked too
             m["turn_card"] = {}                      # it belonged to the turn that ended, shown or not
             m["turn_files"], m["turn_fails"], m["turn_tools"], m["turn_notes"] = [], [], 0, 0
+            m["counted"] = []   # what was charged to the turn that just ended stops mattering with it
             m["edited"] = []   # attribution is per turn, like turn_files: a file this session touched an hour
                                # ago and somebody else has changed since is THEIR change, not an unpaid debt
-            m["midturn_at"] = int(m.get("tools") or 0)   # the boundary just checked; the next mid-turn one waits
+            m["midturn_at"] = 0    # the boundary just checked; the next mid-turn one waits out its window,
+                                   # which is counted in the calls of the turn that is starting
             m["recall_hints"] = 0                        # the hint budget is per turn, like the card's window
             m["poll_hinted"], m["recent_cmds"] = False, []
             save_meta(store, sid, m)
@@ -6358,21 +6513,31 @@ def cmd_hook(args):
         # search term - Grep, Glob, WebSearch, Task, Agent - is already in the PostToolUse matcher, so the
         # second pass only read the same files twice and spent the same (term, file) pair a second time,
         # on output the CLI may drop when a turn ends on a tool result and the model is not called again.
-        calls = [(c.get("tool_name", ""), c.get("tool_input") or {}) for c in (inp.get("tool_calls") or [])]
+        calls = [(c.get("tool_name", ""), c.get("tool_input") or {}, c.get("tool_use_id") or "")
+                 for c in (inp.get("tool_calls") or [])]
         with store.shared_lock():
             m = load_meta_stamped(sid)
             opened, unseen = list(m.get("opened") or []), 0
-            for _t, _ti in calls:
+            counted = set(m.get("counted") or [])
+            for _t, _ti, _id in calls:
                 fp = _ti.get("file_path") or _ti.get("notebook_path")
                 if fp and fp not in opened:   # what the session already has in front of it. Kept apart from
                     opened.append(fp)         # `files`, which means "changing" and is read back as that by
-                if not hooked_tool(_t):       # the compaction hint
+                                              # the compaction hint
+                # Counted already, or not? Asked of the ids the per-call events recorded, and only of the
+                # matcher for a call that carries no id (an older CLI). The matcher alone said "a hook
+                # fires for Edit" and was wrong every time an Edit FAILED: the CLI sends PostToolUseFailure
+                # for those, ours is matched on Bash|PowerShell, and the call went uncounted by everybody.
+                if not ((_id in counted) if _id else hooked_tool(_t)):
                     unseen += 1
+                    counted.add(_id)
+                    count_call(m, _id)   # this event charged it: the call's own event, if it is still on
+                                         # its way, must not charge it a second time
             m["opened"] = opened[-60:]
             # ...and the size of the turn, counted in ALL of its calls rather than in the ones a hook
             # happened to be paid for. A turn of nothing but Read measured zero until here, so the
             # read-only card was blind to exactly the turn it was built for: a session reading its way to
-            # a conclusion. PostToolUse counts the tools it matches; this counts the rest, so neither
+            # a conclusion. PostToolUse counts the tools it fired for; this counts the rest, so neither
             # call is counted twice.
             m["turn_tools"] += unseen
             save_meta(store, sid, m)
@@ -6382,17 +6547,30 @@ def cmd_hook(args):
         if tool in SEARCH_TOOLS:   # matched for the query in it: none of the note counters move for looking
             with store.shared_lock():                    # around, only the turn's own size, which is what
                 m = load_meta_stamped(sid)               # tells a substantial read-only turn from a glance
-                m["turn_tools"] += 1
+                if not charged(m, inp.get("tool_use_id")):
+                    m["turn_tools"] += 1
+                count_call(m, inp.get("tool_use_id"))
                 rh = recall_hint(store, m, [(tool, inp.get("tool_input") or {})])
+                md = midturn_deltas(store, m)
+                bd = board_delta(store, m)
                 save_meta(store, sid, m)
-            if rh:
-                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": rh}}))
+            # Somebody else's news is carried here too. A turn can be twenty Greps long, and a message,
+            # a peer's note or a board move has nothing to do with which tool this session happens to be
+            # holding: waiting for a call of another kind is how a mechanism that must speak goes silent
+            # for a whole hour. The card and the poll hint stay out - those are about work done, and a
+            # search call deliberately counts as none.
+            ctx = [deliver_inbox(store, sid), rh, md, bd]
+            ctx = [c for c in ctx if c]
+            if ctx:
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": "\n".join(ctx)}}))
             return 0
         with store.shared_lock():
             m = load_meta_stamped(sid)
             m["tools"] += 1
             m["tools_since_note"] += 1
-            m["turn_tools"] += 1
+            if not charged(m, inp.get("tool_use_id")):   # only the size of the turn is shared with the
+                m["turn_tools"] += 1                     # batch event; the counters above are this
+            count_call(m, inp.get("tool_use_id"))        # event's alone and cannot be charged twice
             if tool in EDIT_TOOLS:  # a command is not an edit: 40 `ls` prove nothing
                 m["edit_tools_since_note"] += 1
             ti = inp.get("tool_input") or {}
@@ -6448,7 +6626,9 @@ def cmd_hook(args):
                 m["fails_since_note"] += 1
                 m["tools"] += 1
                 m["tools_since_note"] += 1
-                m["turn_tools"] += 1
+                if not charged(m, inp.get("tool_use_id")):   # this hook is installed `async`: it can land
+                    m["turn_tools"] += 1                     # after the batch event that counted its call
+                count_call(m, inp.get("tool_use_id"))
                 m["turn_fails"] = (m["turn_fails"] + [cmdl])[-10:]
                 run = m.get("running") or {}
                 run.pop(inp.get("tool_use_id") or "", None)
@@ -6490,9 +6670,9 @@ def cmd_hook(args):
     if event in ("PermissionRequest", "Notification"):
         ntype = inp.get("notification_type", "") if event == "Notification" else "permission_request"
         what = ""
-        if ntype in ("permission_request", "permission_prompt"):
+        if ntype in NOTIFY_PERMISSION_TYPES:
             what = "permission (%s)" % (inp.get("tool_name") or "tool")
-        elif ntype in ("agent_needs_input", "elicitation_dialog", "elicitation_url_dialog"):
+        elif ntype in NOTIFY_INPUT_TYPES:
             what = "input"
         if what:
             with store.shared_lock():
@@ -6501,7 +6681,7 @@ def cmd_hook(args):
                     m["waiting_since"] = ts()
                 m["waiting_what"] = what
                 save_meta(store, sid, m)
-        elif ntype == "idle_prompt":
+        elif ntype == NOTIFY_IDLE_TYPE:
             with store.shared_lock():
                 m = load_meta(store, sid)
                 m.pop("turn_started", None)
@@ -6766,7 +6946,7 @@ def cmd_config(args):
     """longrun config                      effective values, and where each comes from
     longrun config set KEY VALUE [--global]   project config.json (or ~/.claude/longrun/config.json)
     longrun config unset KEY [--global]       back to the default"""
-    glob, rest = _flag(args, "--global", False, takes_value=False)
+    is_global, rest = _flag(args, "--global", False, takes_value=False)
     local = resolve_local()
     known = sorted(list(DEFAULTS) + list(CONFIG_EXTRA))
     if rest and rest[0] in ("set", "unset"):
@@ -6778,9 +6958,9 @@ def cmd_config(args):
                 "`longrun config unset %s` removes it." % (key, RETIRED_KEYS[key], key), 2)
         if key not in DEFAULTS and key not in CONFIG_EXTRA and key not in RETIRED_KEYS:
             die("unknown key %s. Keys: %s" % (key, ", ".join(known)), 2)
-        if not glob and not local:
+        if not is_global and not local:
             die("no project here: use --global (~/.claude/longrun/config.json) or run inside a project", 3)
-        path = GLOBAL_CONFIG if glob else os.path.join(local, "config.json")
+        path = GLOBAL_CONFIG if is_global else os.path.join(local, "config.json")
         cur = read_json(path)
         if rest[0] == "unset":
             cur.pop(key, None)
@@ -6790,7 +6970,7 @@ def cmd_config(args):
         cur[key] = config_coerce(key, rest[2])
         check_budget_keys(local, key, cur[key])
         write_json(path, cur)
-        print("%s = %s (%s: %s)" % (key, json.dumps(cur[key]), "global" if glob else "project", path))
+        print("%s = %s (%s: %s)" % (key, json.dumps(cur[key]), "global" if is_global else "project", path))
         return 0
     if rest:
         die("usage: longrun config [set KEY VALUE | unset KEY] [--global]", 2)

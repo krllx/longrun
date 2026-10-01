@@ -52,13 +52,16 @@ STP="$T/staleproj"; mkdir -p "$STP"; ( cd "$STP" && "$LR" init >/dev/null )
 ( cd "$STP" && "$LR" add --shared -t dead "retry on 429 does not help: the limit is per org, not per key" >/dev/null
   "$LR" add --shared -t pin "PR 42 = branch feature/checkout" >/dev/null
   "$LR" add --shared -t fact "staging is sas-01, reachable only from the VPN" >/dev/null )
-( cd "$STP" && "$LR" stale n3 >/dev/null 2>/tmp/lr-stale ); check "a stale mark without a reason is refused" "test \$? -eq 2 && grep -q 'say why' /tmp/lr-stale"
-( cd "$STP" && "$LR" stale n3 "staging moved to vla-07 on 09-16" >/dev/null )
+( cd "$STP" && "$LR" stale n2 >/dev/null 2>/tmp/lr-stale ); check "a stale mark without a reason is refused" "test \$? -eq 2 && grep -q 'say why' /tmp/lr-stale"
+# The mark goes on the PIN on purpose: a pin is the entry the weights hold onto hardest, and the cheap
+# `fact` below it is what prune would offer first on tag alone. Marking the cheapest entry would have
+# proved nothing about the rule "a marked entry comes before all of them whatever its tag".
+( cd "$STP" && "$LR" stale n2 "PR 42 was closed unmerged on 09-16, the branch is gone" >/dev/null )
 SD1="$(cd "$STP" && "$LR" digest)"
-check "a marked entry still shows, with the mark and the reason, so other sessions see it too" "echo \"\$SD1\" | grep -q 'STALE since' && echo \"\$SD1\" | grep -q 'staging moved to vla-07' && echo \"\$SD1\" | grep -q 'sas-01'"
-SP="$(cd "$STP" && "$LR" prune --shared)"; check "prune offers the marked entry first, before the cheap tags" "echo \"\$SP\" | head -2 | grep -q 'sas-01'"
-( cd "$STP" && "$LR" stale ls | grep -q 'staging moved' ); check "stale ls lists the marks with who made them and when" "test \$? -eq 0"
-( cd "$STP" && "$LR" stale --clear n3 >/dev/null ); check "stale --clear takes the mark back" "! (cd '$STP' && '$LR' digest | grep -q 'STALE since')"
+check "a marked entry still shows, with the mark and the reason, so other sessions see it too" "echo \"\$SD1\" | grep -q 'STALE since' && echo \"\$SD1\" | grep -q 'closed unmerged' && echo \"\$SD1\" | grep -q 'PR 42'"
+SP="$(cd "$STP" && "$LR" prune --shared)"; check "prune offers the marked entry first, before the cheap tags" "echo \"\$SP\" | head -2 | grep -q 'PR 42' && echo \"\$SP\" | grep -q 'sas-01'"
+( cd "$STP" && "$LR" stale ls | grep -q 'closed unmerged' ); check "stale ls lists the marks with who made them and when" "test \$? -eq 0"
+( cd "$STP" && "$LR" stale --clear n2 >/dev/null ); check "stale --clear takes the mark back" "! (cd '$STP' && '$LR' digest | grep -q 'STALE since')"
 ( cd "$STP" && "$LR" stale n3 "gone for good" >/dev/null && "$LR" rm n3 >/dev/null )
 check "a mark does not outlive its entry" "! grep -q 'gone for good' '$STP/.longrun/stale.json'"
 # mute: take an entry out of MY digest, change nothing on disk and nothing for anyone else
@@ -155,8 +158,12 @@ RWC="\"session_id\":\"70707071-2222-4333-8444-555555555555\",\"transcript_path\"
 rw(){ ( cd "$RWP" && hook "$1" "$2" ); }
 rw SessionStart "{$RWC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
 rw UserPromptSubmit "{$RWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
-for i in $(seq 1 9); do rw PostToolUse "{$RWC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rg thing $i\"},\"tool_response\":{}}" >/dev/null; done
+# The note is written EARLY and the turn reads on afterwards. Written last it proves nothing: a note
+# write resets turn_tools to zero, so the turn ends with a measured size of 0, under the read-only
+# threshold, and the card is silent whether or not it ever looks at what the turn wrote. With nine calls
+# AFTER the note, the only thing that can keep it quiet is that it saw the note.
 ( cd "$RWP" && LONGRUN_SESSION=70707071-2222-4333-8444-555555555555 "$LR" add -t fact "the conclusion this turn reached" >/dev/null )
+for i in $(seq 1 9); do rw PostToolUse "{$RWC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rg thing $i\"},\"tool_response\":{}}" >/dev/null; done
 rw Stop "{$RWC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"done\"}" >/dev/null
 # "Did this turn write anything" is counted, not inferred from last_note >= turn_started. Both are stamped
 # to the minute, so a note written moments BEFORE a turn compared equal and read as written during it; and
@@ -164,7 +171,9 @@ rw Stop "{$RWC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_as
 # "no" for every turn there has ever been. The edit-gated card hid it: a note write resets
 # edit_tools_since_note, and that silenced the card by another route.
 RWM="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*readonly-wrote*/70707071/meta.json 2>/dev/null | head -1)"
-check "the turn Stop froze counts what was written in it instead of comparing two minute-stamps" "test -n \"\$RWM\" && grep -q '\"notes\": 1' \"\$RWM\""
+frozen(){ python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['turn_card'].get(sys.argv[2]))" "$RWM" "$1"; }
+check "the turn Stop froze counts what was written in it instead of comparing two minute-stamps" "test -n \"\$RWM\" && test \"\$(frozen notes)\" = 1"
+check "...and it is still the turn's own size that was frozen: nine calls came after the note" "test \"\$(frozen tools)\" = 9"
 RO5="$(rw UserPromptSubmit "{$RWC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}")"
 check "a read-only turn that wrote its conclusion down is not asked for it again" "! echo \"\$RO5\" | grep -q 'nothing edited'"
 # A turn spent entirely in Read measured ZERO, because a hook is a process per call and Read is
@@ -185,18 +194,71 @@ rd PostToolUse "{$RDC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Grep\"
 rd PostToolBatch "{$RDC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"thing\"},\"tool_response\":{}}]}" >/dev/null
 RDM="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*readonly-reads*/70707072/meta.json 2>/dev/null | head -1)"
 check "a call both events see is counted once, not twice" "test -n \"\$RDM\" && grep -q '\"turn_tools\": 1' \"\$RDM\""
-# The mirror only works while it IS a mirror: the matcher lives in hooks.json, the tuple lives in the script.
-check "the script's HOOKED_TOOLS is the PostToolUse matcher of hooks.json, tool for tool" "python3 - '$HERE/../skill/longrun/hooks.json' '$LR' <<'PY'
+# ...and the same for a tool the matcher fires on WITHOUT naming it. Claude Code tests the matcher as an
+# unanchored regex, so TodoWrite matches on "Write" and BashOutput on "Bash": PostToolUse does fire, and
+# a tuple compared by equality put them in the "no hook saw it" column, counting each of them twice.
+# Three TodoWrite calls read as six - exactly the read-only card's threshold, on half the work.
+rd UserPromptSubmit "{$RDC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+for t in TodoWrite BashOutput TaskOutput; do
+  rd PostToolUse "{$RDC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"$t\",\"tool_input\":{},\"tool_response\":{}}" >/dev/null
+  rd PostToolBatch "{$RDC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"$t\",\"tool_input\":{},\"tool_response\":{}}]}" >/dev/null
+done
+check "a tool the matcher fires on but does not NAME (TodoWrite, BashOutput) is still counted once" "grep -q '\"turn_tools\": 3,' \"\$RDM\""
+# The mirror only works while it IS a mirror, and the thing to mirror is how the CLI READS that string.
+check "hooked_tool answers exactly what the hooks.json matcher, read as Claude Code reads it, answers" "python3 - '$HERE/../skill/longrun/hooks.json' '$LR' <<'PY'
 import json,sys,re
-m=json.load(open(sys.argv[1]))['hooks']['PostToolUse'][0]['matcher'].split('|')
+m=json.load(open(sys.argv[1]))['hooks']['PostToolUse'][0]['matcher']
 src=open(sys.argv[2]).read()
-ns={}
+ns={'re':re}
 for name in ('EDIT_TOOLS','RUNNING_TOOLS','SEARCH_TOOLS'):
     exec(re.search(r'^%s = \(.*?\)' % name, src, re.M|re.S).group(0), ns)
-got=ns['EDIT_TOOLS']+ns['RUNNING_TOOLS']+ns['SEARCH_TOOLS']
-assert m[-1]=='mcp__.*', m[-1]
-assert tuple(m[:-1])==got, (m[:-1], got)
+exec(re.search(r'^HOOKED_TOOLS = .*?$', src, re.M).group(0), ns)
+exec(re.search(r'^HOOKED_RE = .*?$', src, re.M).group(0), ns)
+exec(re.search(r'^def hooked_tool.*?\n\n', src, re.M|re.S).group(0), ns)
+# Claude Code takes the exact-match path only for a matcher of word characters and pipes; ours has
+# mcp__.* in it, so it is new RegExp(matcher).test(name) - a search, not a full match.
+assert not re.match(r'^[a-zA-Z0-9_|]+\$', m), 'matcher would take the CLI exact-match path: rethink hooked_tool'
+cli = re.compile(m)
+for name in ('Edit','Write','MultiEdit','NotebookEdit','Bash','PowerShell','Agent','Task','Workflow',
+             'Grep','Glob','WebSearch','mcp__longrun__ask','TodoWrite','BashOutput','TaskOutput','TaskStop',
+             'Read','NotebookRead','WebFetch','KillShell','ExitPlanMode','AskUserQuestion','SlashCommand'):
+    assert bool(cli.search(name)) == ns['hooked_tool'](name), name
 PY"
+# ...and the matcher is only the fallback, because it answers the wrong question. Which tools a hook is
+# CONFIGURED for is not which calls it FIRED for: a call that fails never reaches PostToolUse at all (the
+# CLI sends PostToolUseFailure, and ours is matched on Bash|PowerShell), so a failed Edit, Grep, Task or
+# MCP call was counted by nobody - the batch skipped it because the matcher says "Edit is ours". Real
+# payloads carry a tool_use_id; what a per-call event counted is recorded by id and read back here.
+FCP="$T/failedcalls"; mkdir -p "$FCP"; ( cd "$FCP" && "$LR" init >/dev/null )
+FCC="\"session_id\":\"70707074-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$FCP\""
+fc(){ ( cd "$FCP" && hook "$1" "$2" ); }
+fc SessionStart "{$FCC,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+fc UserPromptSubmit "{$FCC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+for i in 1 2 3; do
+  fc PostToolBatch "{$FCC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$FCP/f$i.go\"},\"tool_use_id\":\"toolu_fail_$i\",\"tool_response\":{}}]}" >/dev/null
+done
+FCM="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*failedcalls*/70707074/meta.json 2>/dev/null | head -1)"
+check "a call that FAILED is still one of the turn's calls, whichever event the CLI sent about it" "test -n \"\$FCM\" && grep -q '\"turn_tools\": 3,' \"\$FCM\""
+fc Stop "{$FCC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"none of them took\"}" >/dev/null
+fc UserPromptSubmit "{$FCC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+for i in 1 2; do
+  fc PostToolUse "{$FCC,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$FCP/g$i.go\"},\"tool_use_id\":\"toolu_ok_$i\",\"tool_response\":{}}" >/dev/null
+done
+fc PostToolBatch "{$FCC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$FCP/g1.go\"},\"tool_use_id\":\"toolu_ok_1\",\"tool_response\":{}},{\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":\"$FCP/g2.go\"},\"tool_use_id\":\"toolu_ok_2\",\"tool_response\":{}},{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$FCP/g3.go\"},\"tool_use_id\":\"toolu_read_1\",\"tool_response\":{}},{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$FCP/g4.go\"},\"tool_use_id\":\"toolu_read_2\",\"tool_response\":{}}]}" >/dev/null
+check "a call that WORKED is counted once: the batch adds the two Reads to the two edits, not four more" "grep -q '\"turn_tools\": 4,' \"\$FCM\""
+fc Stop "{$FCC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"done\"}" >/dev/null
+fc UserPromptSubmit "{$FCC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+fc PostToolUseFailure "{$FCC,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./...\"},\"tool_use_id\":\"toolu_bash_1\",\"error\":\"exit 1: FAIL pkg/pay\"}" >/dev/null
+fc PostToolBatch "{$FCC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./...\"},\"tool_use_id\":\"toolu_bash_1\",\"tool_response\":{}}]}" >/dev/null
+check "a failed command the failure event DID count is not counted a second time by the batch" "grep -q '\"turn_tools\": 1,' \"\$FCM\""
+# ...and the other order, which is the one the CLI actually leaves open: PostToolUseFailure is installed
+# `async` ("runs in background without blocking"), PostToolBatch blocks, so the batch can be there first
+# and the failure hook lands after it. The record of what was charged has to outlive the batch, then.
+fc Stop "{$FCC,\"hook_event_name\":\"Stop\",\"stop_hook_active\":false,\"last_assistant_message\":\"done\"}" >/dev/null
+fc UserPromptSubmit "{$FCC,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+fc PostToolBatch "{$FCC,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./...\"},\"tool_use_id\":\"toolu_bash_2\",\"tool_response\":{}}]}" >/dev/null
+fc PostToolUseFailure "{$FCC,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"go test ./...\"},\"tool_use_id\":\"toolu_bash_2\",\"error\":\"exit 1: FAIL pkg/pay\"}" >/dev/null
+check "one failed command is one call of the turn whichever of its two events lands first" "grep -q '\"turn_tools\": 1,' \"\$FCM\""
 # The other half of the question - what has STOPPED being true - used to ride on the turn card and so
 # inherited every one of its gates. A session that only read, reviewed or talked, which is exactly the
 # session with time to re-read old notes, was never asked at all. It now stands on its own.
@@ -263,6 +325,20 @@ OUT="$(hook SessionStart "{$COMMON,\"hook_event_name\":\"SessionStart\",\"source
 check "SessionStart(compact) digest: own notes + journal tail + archive pointer" "echo \"\$OUT\" | grep -q 's1\] .*v4 works' && echo \"\$OUT\" | grep -q 'SESSION journal tail' && echo \"\$OUT\" | grep -q 'archived verbatim in archive/compact/'"
 check "SessionStart(compact) digest carries the mechanical HANDOFF (failure + framing + files)" "echo \"\$OUT\" | grep -q 'HANDOFF (mechanical' && echo \"\$OUT\" | grep -q 'FAIL' && echo \"\$OUT\" | grep -q 'ASK: Make the /screen handler' && echo \"\$OUT\" | grep -q 'post_v_1_screen.go'"
 check "HANDOFF skips one-word replies and carries the /compact instructions as FOCUS" "! echo \"\$OUT\" | grep -q 'ASK: try again' && ! echo \"\$OUT\" | grep -q 'ASK: yes' && echo \"\$OUT\" | grep -q 'FOCUS: keep the EPMA decision'"
+# Over budget the block gives way in a fixed order, and which end it gives way from is the whole point:
+# a summary degrades the verbatim failure first (the exact command and the exact error), and the file
+# list last - a file list is the one thing the session can rebuild by looking.
+check "a HANDOFF over its budget drops the file list before the failure it was written to carry" "python3 - '$LR' '$LOCAL' <<'PY'
+import importlib.machinery, importlib.util, sys
+s=importlib.util.spec_from_loader('lr', importlib.machinery.SourceFileLoader('lr', sys.argv[1]))
+lr=importlib.util.module_from_spec(s); s.loader.exec_module(lr)
+st=lr.Store(sys.argv[2]); sid='11111111-2222-4333-8444-555555555555'
+full=lr.handoff_block(st, sid, 10000)
+assert 'FILES:' in full and 'FAIL' in full, full
+tight=lr.handoff_block(st, sid, len(full.encode('utf-8')) - 1)
+assert 'FILES:' not in tight, tight
+assert tight.count('FAIL') == full.count('FAIL'), (full, tight)
+PY"
 "$LR" add --own -t fact "reset before the failure-as-activity check" >/dev/null
 for i in 1 2 3 4 5 6 7 8; do hook UserPromptSubmit "{$COMMON,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"u$i\"}" >/dev/null; done
 hook PostToolUseFailure "{$COMMON,\"hook_event_name\":\"PostToolUseFailure\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"make lint\"},\"error\":\"Exit code 2\\nlint failed\",\"is_interrupt\":false}"
@@ -373,6 +449,19 @@ check "doc add writes one shared line with the path relative to the project root
 ( cd "$DOCP" && "$LR" doc add research/M.md "again" >/dev/null 2>/tmp/lr-doc ); check "the same file twice is refused, and points at doc touch" "test \$? -eq 2 && grep -q 'doc touch n1' /tmp/lr-doc"
 ( cd "$DOCP" && "$LR" doc add research/nope.md "not written yet" >/dev/null 2>/tmp/lr-doc2 ); check "a doc must point at a file that exists" "test \$? -eq 2 && grep -q 'no such file' /tmp/lr-doc2"
 ( cd "$DOCP" && "$LR" doc add /etc/hosts "outside" >/dev/null 2>/tmp/lr-doc3 ); check "a file outside the project is refused (it would not resolve in another worktree)" "test \$? -eq 2 && grep -q 'outside the project' /tmp/lr-doc3"
+# The project root was resolved through its symlinks when it was created; a path typed by hand is not.
+# So a file plainly inside the project read as outside whenever anything above it was a link - which on
+# macOS is every project under /tmp, /var or a linked home. Its own project: `doc add` hands out the next
+# note id, and the docs checks below name theirs.
+LNP="$T/linkdoc"; mkdir -p "$LNP/research"; ( cd "$LNP" && "$LR" init >/dev/null )
+printf 'reached through a symlink\n' > "$LNP/research/L.md"
+ln -s "$LNP/research" "$T/linked-research"
+( cd "$LNP" && "$LR" doc add "$T/linked-research/L.md" "material reached by a linked path" >/dev/null 2>/tmp/lr-doc4 )
+check "a path into the project through a symlink is the project, not 'outside' it" "grep -q 'research/L.md - material reached' '$LNP/.longrun/NOTES.md'"
+( cd "$LNP" && "$LR" doc add "$T/P.outside.md" "really outside" >/dev/null 2>/tmp/lr-doc5 || true )
+printf 'x\n' > "$T/P.outside.md"
+( cd "$LNP" && "$LR" doc add "$T/P.outside.md" "really outside" >/dev/null 2>/tmp/lr-doc5 )
+check "...and a file that is still outside once both sides are resolved is still refused" "test \$? -eq 2 && grep -q 'outside the project' /tmp/lr-doc5"
 DD="$(cd "$DOCP" && "$LR" digest)"; check "the pointer is in the digest, the file's contents are not" "echo \"\$DD\" | grep -q 'research/M.md - the original intent' && ! echo \"\$DD\" | grep -q 'zanzibar'"
 RD="$(cd "$DOCP" && "$LR" recall zanzibar --no-transcript)"; check "recall reaches inside the file the pointer names" "echo \"\$RD\" | grep -q 'research/M.md:3'"
 DD1="$(cd "$DOCP" && "$LR" digest)"; check "a file untouched since its line was written carries no warning" "! echo \"\$DD1\" | grep -q 'this line may be stale'"
@@ -414,6 +503,18 @@ sleep 1; printf 'the rollout plan, rewritten on the other branch\nwith a second 
 sleep 1; cp "$T/P.keep" "$BSP/research/P.md"   # a whole branch round trip inside one session
 BS3="$(cd "$BSP" && hook UserPromptSubmit "{$BSG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"b\"}")"
 check "...and the per-turn DOCS delta says nothing about it either" "! echo \"\$BS3\" | grep -q 'DOCS changed'"
+# Past DOC_HASH_MAX_BYTES there is no hash to compare, and demanding one anyway answered "changed" for
+# every mtime that moved - so the branch-switch fix skipped the biggest pointers, which is where hashing
+# was dropped precisely because they are big. The size is the identity there, as REFERENCE says.
+BIGP="$T/bigdoc"; mkdir -p "$BIGP/research"; ( cd "$BIGP" && "$LR" init >/dev/null )
+python3 -c "open('$BIGP/research/BIG.md','w').write('x'*(5*1024*1024))"
+( cd "$BIGP" && "$LR" doc add research/BIG.md "five megabytes of material" >/dev/null )
+check "a doc file past the hash limit is stamped with no hash, by size alone" "python3 -c \"
+import json;d=json.load(open('$BIGP/.longrun/docs.json'))['1'];assert d['sha']=='' and d['size']==5*1024*1024, d\""
+sleep 3; touch "$BIGP/research/BIG.md"   # a checkout that puts back the same bytes
+BG1="$(cd "$BIGP" && "$LR" digest)"; check "a branch switch under a file too big to hash is not a rewrite either" "! echo \"\$BG1\" | grep -q 'this line may be stale'"
+python3 -c "open('$BIGP/research/BIG.md','w').write('y'*(6*1024*1024))"
+BG2="$(cd "$BIGP" && "$LR" digest)"; check "...but a real rewrite of it still is" "echo \"\$BG2\" | grep -q 'this line may be stale'"
 DG="\"session_id\":\"dddddddd-2222-4333-8444-555555555555\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$DOCP\""
 ( cd "$DOCP" && hook SessionStart "{$DG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
   hook UserPromptSubmit "{$DG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"a\"}" >/dev/null )
@@ -454,6 +555,17 @@ PY
 ( cd "$DOCP" && "$LR" gc >/dev/null )
 check "a month-old pointer whose file went missing today survives the next gc" "grep -q 'research/M.md' '$DOCP/.longrun/NOTES.md'"
 check "...and that gc wrote down when the file was first found missing" "grep -q 'gone_since' '$DOCP/.longrun/docs.json'"
+# The value, not just the key: stamping the NOTE's date here would leave the pointer looking a month gone
+# and the very next gc would archive it, which is the bug this replaced, one hour later instead of at once.
+check "...stamped with today, not with the date of the note" "python3 -c \"
+import json,datetime;d=json.load(open('$DOCP/.longrun/docs.json'))['1']
+assert d['gone_since'][:10]==datetime.date.today().isoformat(), d\""
+( cd "$DOCP" && "$LR" gc >/dev/null )
+check "...so a second gc right after it does not archive it either" "grep -q 'research/M.md' '$DOCP/.longrun/NOTES.md'"
+# Rewriting the description of a file that is not there re-stamped the entry from scratch, and the clock
+# went with it: a pointer could be kept alive for ever by describing it again every few days.
+( cd "$DOCP" && "$LR" doc touch n1 "what used to be in it, while the file is away" >/dev/null )
+check "rewriting the line of a missing file does not restart the week it has been missing" "grep -q 'gone_since' '$DOCP/.longrun/docs.json'"
 printf 'the file is back, under the same name\n' > "$DOCP/research/M.md"
 ( cd "$DOCP" && "$LR" gc >/dev/null )
 check "a file that comes back clears the clock instead of leaving it running" "! grep -q 'gone_since' '$DOCP/.longrun/docs.json'"
@@ -522,10 +634,19 @@ check "a one-word Grep IS the question, so it reaches a doc file - the whole poi
 RH4C="$(cd "$RCP" && ptu Grep '{"pattern":"promocode layout"}')"
 check "...and two words of one pattern are a co-occurrence the session asked for" "echo \"\$RH4C\" | grep -q 'research/R.md:4'"
 ( cd "$RCP" && rturn )
-RH5="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}}]}")"
-check "a Read carries no question, so it is never guessed at from the path" "test -z \"\$RH5\""
 RMETA="$(ls -d "$CLAUDE_CONFIG_DIR"/longrun/sessions/*recallhint*/rrrrrrrr/meta.json 2>/dev/null | head -1)"
 check "a search tool moves no counter: looking around is still not activity" "test -n \"\$RMETA\" && grep -q '\"tools\": 0' \"\$RMETA\""
+# Asked of the event that actually runs the hint. Sent to PostToolBatch this proved nothing from 0.6.3 on,
+# because that event stopped calling recall_hint at all - the check passed whatever a Read carried.
+RH5="$(cd "$RCP" && ptu Read "{\"file_path\":\"$RCP/research/R.md\"}")"
+check "a Read carries no question, so it is never guessed at from the path" "test -z \"\$RH5\""
+check "...and the path in it is not turned into a term either" "python3 - '$LR' <<'PY'
+import importlib.machinery, importlib.util, sys
+s=importlib.util.spec_from_loader('lr', importlib.machinery.SourceFileLoader('lr', sys.argv[1]))
+lr=importlib.util.module_from_spec(s); s.loader.exec_module(lr)
+assert lr.search_terms([('Read', {'file_path': '/x/research/idempotency-notes.md'})]) == []
+assert lr.search_terms([('Grep', {'pattern': 'idempotency'})]) != []
+PY"
 printf 'x\n' > "$RCP/research/R2.md"
 RH6="$(cd "$RCP" && ptu Grep '{"pattern":"nothing_here_at_all"}')"
 check "a term nothing answers stays silent" "test -z \"\$RH6\""
@@ -558,11 +679,30 @@ RB1="$(cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch
 check "PostToolBatch does not repeat the hint PostToolUse already carried" "test -z \"\$RB1\""
 RB1B="$(cd "$RCP" && ptu Grep '{"pattern":"superseded"}')"
 check "...and the pointer was not spent, so PostToolUse still finds the archived answer" "echo \"\$RB1B\" | grep -q 'widget v3 in PR 41'"
-printf 'the drawer also owns a promocode layout slot\n' >> "$RCP/research/R.md"
-( cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/R.md\"},\"tool_response\":{}}]}" >/dev/null )
+# Its own file, and a term this project has never been searched for. On R.md this proved nothing twice
+# over: the pattern had been spent on that file twenty lines up, and R.md is in `files` anyway (a Read
+# went through PostToolUse above), so what kept the hint quiet was the file being this session's, not
+# its having been opened. The control is a second session, which never opened O.md.
+printf 'the settlement queue owns a settlement_window_ms slot of its own\n' > "$RCP/research/O.md"
+( cd "$RCP" && "$LR" doc add research/O.md "what the settlement queue owns" >/dev/null )
+RG2="\"session_id\":\"rrrrrrr2-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$RCP\""
+( cd "$RCP" && hook SessionStart "{$RG2,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
+RB2C="$(cd "$RCP" && hook PostToolUse "{$RG2,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"settlement_window_ms\"},\"tool_response\":{}}")"
+check "the word does reach that line from a session that has not opened the file" "echo \"\$RB2C\" | grep -q 'settlement_window_ms slot'"
+( cd "$RCP" && hook PostToolBatch "{$RG,\"hook_event_name\":\"PostToolBatch\",\"tool_calls\":[{\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"$RCP/research/O.md\"},\"tool_use_id\":\"toolu_read_O\",\"tool_response\":{}}]}" >/dev/null )
 ( cd "$RCP" && rturn )
-RB2="$(cd "$RCP" && ptu Grep '{"pattern":"promocode layout"}')"
+RB2="$(cd "$RCP" && ptu Grep '{"pattern":"settlement_window_ms"}')"
 check "a file this session has already opened is not offered back to it" "test -z \"\$RB2\""
+# Journals are mechanical logs: "PR #8 opened", "watch w1 fired". A replay of this project's real searches
+# through the first version of the hint said two thirds of its hits were lines like that, so the scan
+# takes only what somebody wrote down on purpose. Measured in REFERENCE 5a and until now in nothing else.
+printf -- '09-17 12:00 raised kassa_timeout_ms to 900 and the retry stopped\n' >> "$RPEER/journal.md"
+printf -- '- [s9] 09-17 fact: the courier_timeout_ms knob is read once at startup\n' >> "$RPEER/notes.md"
+( cd "$RCP" && rturn )
+RJ1="$(cd "$RCP" && ptu Grep '{"pattern":"kassa_timeout_ms"}')"
+RJ2="$(cd "$RCP" && ptu Grep '{"pattern":"courier_timeout_ms"}')"
+check "a line from another session's JOURNAL is a log, not knowledge: never offered as the answer" "test -z \"\$RJ1\""
+check "...while a note of that same session, written on purpose, is" "echo \"\$RJ2\" | grep -q 'courier_timeout_ms knob'"
 # Two pointers in a turn is help; five is a lecture. The budget refills at the turn boundary.
 printf -- '2026-09-10 11:00 pruned | - [n8] 09-10 fact: the kassa callback signature is checked against the merchant key\n2026-09-10 11:00 pruned | - [n7] 09-10 dead: the courier eta endpoint answers 404 for a cancelled order\n2026-09-10 11:00 pruned | - [n6] 09-10 decision: the tariff matrix is rebuilt nightly, never on request\n' >> "$RLOCAL/archive/notes.md"
 ( cd "$RCP" && rturn )
@@ -572,6 +712,19 @@ check "two pointers in a turn are help; the third is held back" "echo \"\$RB3A\"
 ( cd "$RCP" && rturn )
 RB4="$(cd "$RCP" && ptu Grep '{"pattern":"tariff"}')"
 check "...and the next turn gets it, instead of it being lost" "echo \"\$RB4\" | grep -q 'rebuilt nightly'"
+# The scan has a hard ceiling per pass, and a file is skipped when it is bigger than the ceiling. A file
+# just UNDER it used to be read instead, leaving a few hundred bytes - and since doc pointers are scanned
+# first, one fat pointer silently cost every other doc, every peer's notes and the whole archive their
+# turn. What is skipped now is anything that would not leave enough behind to be worth a pass.
+BUDP="$T/scanbudget"; mkdir -p "$BUDP/research"; ( cd "$BUDP" && "$LR" init >/dev/null )
+python3 -c "open('$BUDP/research/FAT.md','w').write('filler about nothing in particular\n'*17100)"
+python3 -c "open('$BUDP/research/THIN.md','w').write('the retry uses payment_callback once the decline lands\n' + 'more prose\n'*4500)"
+( cd "$BUDP" && "$LR" doc add research/FAT.md "a pile just under the scan ceiling" >/dev/null
+  "$LR" doc add research/THIN.md "the one line that answers" >/dev/null )
+BUG="\"session_id\":\"b0d6e701-2222-4333-8444-555555555555\",\"transcript_path\":\"\",\"cwd\":\"$BUDP\""
+( cd "$BUDP" && hook SessionStart "{$BUG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null )
+BU1="$(cd "$BUDP" && hook PostToolUse "{$BUG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"payment_callback\"},\"tool_response\":{}}")"
+check "a doc file just under the scan ceiling does not cost every file after it its turn" "echo \"\$BU1\" | grep -q 'research/THIN.md:1'"
 
 echo "== recall ranking: curated notes are not crowded out by a noisy archive"
 for k in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do echo "old summary $k mentioning pgx pool deadlock again" > "$LOCAL/archive/compact/11111111-2026010$((k%9))-$k.md"; done
@@ -715,6 +868,51 @@ check "the target's UserPromptSubmit delivers the message once and archives it" 
 "$LR" send gone-worker "second: run the tests" >/dev/null 2>&1
 PTM="$(hook PostToolUse "{$G,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"tool_response\":{}}")"
 check "the target's PostToolUse delivers a message between tool calls as additionalContext" "echo \"\$PTM\" | grep -q 'additionalContext' && echo \"\$PTM\" | grep -q 'second: run the tests'"
+# A turn can be twenty Greps long. The three search tools take a shorter path through the hook - they move
+# no counter - and a message, a peer's note and a board move used to be left behind on that path, so a
+# session that was only searching heard nothing until it happened to run a tool of another kind.
+"$LR" send gone-worker "third: the search branch carries messages too" >/dev/null 2>&1
+PTG="$(hook PostToolUse "{$G,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"nothing in particular\"},\"tool_response\":{}}")"
+check "a message reaches a session between two Greps, not only between two calls of another kind" "echo \"\$PTG\" | grep -q 'the search branch carries messages too'"
+# ...and so does the other half of that promise, a peer's note. The mid-turn deltas open a window every
+# five calls, and that window used to be counted in `tools` - the very counter a search does not move -
+# so in a turn made of searches it never came round at all. The window is counted in the turn's calls now.
+SDP="$T/searchdelta"; mkdir -p "$SDP"; ( cd "$SDP" && "$LR" init >/dev/null )
+SDA=a1a1a1a1-2222-4333-8444-555555555555; SDB=b1b1b1b1-2222-4333-8444-555555555555
+SDG="\"session_id\":\"$SDA\",\"transcript_path\":\"\",\"cwd\":\"$SDP\""
+( cd "$SDP" && hook SessionStart "{$SDG,\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null
+  hook UserPromptSubmit "{$SDG,\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"go\"}" >/dev/null
+  LONGRUN_SESSION=$SDB "$LR" add -t fact "the retry budget past 128 kB is capped by the proxy" >/dev/null )
+SDOUT=""
+for i in 1 2 3 4 5 6 7 8; do
+  SDOUT="$SDOUT$( cd "$SDP" && hook PostToolUse "{$SDG,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Grep\",\"tool_input\":{\"pattern\":\"pattern$i\"},\"tool_response\":{},\"tool_use_id\":\"toolu_sd$i\"}" )"
+done
+check "a peer's note reaches a session whose turn is nothing but searches" "echo \"\$SDOUT\" | grep -q 'SHARED notes of project' && echo \"\$SDOUT\" | grep -q 'past 128 kB'"
+# PostToolUse hooks run in parallel for a parallel batch, so two of them can be inside deliver_inbox at the
+# same moment. The file is claimed by an atomic rename BEFORE it is read: whoever loses the rename carries
+# nothing. Read first and move after - the old order - both deliver the same message and the loser then
+# trips over a file that is no longer there. The competitor is simulated inside `read`, which is exactly
+# the window that used to be open.
+check "a message another hook claimed a moment earlier is carried by neither twice nor by a traceback" "python3 - '$LR' '$LOCAL' <<'PY'
+import glob, importlib.machinery, importlib.util, os, sys
+s=importlib.util.spec_from_loader('lr', importlib.machinery.SourceFileLoader('lr', sys.argv[1]))
+lr=importlib.util.module_from_spec(s); s.loader.exec_module(lr)
+st=lr.Store(sys.argv[2]); sid='66666666-2222-4333-8444-555555555555'
+arch=os.path.join(st.inbox, '.archive'); os.makedirs(arch, exist_ok=True)
+open(os.path.join(st.inbox, '20260919-101010-msg-to-66666666-from-peer.md'), 'w').write('# MESSAGE to 66666666\n\nfifth: a contested message\n')
+orig=lr.read
+def competing_hook(path, *a, **k):   # another hook finishes its own claim while this one is reading
+    for f in glob.glob(os.path.join(st.inbox, '*-msg-to-*.md')):
+        try:
+            os.rename(f, os.path.join(arch, os.path.basename(f)))
+        except OSError:
+            pass
+    return orig(path, *a, **k)
+lr.read=competing_hook
+out=lr.deliver_inbox(st, sid)        # must not raise, whoever won
+assert out.count('fifth: a contested message') <= 1, out
+assert not glob.glob(os.path.join(st.inbox, '*-msg-to-66666666-*.md')), 'left in the inbox for a third delivery'
+PY"
 python3 -c "print('x' * 5000)" | "$LR" send gone-worker - >/dev/null 2>&1
 LONGM="$(hook PostToolUse "{$G,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"tool_response\":{}}")"
 check "a message longer than the injection limit says it was cut and where the whole text is" "echo \"\$LONGM\" | grep -q 'cut off here, 5000 chars in all' && echo \"\$LONGM\" | grep -q 'inbox/.archive/'"
@@ -750,10 +948,26 @@ check "watch ls shows it pending" "$LR watch ls | grep -q 'w1   pending'"
 touch "$FLAG"; "$LR" watch run --force >/tmp/lr-tick; MSGW=$(ls "$LOCAL/inbox/"*-msg-to-d66666666-from-watch.md 2>/dev/null | head -1)
 check "tick fires: message queued in the TARGET's inbox with the --then text" "grep -q '1 fired' /tmp/lr-tick && test -n \"\$MSGW\" && grep -q 'CONDITION MET: file exists' \"\$MSGW\" && grep -q 'the flag appeared: run the tests' \"\$MSGW\" && grep -q '\"state\": \"fired\"' '$WD/w1.json'"
 check "fired watch logged in the target's journal" "grep -q 'watch w1 fired' '$SESS/66666666/journal.md'"
+check "a watch that is over is stamped with the moment it was over, not with the moment it would have given up" "python3 - '$WD/w1.json' <<'PYD'
+import json, sys, time
+d = json.load(open(sys.argv[1]))
+assert d['state'] == 'fired', d
+assert abs(d['done_at'] - time.time()) < 300, d        # stamped as it fired...
+assert d['done_at'] < d['expires'] - 60, d             # ...and that is not when it would have given up
+PYD"
 G="\"session_id\":\"66666666-2222-4333-8444-555555555555\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$WT\""
 SSW="$(hook SessionStart "{$G,\"hook_event_name\":\"SessionStart\",\"source\":\"resume\"}")"
 check "the target's next SessionStart delivers the fired watch" "echo \"\$SSW\" | grep -q 'CONDITION MET' && echo \"\$SSW\" | grep -q 'run the tests'"
 check "watch ls hides fired, --all shows it with delivery" "! $LR watch ls | grep -q 'w1 ' && $LR watch ls --all | grep -q 'delivered via inbox'"
+# A watch that is over is kept a week so `watch ls --all` can still say what happened to it - a week from
+# the moment it was OVER. Counted from `expires` (when it would have given up instead), one registered for
+# a month and fired on its first tick sat in the list for five weeks.
+python3 - "$WD/w1.json" <<'PYX'
+import json,sys,time; p=sys.argv[1]; d=json.load(open(p))
+d["expires"]=time.time()+30*86400; d["done_at"]=time.time()-8*86400; json.dump(d,open(p,"w"))
+PYX
+"$LR" watch run --force >/dev/null
+check "a watch that fired a week ago is dropped even though it was registered for a month" "! test -f '$WD/w1.json'"
 # the app resumes a session with a NEW CLI id behind the same sidebar entry: the watch follows the entry
 "$LR" watch add --to "PR E: Шторка лотереи" --no-test --then "after resume" -- file "$FLAG" >/dev/null 2>&1
 printf '{"sessionId":"local_66666666-2222-4333-8444-555555555555","cliSessionId":"99999999-2222-4333-8444-555555555555","priorCliSessionIds":["66666666-2222-4333-8444-555555555555"],"cwd":"%s","title":"PR E: Шторка (renamed)","isArchived":false,"lastActivityAt":1788779365881}' "$WT" > "$DSK/local_66666666-2222-4333-8444-555555555555.json"
@@ -807,6 +1021,15 @@ python3 - "$LOCAL/config.json" <<'PYX'
 import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["inject_max_bytes"]=60000; json.dump(d,open(p,"w"))
 PYX
 DG="$("$LR" digest --source startup)"; check "digest lists pending watches for this session" "echo \"\$DG\" | grep -q 'WATCH 1 pending for this session'"
+# The app hands a resumed session a NEW CLI id behind the same sidebar entry, and the record keeps the id
+# it was registered under until the watch fires (only then does watch_deliver follow the entry and rewrite
+# it). Comparing the two ids dropped the block out of the digest for exactly the session that had just
+# come back and no longer remembered it was waiting for anything.
+"$LR" watch add --to 66666666 --no-test --then "still waiting after the resume" -- file /nonexistent/resumed >/dev/null 2>&1
+DGR="$(LONGRUN_SESSION=99999999-2222-4333-8444-555555555555 "$LR" digest --source startup)"
+check "a watch still pending is still in the digest after the app resumes the session under a new CLI id" "echo \"\$DGR\" | grep -q 'still waiting after the resume'"
+WLR="$(LONGRUN_SESSION=99999999-2222-4333-8444-555555555555 "$LR" watch ls | grep -B1 'still waiting after the resume' | head -1)"
+check "...and watch ls marks it as this session's own, not as somebody else's" "case \"\$WLR\" in '*'*) true;; *) false;; esac"
 rm -f "$CLAUDE_CONFIG_DIR/sessions/$PEER.json" "$CLAUDE_CONFIG_DIR/sessions/999999.json" "$CLAUDE_CONFIG_DIR/sessions/$PEER2.json"
 
 echo "== env exports are shell-quoted"

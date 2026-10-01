@@ -44,6 +44,22 @@
   ok   a turn of pure reading gets no card, and a note write resets the counters
   ok   a failed command stepping over the window boundary does not swallow the card
   ok   PostToolUseFailure -> FAIL line in journal
+  ok   a glance - a read-only turn of a couple of calls - is still not worth a card
+  ok   a read-only turn that did real work gets a card of its own, and asks for the conclusion
+  ok   ...at most once per window, like the other way in
+  ok   and never mid-turn: six calls in may still be on the way to the seventh, an edit
+  ok   the turn Stop froze counts what was written in it instead of comparing two minute-stamps
+  ok   ...and it is still the turn's own size that was frozen: nine calls came after the note
+  ok   a read-only turn that wrote its conclusion down is not asked for it again
+  ok   a turn of nothing but Read has a size at last, and the read-only card sees it
+  ok   a call both events see is counted once, not twice
+  ok   a tool the matcher fires on but does not NAME (TodoWrite, BashOutput) is still counted once
+  ok   hooked_tool answers exactly what the hooks.json matcher, read as Claude Code reads it, answers
+  ok   a call that FAILED is still one of the turn's calls, whichever event the CLI sent about it
+  ok   a call that WORKED is counted once: the batch adds the two Reads to the two edits, not four more
+  ok   a failed command the failure event DID count is not counted a second time by the batch
+  ok   one failed command is one call of the turn whichever of its two events lands first
+  ok   not on the first turn of a session, when the only honest answer is 'I don't know yet'
   ok   the housekeeping question comes on its own: no edits, no failures, no card in that turn
   ok   ...and not again on the next turn: once per half an ageing window, not once per turn
   ok   nothing old enough to re-read: the question is not asked at all
@@ -59,6 +75,7 @@
   ok   SessionStart(compact) digest: own notes + journal tail + archive pointer
   ok   SessionStart(compact) digest carries the mechanical HANDOFF (failure + framing + files)
   ok   HANDOFF skips one-word replies and carries the /compact instructions as FOCUS
+  ok   a HANDOFF over its budget drops the file list before the failure it was written to carry
   ok   a failed command alone is worth a card, with no edits in the turn at all
   ok   handoff appears only after a compaction, not on plain startup
   ok   compactions counted
@@ -93,16 +110,65 @@
   ok   the same file twice is refused, and points at doc touch
   ok   a doc must point at a file that exists
   ok   a file outside the project is refused (it would not resolve in another worktree)
+  ok   a path into the project through a symlink is the project, not 'outside' it
+  ok   ...and a file that is still outside once both sides are resolved is still refused
   ok   the pointer is in the digest, the file's contents are not
   ok   recall reaches inside the file the pointer names
-  ok   a file newer than its line is marked, so nobody trusts a stale description
+  ok   a file untouched since its line was written carries no warning
+  ok   a change made the same day the line was written is still marked (the note's date could not tell)
+  ok   the mark says when, to the minute
   ok   doc touch rewrites the description and keeps the path
+  ok   ...and clears the mark: the description now matches the file
   ok   doc ls shows the path, the size and when it last changed
+  ok   a project with no stamps yet falls back to the note's date instead of going quiet
+  ok   a doc file with different bytes under it is still marked stale
+  ok   coming back to the bytes the line was written against is not a change, whatever the mtime says
+  ok   ...and the per-turn DOCS delta says nothing about it either
+  ok   a doc file past the hash limit is stamped with no hash, by size alone
+  ok   a branch switch under a file too big to hash is not a rewrite either
+  ok   ...but a real rewrite of it still is
   ok   a file changed under a pointer is reported once, on the next turn
   ok   a file THIS session edited asks for doc touch instead of offering a read
+  ok   a later change to a file this session edited turns ago is theirs again, not an unpaid debt
   ok   a file this session only READ is never claimed as its work: an offer to read, not a debt
   ok   a pointer whose file is gone says so instead of going quiet
+  ok   a month-old pointer whose file went missing today survives the next gc
+  ok   ...and that gc wrote down when the file was first found missing
+  ok   ...stamped with today, not with the date of the note
+  ok   ...so a second gc right after it does not archive it either
+  ok   rewriting the line of a missing file does not restart the week it has been missing
+  ok   a file that comes back clears the clock instead of leaving it running
   ok   gc archives a pointer whose file has been missing for a week
+== the poll hint: waiting by hand, told once what to do instead
+  ok   an ordinary command is not a poll
+  ok   a long sleep is met with watch, and with the reason it is better
+  ok   ...once per turn, not after every sleep
+  ok   a short sleep is pacing a command, not waiting for the world
+  ok   the same command three times over is a poll loop even with no sleep in it
+== the recall hint: a session searching for something already written down, outside its context
+  ok   a Grep for what another session recorded as a dead end is met with that line and with recall
+  ok   a ctx note is that conversation's own bookkeeping and is never offered to another session
+  ok   ...and not again for the same term and file: one pointer, not a nag
+  ok   a short word is not a search term: no hint
+  ok   a term on too many lines is a word, not a term: no hint
+  ok   a one-word Grep IS the question, so it reaches a doc file - the whole point of the lazy layer
+  ok   ...and two words of one pattern are a co-occurrence the session asked for
+  ok   a search tool moves no counter: looking around is still not activity
+  ok   a Read carries no question, so it is never guessed at from the path
+  ok   ...and the path in it is not turned into a term either
+  ok   a term nothing answers stays silent
+  ok   ordinary words out of a subagent's sentence are not a question: no hint
+  ok   ...but a word in that sentence that NAMES something is
+  ok   a word-boundary pattern searches for the word, not for "bfallback_window_ms"
+  ok   PostToolBatch does not repeat the hint PostToolUse already carried
+  ok   ...and the pointer was not spent, so PostToolUse still finds the archived answer
+  ok   the word does reach that line from a session that has not opened the file
+  ok   a file this session has already opened is not offered back to it
+  ok   a line from another session's JOURNAL is a log, not knowledge: never offered as the answer
+  ok   ...while a note of that same session, written on purpose, is
+  ok   two pointers in a turn are help; the third is held back
+  ok   ...and the next turn gets it, instead of it being lost
+  ok   a doc file just under the scan ceiling does not cost every file after it its turn
 == recall ranking: curated notes are not crowded out by a noisy archive
   ok   recall shows the NOTES.md hit despite 15 noisier archive hits
 == status and concurrency
@@ -142,6 +208,9 @@
   ok   send to a session that is not running queues a file in the project inbox
   ok   the target's UserPromptSubmit delivers the message once and archives it
   ok   the target's PostToolUse delivers a message between tool calls as additionalContext
+  ok   a message reaches a session between two Greps, not only between two calls of another kind
+  ok   a peer's note reaches a session whose turn is nothing but searches
+  ok   a message another hook claimed a moment earlier is carried by neither twice nor by a traceback
   ok   a message longer than the injection limit says it was cut and where the whole text is
   ok   the target's SessionStart digest carries a queued message
   ok   --resume runs claude -p <text> --resume <sid> in the session's cwd with LONGRUN_* scrubbed
@@ -160,8 +229,10 @@
   ok   tick with the condition false keeps it pending
   ok   tick fires: message queued in the TARGET's inbox with the --then text
   ok   fired watch logged in the target's journal
+  ok   a watch that is over is stamped with the moment it was over, not with the moment it would have given up
   ok   the target's next SessionStart delivers the fired watch
   ok   watch ls hides fired, --all shows it with delivery
+  ok   a watch that fired a week ago is dropped even though it was registered for a month
   ok   watch follows the desktop entry to the new CLI id (rename + resume)
   ok   the resumed session (new CLI id) receives the message addressed to its desktop id
   ok   the resumed session continues the prior's dir (priorCliSessionIds): same key, journal continues, no second dir
@@ -173,6 +244,8 @@
   ok   unwritable project inbox -> message spooled in the session dir, watch marked fired, tick exit 0
   ok   the target's hooks read the session spool too and archive the message
   ok   digest lists pending watches for this session
+  ok   a watch still pending is still in the digest after the app resumes the session under a new CLI id
+  ok   ...and watch ls marks it as this session's own, not as somebody else's
 == env exports are shell-quoted
   ok   a path with a space survives the env file
 == inert outside a project
@@ -243,4 +316,4 @@
   ok   the flag beats both gates: notify_turn_end off and the Claude app in front
   ok   consume_important spends a counted flag and never goes below zero
 
-PASS=222 FAIL=0  (tmp: /tmp/longrun-test.lxJYcg)
+PASS=293 FAIL=0  (tmp: /tmp/longrun-test.f1yrMP)

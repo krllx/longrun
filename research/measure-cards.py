@@ -20,6 +20,7 @@ import collections
 import glob
 import json
 import os
+import re
 import sys
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
@@ -28,12 +29,16 @@ WRITE_CMDS = ("longrun add", "longrun doc add", "longrun doc touch", "longrun re
 # process per call. Since 0.6.3 `PostToolBatch`, which has no matcher, counts the calls PostToolUse does
 # not, so the size of a turn is ALL of its calls again and the `tools` table below is the one the code
 # uses. The `hooked` table is kept because it is what the threshold was originally chosen against.
-SEEN_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Agent", "Task",
-              "Workflow", "Grep", "Glob", "WebSearch"}
+SEEN_TOOLS = ["Edit", "Write", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "Agent", "Task",
+              "Workflow", "Grep", "Glob", "WebSearch"]
+# Claude Code tests that matcher as an UNANCHORED regex (it only takes the exact-match path when the whole
+# string is `^[a-zA-Z0-9_|]+$`, and `mcp__.*` is not), so `TodoWrite` matches on "Write" and `BashOutput`
+# on "Bash". Comparing names for equality here would put those in the "no hook saw it" column.
+SEEN_RE = re.compile("|".join(SEEN_TOOLS + ["mcp__.*"]))
 
 
 def seen(name):
-    return name in SEEN_TOOLS or (name or "").startswith("mcp__")
+    return bool(SEEN_RE.search(name or ""))
 
 
 def is_interrupt(block):
@@ -47,13 +52,23 @@ def blocks(row):
     return c if isinstance(c, list) else []
 
 
+# Rows the harness writes into the transcript as if the user had typed them: a task finishing, a slash
+# command and its output, a scheduled run. Only `<system-reminder>` used to be filtered, and the rest -
+# 566 rows of 3828 in the corpus this was last run against - were counted as prompts, which cut real turns
+# in two and invented turns that nobody took.
+HARNESS_TAGS = ("<system-reminder>", "<task-notification>", "<command-name>", "<command-message>",
+                "<command-args>", "<local-command-stdout>", "<local-command-stderr>", "<bash-input>",
+                "<bash-stdout>", "<bash-stderr>", "<scheduled-task", "<ci-monitor-event>")
+
+
 def is_real_user_turn(row):
     """A prompt the human typed, not a tool result and not the harness talking to itself."""
     if row.get("type") != "user" or row.get("isMeta") or row.get("isSidechain"):
         return False
     c = (row.get("message") or {}).get("content")
     if isinstance(c, str):
-        return bool(c.strip()) and not c.lstrip().startswith("<system-reminder>")
+        s = c.lstrip()
+        return bool(s) and not s.startswith(HARNESS_TAGS)
     return isinstance(c, list) and not any(b.get("type") == "tool_result" for b in c if isinstance(b, dict))
 
 
@@ -136,6 +151,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--projects-dir", default=os.path.expanduser("~/.claude/projects"))
     ap.add_argument("--min-edits", type=int, default=6, help="nudge_edit_tools")
+    ap.add_argument("--nudge-turns", type=int, default=8, help="nudge_turns: turns between two cards")
+    ap.add_argument("--read-calls", type=int, default=6, help="NUDGE_READ_TOOLS")
     a = ap.parse_args()
 
     files = sorted(glob.glob(os.path.join(a.projects_dir, "*", "*.jsonl")))
@@ -183,6 +200,29 @@ def main():
 
     tally(per_file, "every transcript")
     tally(active, "transcripts where longrun was in use (>=1 note written)")
+
+    # The gate is not the only thing between a turn and a card. `card_due` also holds the card to one per
+    # `nudge_turns` turns, and nothing above models that - so every "the card WOULD have asked" number in
+    # this script, and every "a second path would card N turns" read off it, is an upper bound. How far
+    # above the truth it sits is worth printing rather than guessing.
+    thr = collections.Counter()
+    for turns in active.values():
+        carded_at = None
+        for i, t in enumerate(turns, 1):
+            if t.notes:
+                continue          # turn_card() says nothing about a turn that already wrote something
+            want = t.gate if (t.edits or t.fails) else (t.tools >= a.read_calls)
+            if not want:
+                continue
+            thr["gate_open"] += 1
+            if carded_at is None or i - carded_at >= a.nudge_turns:
+                thr["shown"] += 1
+                carded_at = i
+    print("\n== and how many of those cards `nudge_turns` = %d actually lets through (sessions in use)" % a.nudge_turns)
+    print("   turns where a card's GATE is open (either path):  %6d" % thr["gate_open"])
+    print("   cards the once-per-%d-turns window allows:        %6d  (%.0f%% of them)"
+          % (a.nudge_turns, thr["shown"], 100.0 * thr["shown"] / max(1, thr["gate_open"])))
+    print("   lower still in reality: the mid-turn card shares the same window and is not modelled here")
 
     # How much a lower gate would cost: turns with some edits but under the threshold.
     near = collections.Counter()
