@@ -1,5 +1,7 @@
 English | [Русский](REFERENCE.ru.md)
 
+Codex support: [setup and compatibility](../skill/longrun/references/codex.md). Shared notes, own notes, board, inbox and watches use the same store in both clients. Client-specific hook and transcript details below describe Claude Code unless stated otherwise.
+
 > Reference: every command and flag, file formats, hooks, budgets, verified facts. How it works and why is in [README.md](../README.md).
 
 # longrun - reference

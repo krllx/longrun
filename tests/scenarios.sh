@@ -12,7 +12,7 @@ export CLAUDE_CONFIG_DIR="$T/claude" HOME="$T/home" LONGRUN_NO_TIMER=1
 export LONGRUN_DESKTOP_DIR="$T/home/desktop-sessions"
 export LONGRUN_NO_UI=1                     # never a real dialog or notification from a test
 mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/projects/-proj" "$CLAUDE_CONFIG_DIR/sessions"
-unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT CLAUDE_ENV_FILE
+unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT CODEX_THREAD_ID LONGRUN_HOME LONGRUN_CLIENT CLAUDE_ENV_FILE
 PASS=0; FAIL=0
 ok(){ PASS=$((PASS+1)); echo "  ok   $1"; }
 bad(){ FAIL=$((FAIL+1)); echo "  FAIL $1"; }

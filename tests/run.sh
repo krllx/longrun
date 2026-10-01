@@ -7,7 +7,7 @@ LR="$HERE/../skill/longrun/scripts/longrun"
 T="$(mktemp -d /tmp/longrun-test.XXXXXX)"
 export CLAUDE_CONFIG_DIR="$T/claude"      # keeps registry/global config out of ~/.claude
 export HOME="$T/home"; mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/projects/-proj"
-unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT XDG_CONFIG_HOME
+unset LONGRUN_DIR LONGRUN_SESSION LONGRUN_SCOPE LONGRUN_TRANSCRIPT CODEX_THREAD_ID LONGRUN_HOME LONGRUN_CLIENT XDG_CONFIG_HOME
 export LONGRUN_NO_TIMER=1                  # never register a real launchd/systemd/cron job from the test tree
 export LONGRUN_DESKTOP_DIR="$HOME/desktop-sessions"   # the Claude desktop app's metadata dir, wherever this OS puts it
 export LONGRUN_NO_UI=1                     # never a real dialog or notification from a test

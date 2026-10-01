@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""longrun - shared project memory plus per-session notes for long Claude Code sessions.
+"""longrun - shared project memory plus per-session notes for Claude Code and Codex.
 
 Two levels, nothing else:
   PROJECT  <root>/.longrun/ (or ~/.claude/longrun/projects/<slug>/ with --external). Shared by every session
@@ -35,7 +35,10 @@ IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")
 UTF8_LOCALE = "en_US.UTF-8" if IS_MAC else "C.UTF-8"  # what a spawned check gets; C.UTF-8 is the one Linux always has
-GLOBAL_DIR = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "longrun")
+# Keep the existing store: installing Codex must not split a project's session history,
+# registry or watches. LONGRUN_HOME explicitly relocates it for both clients.
+GLOBAL_DIR = os.path.abspath(os.path.expanduser(os.environ.get("LONGRUN_HOME") or
+    os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "longrun")))
 REGISTRY = os.path.join(GLOBAL_DIR, "registry.json")
 GLOBAL_CONFIG = os.path.join(GLOBAL_DIR, "config.json")
 NOTIFY_FIX_MAC = """macOS posts an osascript notification on behalf of Script Editor, which has no notification
@@ -224,6 +227,10 @@ def resolve_local(cwd=None, use_env=True):
     env = os.environ.get("LONGRUN_DIR") if use_env else ""
     if env and os.path.isdir(env):
         return os.path.abspath(env)
+    if use_env and not os.environ.get("LONGRUN_SESSION") and not os.environ.get("CLAUDE_SESSION_ID"):
+        idx = index_read(os.environ.get("CODEX_THREAD_ID") or "")
+        if idx.get("local") and os.path.isdir(idx["local"]):
+            return follow_hub(idx["local"])
     cwd = os.path.realpath(cwd or os.getcwd())
     d = cwd
     while True:
@@ -343,7 +350,7 @@ def project_slug(cwd):
 
 
 def session_id():
-    sid = os.environ.get("LONGRUN_SESSION") or os.environ.get("CLAUDE_SESSION_ID")
+    sid = os.environ.get("LONGRUN_SESSION") or os.environ.get("CLAUDE_SESSION_ID") or os.environ.get("CODEX_THREAD_ID")
     return sid or ""
 
 
@@ -1130,7 +1137,7 @@ def chain_prior(store, sid, cwd, source):
     if source == "clear":
         best = None
         for m in session_metas(store):
-            if m.get("ended") == "clear" and os.path.realpath(m.get("cwd") or "/") == os.path.realpath(cwd or "/"):
+            if m.get("client", "claude") == "claude" and m.get("ended") == "clear" and os.path.realpath(m.get("cwd") or "/") == os.path.realpath(cwd or "/"):
                 if best is None or m.get("last_seen", "") > best.get("last_seen", ""):
                     best = m
         if best:
@@ -1143,14 +1150,15 @@ def chain_prior(store, sid, cwd, source):
     return ""
 
 
-def bind_session(store, sid, cwd, source):
+def bind_session(store, sid, cwd, source, client="claude"):
     """SessionStart: which session dir does this CLI id belong to? Seen before (compaction, CLI resume,
     /clear within one id) -> the same one. New id with a prior -> continue the prior's dir. Else fresh."""
     idx = index_read(sid)
-    skey = idx.get("skey") or chain_prior(store, sid, cwd, source) or sid8(sid)
+    prior = chain_prior(store, sid, cwd, source) if client == "claude" and not idx.get("skey") else ""
+    skey = idx.get("skey") or prior or sid8(sid)
     if skey != sid8(sid) and os.path.isdir(os.path.join(store.sessions, sid8(sid))):
         rebind_session(store, sid, sid8(sid), skey)  # something (a watch delivery, say) wrote under the new id already
-    write_json(session_index_path(sid), {"local": store.local, "cwd": cwd, "skey": skey, "at": ts()})
+    write_json(session_index_path(sid), {"local": store.local, "cwd": cwd, "skey": skey, "at": ts(), "client": client})
     return skey
 
 
@@ -1228,6 +1236,7 @@ def load_meta(store, sid):
     _, mp = session_paths(store, sid)
     m = read_json(mp)
     m.setdefault("sid", sid)
+    m.setdefault("client", index_read(sid).get("client") or "claude")
     m.setdefault("skey", session_key(sid))
     m.setdefault("tools", 0)
     m.setdefault("turns", 0)
@@ -1266,7 +1275,17 @@ def current_session(store, cwd=None):
     """Session id for CLI commands run by the model: env first, else the freshest meta with the same cwd."""
     sid = session_id()
     if sid:
+        if current_client() == "codex" and not index_read(sid):
+            # Manual mode on older Codex versions still has a real thread ID.
+            # Bind it once, so own notes and later wakeups use the right client.
+            with store.shared_lock():
+                bind_session(store, sid, os.path.realpath(cwd or os.getcwd()), "startup", client="codex")
+                m = load_meta(store, sid)
+                m.update({"cwd": os.path.realpath(cwd or os.getcwd()), "client": "codex"})
+                save_meta(store, sid, m)
         return sid
+    if current_client() == "codex":
+        return ""  # a shared MCP process or a shell without a thread ID must not borrow another thread
     cwd = os.path.realpath(cwd or os.getcwd())
     best = None
     for mp in session_files(store, "*.json"):
@@ -1274,6 +1293,18 @@ def current_session(store, cwd=None):
         if os.path.realpath(m.get("cwd") or "/") == cwd and (best is None or m.get("last_seen", "") > best.get("last_seen", "")):
             best = m
     return best.get("sid", "") if best else ""
+
+
+def session_client(sid):
+    return index_read(sid).get("client") or "claude"
+
+
+def current_client():
+    if os.environ.get("LONGRUN_CLIENT") in ("claude", "codex"):
+        return os.environ["LONGRUN_CLIENT"]
+    sid = session_id()
+    return index_read(sid).get("client") or ("codex" if os.environ.get("CODEX_THREAD_ID") and
+        not os.environ.get("LONGRUN_SESSION") and not os.environ.get("CLAUDE_SESSION_ID") else "claude")
 
 
 def touch_session_note(store, locked=False, seen=None, drop=None):
@@ -1412,6 +1443,13 @@ def sample_ctx(store, m, tpath="", force=False):
     tpath = tpath or m.get("transcript") or ""
     if not force and int(m.get("tools", 0)) % CTX_SAMPLE_EVERY:
         return
+    if m.get("client") == "codex":
+        # Codex rollouts are optional and not a stable API. Never apply Claude model
+        # windows or settings to a Codex session when its telemetry is unavailable.
+        tok, win = codex_context(tpath)
+        if tok and win:
+            m["ctx_tokens"], m["ctx_window"], m["ctx_at"] = tok, win, ts()
+        return
     tok, model = transcript_ctx(tpath)
     if tok:
         m["ctx_tokens"], m["ctx_model"], m["ctx_at"], m["ctx_window"] = tok, model, ts(), autocompact_window(model)
@@ -1421,6 +1459,8 @@ def ctx_warning(store, m, key="ctx_warned"):
     """The near-compaction warning, once per 20k of growth once the context is within ctx_warn_before of the
     auto-compact window; '' otherwise. Resets when the context shrinks (a compaction happened). `key` keeps
     the session's own warning and the note to the orchestrator on separate counters."""
+    if m.get("client") == "codex":
+        return ""  # its reported model window does not establish the auto-compaction threshold
     tok, win = int(m.get("ctx_tokens") or 0), int(m.get("ctx_window") or 0)
     if not tok or not win or tok < win - int(store.cfg["ctx_warn_before"]):
         m[key] = 0
@@ -2601,8 +2641,15 @@ def lift_halt(store=None, by="", me=""):
     return h
 
 
-# ----------------------------------------------------------------------------- the stdio MCP server (tools: ask, notify)
+# ----------------------------------------------------------------------------- the stdio MCP server (tools: run, ask, notify)
 MCP_TOOLS = [
+    {"name": "run",
+     "description": "Run a public longrun subcommand with this conversation's explicit session_id and absolute cwd. "
+                    "Use for where, digest, notes, add, recall, board, send, watch and setup when the Codex shell sandbox "
+                    "cannot write the shared session store outside the workspace. args is an argv array, not shell code. "
+                    "Session messages, wakeups, watches and destructive changes still require the user's authorization.",
+     "inputSchema": {"type": "object", "required": ["args", "session_id", "cwd"], "properties": {
+         "args": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "CLI arguments, e.g. [\"add\", \"--own\", \"-t\", \"ctx\", \"Keep the old install\"]."}}}},
     {"name": "ask",
      "description": "Ask the user a question in a desktop dialog that comes to the front of every window (osascript on macOS, "
                     "where a Focus mode does not hide it; zenity or kdialog on Linux). Use it only when the work cannot continue without the user's decision or action "
@@ -2634,6 +2681,10 @@ MCP_TOOLS = [
 def mcp_session():
     """The session this server serves: Claude Code registers its own pid in ~/.claude/sessions/<pid>.json and the
     server is that process's child (verified 2026-09-09). -> (sid, cwd, name), empty when not under a session."""
+    # Some Codex clients share one MCP process across threads. Such callers must
+    # pass session_id/cwd on each call; never guess from the newest heartbeat.
+    if current_client() == "codex":
+        return "", "", ""
     parents = {}
     for pid, ppid, _, _ in proc_rows():
         parents[pid] = ppid
@@ -2647,6 +2698,45 @@ def mcp_session():
             return d["sessionId"], d.get("cwd") or "", d.get("name") or ""
         pid = parents.get(pid, 0)
     return "", "", ""
+
+
+for _mcp_tool in MCP_TOOLS:
+    _mcp_tool["inputSchema"]["properties"].update({
+        "session_id": {"type": "string", "description": "Current thread ID. Required for session-bound calls from a shared Codex MCP server; obtain from CODEX_THREAD_ID in the shell environment."},
+        "cwd": {"type": "string", "description": "Absolute project working directory for this call."},
+    })
+
+
+def mcp_context(sid, cwd=""):
+    store = session_store_for(sid)
+    if store is None and cwd:
+        local = resolve_local(cwd, use_env=False)
+        store = Store(local) if local else None
+    return {"sid": sid, "cwd": cwd or session_cwd(sid, store), "name": "", "store": store}
+
+
+def mcp_run(c, a):
+    args = a.get("args")
+    sid, cwd = str(a.get("session_id") or ""), str(a.get("cwd") or "")
+    if not sid or not os.path.isabs(cwd) or not os.path.isdir(cwd):
+        return "run: session_id and an existing absolute cwd are required", True
+    if not isinstance(args, list) or not args or not all(isinstance(x, str) for x in args):
+        return "run: args must be a nonempty array of strings", True
+    if args[0] in ("hook", "mcp"):
+        return "run: internal hook and mcp entrypoints are not public subcommands", True
+    env = dict(os.environ, LONGRUN_SESSION=sid, LONGRUN_HOME=GLOBAL_DIR,
+               LONGRUN_CLIENT=session_client(sid) if index_read(sid) else os.environ.get("LONGRUN_CLIENT") or "claude")
+    # One server may serve multiple projects: do not inherit the first one's binding.
+    for key in ("LONGRUN_DIR", "LONGRUN_SCOPE", "LONGRUN_TRANSCRIPT", "CLAUDE_ENV_FILE", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID"):
+        env.pop(key, None)
+    if c.get("store"):
+        env["LONGRUN_DIR"] = c["store"].local
+    try:
+        r = subprocess.run([sys.executable, self_path()] + args, cwd=cwd, env=env,
+                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
+        return (r.stdout + r.stderr).strip(), r.returncode != 0
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return "run: %s" % e, True
 
 
 def mcp_ask(c, a):
@@ -2671,8 +2761,8 @@ def mcp_ask(c, a):
 
 
 def mcp_serve(args):
-    """`longrun mcp`: JSON-RPC over stdio (one message per line), tools `ask` and `notify`. Register once with
-    `claude mcp add --scope user longrun -- <path>/longrun mcp` (install.sh does it); each session starts its own copy."""
+    """`longrun mcp`: JSON-RPC over stdio, tools `run`, `ask` and `notify`.
+    install.sh registers it with each selected client. Codex callers pass thread context explicitly."""
     import threading
     out_lock = threading.Lock()
 
@@ -2691,7 +2781,9 @@ def mcp_serve(args):
 
     ctx = {"resolved": False, "sid": "", "cwd": "", "name": "", "store": None}
 
-    def resolve():
+    def resolve(a):
+        if a.get("session_id"):
+            return mcp_context(str(a["session_id"]), str(a.get("cwd") or ""))
         if not ctx["resolved"]:
             ctx["resolved"] = True
             sid, cwd, name = mcp_session()
@@ -2705,8 +2797,11 @@ def mcp_serve(args):
 
     def call(mid, name, a):
         try:
-            c = resolve()
-            if name == "ask":
+            c = resolve(a)
+            failed = False
+            if name == "run":
+                text, failed = mcp_run(c, a)
+            elif name == "ask":
                 text = mcp_ask(c, a)
             elif name == "notify":
                 # a click lands in the session that asked for the notification, not just in the app
@@ -2717,7 +2812,7 @@ def mcp_serve(args):
             else:
                 reply(mid, error={"code": -32602, "message": "unknown tool %s" % name})
                 return
-            reply(mid, {"content": [{"type": "text", "text": text}], "isError": False})
+            reply(mid, {"content": [{"type": "text", "text": text}], "isError": failed})
         except Exception as e:  # never let one bad call take the server down
             reply(mid, {"content": [{"type": "text", "text": "longrun mcp: %s" % e}], "isError": True})
 
@@ -3142,22 +3237,25 @@ def cmd_send(store, args):
         t = resolve_session(store, target)
         sid, cwd = t["sid"], t["cwd"]
     if opts["resume"]:
-        cmd = ["claude", "-p", stamp + "\n" + text, "--resume", sid, "--max-turns", opts["max_turns"]]
-        if opts["model"]:
-            cmd += ["--model", opts["model"]]
-        if opts["mode"]:
-            cmd += ["--permission-mode", opts["mode"]]
+        client = session_client(sid)
+        if client == "codex" and (opts["mode"] or "--max-turns" in args):
+            die("Codex resume does not support --mode or --max-turns; use --timeout to bound the run", 2)
+        cmd = resume_command(sid, stamp + "\n" + text, opts["model"], opts["mode"], opts["max_turns"])
         env = {k: v for k, v in os.environ.items() if not k.startswith("LONGRUN_")}  # its own hooks set its own
         env.pop("CLAUDE_ENV_FILE", None)
+        env.pop("CLAUDE_SESSION_ID", None)
+        env.pop("CODEX_THREAD_ID", None)
+        if os.environ.get("LONGRUN_HOME"):
+            env["LONGRUN_HOME"] = GLOBAL_DIR
         wd = cwd if cwd and os.path.isdir(cwd) else os.getcwd()
         if me:
-            journal(store, me, "send -> %s via claude -p --resume (cwd %s): %s" % (sid8(sid), wd, clip(text, 120)))
+            journal(store, me, "send -> %s via %s resume (cwd %s): %s" % (sid8(sid), client, wd, clip(text, 120)))
         try:
             r = subprocess.run(cmd, cwd=wd, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=float(opts["timeout"]))
         except subprocess.TimeoutExpired:
-            die("claude -p --resume %s did not finish within %ss" % (sid8(sid), opts["timeout"]), 1)
+            die("%s resume %s did not finish within %ss" % (client, sid8(sid), opts["timeout"]), 1)
         except OSError as e:
-            die("cannot run claude: %s" % e, 1)
+            die("cannot run %s: %s" % (client, e), 1)
         sys.stdout.write((r.stdout or "").rstrip("\n") + "\n")
         if r.returncode != 0:
             sys.stderr.write((r.stderr or "").strip() + "\n")
@@ -3173,6 +3271,22 @@ def cmd_send(store, args):
         journal(store, me, "send -> %s queued in inbox/%s: %s" % (sid8(sid), name, clip(text, 120)))
     print("%s is not running: queued as inbox/%s; its hooks deliver it at its next tool call, turn or start (`--resume` would wake it now)" % (sid8(sid), name))
     return 0
+
+
+def resume_command(sid, text, model="", mode="", turns="8", path=None):
+    client = session_client(sid)
+    binary = shutil.which(client, path=path) or (os.path.join(HOME, ".local", "bin", client) if path is not None else client)
+    if client == "codex":
+        if mode:
+            raise ValueError("Codex resume does not support a Claude permission mode")
+        cmd = [binary, "exec", "resume", sid, text]
+    else:
+        cmd = [binary, "-p", text, "--resume", sid, "--max-turns", str(turns)]
+        if mode:
+            cmd += ["--permission-mode", mode]
+    if model:
+        cmd += ["--model", model]
+    return cmd
 
 
 # ----------------------------------------------------------------------------- watch (deferred checks that cost no tokens while waiting)
@@ -3457,6 +3571,9 @@ def watch_env():
     for k in ("SSH_AUTH_SOCK",):
         if saved.get(k):
             env[k] = saved[k]
+    for k in ("LONGRUN_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+        if saved.get(k):
+            env[k] = saved[k]
     return env
 
 
@@ -3476,6 +3593,10 @@ def snapshot_env():
     for k in ("SSH_AUTH_SOCK", "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
         if os.environ.get(k):
             cur[k] = os.environ[k]
+    for k in ("LONGRUN_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+        if os.environ.get(k):
+            cur[k] = os.environ[k]
+    cur["LONGRUN_HOME"] = GLOBAL_DIR
     cur["at"] = ts()
     write_json(os.path.join(WATCH_DIR, "env.json"), cur)
     return cur
@@ -3793,7 +3914,7 @@ def frontmost_bundle():
     return m.group(1) if m else ""
 
 
-def should_notify_turn_end(store):
+def should_notify_turn_end(store, client="claude"):
     """Whether this turn's end is worth a notification, by the `notify_turn_end` setting. `unfocused` means
     the Claude desktop app is not the application in front - the case the app's own notification handles
     badly, because it sends turn ends with interruptionLevel passive and silent, so macOS files them into
@@ -3804,7 +3925,8 @@ def should_notify_turn_end(store):
         return True
     if mode != "unfocused":
         return False
-    return frontmost_bundle() != "com.anthropic.claudefordesktop"
+    app = "com.openai.codex" if client == "codex" else "com.anthropic.claudefordesktop"
+    return frontmost_bundle() != app
 
 
 def important_state(m):
@@ -4067,13 +4189,10 @@ def watch_deliver(w, kind, detail):
         except OSError as e:
             watch_log("%s socket delivery failed (%s), falling back" % (w["id"], e))
     if not how and w.get("wake"):
-        claude = shutil.which("claude", path=watch_env()["PATH"]) or os.path.join(HOME, ".local", "bin", "claude")
         cwd = w["to"].get("cwd") or HOME
         env = dict(watch_env())
-        cmd = [claude, "-p", text, "--resume", sid, "--max-turns", str(w.get("wake_turns") or 12)]
-        if w.get("wake_mode"):
-            cmd += ["--permission-mode", w["wake_mode"]]
         try:
+            cmd = resume_command(sid, text, mode=w.get("wake_mode") or "", turns=w.get("wake_turns") or 12, path=env["PATH"])
             r = subprocess.run(cmd, cwd=cwd if os.path.isdir(cwd) else HOME, env=env, stdin=subprocess.DEVNULL,
                                capture_output=True, text=True, timeout=float(w.get("wake_timeout") or 900))
             how = "resume(rc=%d)" % r.returncode
@@ -4351,6 +4470,8 @@ def timer_install(interval=None, quiet=False):
 
 
 def timer_uninstall():
+    if os.environ.get("LONGRUN_NO_TIMER") or os.environ.get("LONGRUN_NO_LAUNCHD"):
+        die("LONGRUN_NO_TIMER is set (tests / sandbox): not touching the scheduler", 1)
     kind = timer_kind()
     if kind == "launchd":
         launchctl("bootout", "%s/%s" % (launchd_domain(), WATCH_LABEL))
@@ -4405,12 +4526,13 @@ def launchd_plist_text(interval):
     <key>PATH</key><string>%s</string>
     <key>HOME</key><string>%s</string>
     <key>LANG</key><string>%s</string>
+    <key>LONGRUN_HOME</key><string>%s</string>
   </dict>
   <key>StandardOutPath</key><string>%s</string>
   <key>StandardErrorPath</key><string>%s</string>
 </dict>
 </plist>
-""" % (WATCH_LABEL, esc(py), esc(me), int(interval), esc(env["PATH"]), esc(HOME), UTF8_LOCALE, esc(log), esc(log))
+""" % (WATCH_LABEL, esc(py), esc(me), int(interval), esc(env["PATH"]), esc(HOME), UTF8_LOCALE, esc(GLOBAL_DIR), esc(log), esc(log))
 
 
 def launchctl(*args):
@@ -4459,17 +4581,18 @@ def systemd_unit_texts(interval):
         return str(s).replace("%", "%%")   # % starts a specifier in a unit file
     log = timer_log_path("systemd")
     service = """[Unit]
-Description=longrun watch tick: deferred checks for Claude Code sessions
+Description=longrun watch tick: deferred checks for Claude Code and Codex sessions
 
 [Service]
 Type=oneshot
 Environment=PATH=%s
 Environment=LANG=%s
 Environment=LC_ALL=%s
+Environment=%s
 ExecStart=%s %s watch run --quiet
 StandardOutput=append:%s
 StandardError=append:%s
-""" % (esc(watch_env()["PATH"]), UTF8_LOCALE, UTF8_LOCALE, esc(timer_python()), esc(timer_script()), esc(log), esc(log))
+""" % (esc(watch_env()["PATH"]), UTF8_LOCALE, UTF8_LOCALE, esc(json.dumps("LONGRUN_HOME=" + GLOBAL_DIR)), esc(timer_python()), esc(timer_script()), esc(log), esc(log))
     timer = """[Unit]
 Description=longrun watch tick every %s
 
@@ -4569,8 +4692,10 @@ def cron_spec(interval):
 
 
 def cron_line(interval):
-    log = timer_log_path("cron").replace("%", "\\%")   # % means newline-on-stdin to cron
-    return "%s %s %s watch run --quiet >> %s 2>&1" % (cron_spec(interval), timer_python(), timer_script(), log)
+    # Quote paths before escaping %, which means newline-on-stdin to cron.
+    command = "LONGRUN_HOME=%s %s %s watch run --quiet >> %s 2>&1" % (
+        shlex.quote(GLOBAL_DIR), shlex.quote(timer_python()), shlex.quote(timer_script()), shlex.quote(timer_log_path("cron")))
+    return cron_spec(interval) + " " + command.replace("%", "\\%")
 
 
 def cron_install(interval, quiet):
@@ -4722,6 +4847,8 @@ def watch_add(store, args):
         die("missing `-- CHECK` (longrun watch help)", 2)
     check = parse_check(check_argv, os.getcwd())
     target = resolve_session(store, opts["to"])
+    if session_client(target["sid"]) == "codex" and (opts["wake_mode"] or "--wake-turns" in args[:i]):
+        die("Codex watch wake does not support --wake-mode or --wake-turns", 2)
     if check["kind"] == "at":
         opts["every"] = max(60, min(opts["every"], WATCH_DEFAULT_EVERY))
         opts["ttl"] = max(opts["ttl"], float(check["args"][0]) - time.time() + 2 * 86400)
@@ -4749,7 +4876,7 @@ def watch_add(store, args):
     if store and me:
         journal(store, me, "watch %s registered: %s -> %s [%s] every %s" % (wid, check["desc"], target["name"], sid8(target["sid"]), fmt_duration(w["every"])))
     watch_log("%s ADDED %s -> %s [%s] every %s by %s" % (wid, check["desc"], target["name"], sid8(target["sid"]), fmt_duration(w["every"]), sid8(me)))
-    path = "socket (running now)" if target["live"] else ("claude -p --resume (--wake)" if opts["wake"] else "inbox file, read at its next tool call, turn or start")
+    path = "socket (running now)" if target["live"] else (("codex exec resume (--wake)" if session_client(target["sid"]) == "codex" else "claude -p --resume (--wake)") if opts["wake"] else "inbox file, read at its next tool call, turn or start")
     print("registered %s: %s" % (wid, check["desc"]))
     print("  to:       %s [%s]  delivery when it fires: %s" % (target["name"], sid8(target["sid"]), path))
     print("  every:    %s (the tick runs every %s; a machine that slept catches up on wake)   expires: %s" % (
@@ -5674,7 +5801,28 @@ def transcript_texts(path, prefilter=None):
                 d = json.loads(line)
             except ValueError:
                 continue
+            if not isinstance(d, dict):
+                continue
             t = d.get("type")
+            # Codex rollouts are best-effort input, separate from Claude's schema.
+            if t in ("response_item", "event_msg", "compacted"):
+                p = d.get("payload") or {}
+                if not isinstance(p, dict):
+                    continue
+                pt = p.get("type")
+                if t == "compacted" and p.get("message"):
+                    yield "summary", str(p["message"])
+                elif t == "event_msg" and pt in ("user_message", "agent_message"):
+                    yield "user" if pt == "user_message" else "assistant", str(p.get("message") or "")
+                elif t == "response_item" and pt == "message" and p.get("role") in ("user", "assistant"):
+                    for b in p.get("content") or []:
+                        if isinstance(b, dict) and b.get("type") in ("input_text", "output_text", "text"):
+                            yield p["role"], str(b.get("text") or "")
+                elif t == "response_item" and pt in ("function_call", "custom_tool_call"):
+                    yield "tool_use", "%s %s" % (p.get("name"), str(p.get("arguments") or p.get("input") or "")[:500])
+                elif t == "response_item" and pt in ("function_call_output", "custom_tool_call_output"):
+                    yield "tool_result", str(p.get("output") or "")[:2000]
+                continue
             if t not in ("user", "assistant"):
                 continue
             if d.get("isMeta"):
@@ -5707,12 +5855,24 @@ def transcript_paths(sid, cwd, limit=6):
     so searching only the current one answers the question exactly when it does not matter."""
     base = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "projects")
     cur = os.environ.get("LONGRUN_TRANSCRIPT") or ""
+    # Hook-provided paths also cover Codex history formats without scanning its
+    # entire private history. Only transcripts bound to this project are read.
+    local = resolve_local(cwd)
+    bound = []
+    if local:
+        st = Store(local)
+        for m in session_metas(st):
+            p = m.get("transcript") or ""
+            if p and os.path.isfile(p):
+                bound.append(p)
+                if m.get("sid") == sid and not cur:
+                    cur = p
     if not cur and sid:
         hits = glob.glob(os.path.join(base, "*", sid + ".jsonl"))
         cur = hits[0] if hits else ""
     out = [cur] if cur and os.path.isfile(cur) else []
     if out:
-        proj = os.path.dirname(out[0])
+        proj = os.path.dirname(out[0]) if session_client(sid) != "codex" and current_client() != "codex" else ""
     else:  # no current transcript: fall back to the directory Claude Code derives from cwd
         key = re.sub(r"[^A-Za-z0-9]+", "-", os.path.realpath(cwd or os.getcwd()))
         proj = next((c for c in (os.path.join(base, key), os.path.join(base, key.strip("-"))) if os.path.isdir(c)), "")
@@ -5720,6 +5880,9 @@ def transcript_paths(sid, cwd, limit=6):
         for p in sorted(glob.glob(os.path.join(proj, "*.jsonl")), key=os.path.getmtime, reverse=True):
             if p not in out:
                 out.append(p)
+    for p in sorted(set(bound), key=os.path.getmtime, reverse=True):
+        if p not in out:
+            out.append(p)
     out = out[:max(1, limit)]
     if proj and sid:  # what a subagent found lives in its own transcript, the parent only has its report
         subs = glob.glob(os.path.join(proj, sid, "subagents", "*.jsonl"))
@@ -6040,6 +6203,76 @@ def maybe_gc(store):
 
 
 # ----------------------------------------------------------------------------- hooks
+def codex_context(path):
+    """Optional rollout telemetry, with the window reported by Codex itself."""
+    if not path:
+        return 0, 0
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, os.path.getsize(path) - CTX_TAIL_BYTES))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+        for line in reversed(lines):
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            p = d.get("payload") or {}
+            if d.get("type") == "event_msg" and p.get("type") == "token_count":
+                info = p.get("info") or {}
+                u = info.get("last_token_usage") or {}
+                return int(u.get("input_tokens") or 0), int(info.get("model_context_window") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return 0, 0
+
+
+def codex_hook_input(event, inp):
+    """Adapt documented Codex hook fields to the existing handlers. No Claude changes."""
+    inp = dict(inp)
+    ti = inp.get("tool_input") or {}
+    ti = dict(ti) if isinstance(ti, dict) else {"command": str(ti)}
+    tool = inp.get("tool_name") or ""
+    if tool in ("exec_command", "shell_command", "shell"):
+        tool = "Bash"
+    if tool == "Bash" and not ti.get("command"):
+        ti["command"] = ti.get("cmd") or ""
+    if tool == "apply_patch":
+        patch = str(ti.get("command") or ti.get("patch") or ti.get("input") or "")
+        paths = re.findall(r"^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$", patch, re.M)
+        cwd = inp.get("cwd") or os.getcwd()
+        ti["file_paths"] = [os.path.abspath(os.path.join(cwd, p.strip())) for p in paths]
+        tool = "Edit"
+    elif tool == "spawn_agent":
+        tool = "Agent"
+    inp["tool_name"], inp["tool_input"] = tool, ti
+    inp["transcript_path"] = inp.get("transcript_path") or ""
+    inp["last_assistant_message"] = inp.get("last_assistant_message") or ""
+    if event == "PostToolUse" and tool == "Bash":
+        response = inp.get("tool_response")
+        # Unified exec's model-facing output can be a string or a structured
+        # result; a running command has no exit code yet and is not a failure.
+        code, output = None, ""
+        if isinstance(response, dict):
+            code = response.get("exit_code", response.get("exitCode"))
+            output = str(response.get("output") or response.get("stderr") or "")
+        elif isinstance(response, str):
+            output = response
+            match = re.search(r"(?:Process exited with code|Exit code:)\s*(-?\d+)", response)
+            if match:
+                code = int(match.group(1))
+            else:
+                try:
+                    r = json.loads(response)
+                    if isinstance(r, dict):
+                        code = r.get("exit_code", r.get("exitCode"))
+                except ValueError:
+                    pass
+        if code is not None and str(code) != "0":
+            event = "PostToolUseFailure"
+            inp["error"] = "exit %s\n%s" % (code, output)
+    return event, inp
+
+
 def hook_input():
     try:
         raw = sys.stdin.read()
@@ -6174,8 +6407,11 @@ def cmd_compact_hint(store, args):
         print("compact_hint is off here (`longrun config set compact_hint true`)")
         return 0
     print(out)
-    print("\n(%d B; sent on stdout by the PreCompact hook, which Claude Code appends to the compaction prompt as its "
-          "\"Additional Instructions\" - for automatic compactions too)" % len(out.encode("utf-8")), file=sys.stderr)
+    if current_client() == "codex":
+        print("\n(Codex saves a PreCompact snapshot and restores notes after compaction; these instructions do not steer its summariser.)", file=sys.stderr)
+    else:
+        print("\n(%d B; sent on stdout by the PreCompact hook, which Claude Code appends to the compaction prompt as its "
+              "\"Additional Instructions\" - for automatic compactions too)" % len(out.encode("utf-8")), file=sys.stderr)
     return 0
 
 
@@ -6360,10 +6596,18 @@ def turn_card(store, m, closed=False):
 def cmd_hook(args):
     if not args:
         die("usage: longrun hook <EventName>  (reads the hook JSON on stdin)", 2)
+    client, args = _flag(args, "--client", "claude")
+    if client not in ("claude", "codex") or len(args) != 1:
+        die("usage: longrun hook [--client claude|codex] <EventName>", 2)
     event = args[0]
     inp = hook_input()
+    if client == "codex":
+        event, inp = codex_hook_input(event, inp)
     cwd = inp.get("cwd") or os.getcwd()
     sid = inp.get("session_id") or session_id()
+    if sid:
+        os.environ["LONGRUN_SESSION"] = sid
+    os.environ["LONGRUN_CLIENT"] = client
     source = inp.get("source", "startup") if event == "SessionStart" else ""
     # The project belongs to the session, not to the shell. `cwd` in a hook payload is the Bash tool's
     # persisted working directory (verified 2026-09-06): after a `cd` elsewhere, cwd-based resolution would
@@ -6385,9 +6629,17 @@ def cmd_hook(args):
     if event != "SessionStart":  # a session running across an upgrade: its old-layout files are moved before they are read
         with store.shared_lock():
             migrate_sessions(store)
+            if client == "codex" and sid and not index_read(sid):
+                # Hooks may be trusted while a thread is already open, before it
+                # gets a SessionStart. Bind before any handler holds this lock.
+                bind_session(store, sid, cwd, "startup", client=client)
+                m = load_meta(store, sid)
+                m.update({"cwd": cwd, "transcript": tpath, "client": client})
+                save_meta(store, sid, m)
 
     def load_meta_stamped(s):  # remember the permission class: `longrun send` declares it to the receiver
         m = load_meta(store, s)
+        m["client"] = client
         if pmode:
             m["permission_mode"] = pmode
         return m
@@ -6398,7 +6650,7 @@ def cmd_hook(args):
         with store.shared_lock():
             migrate_sessions(store)
             if sid:
-                continued = bind_session(store, sid, cwd, source) != sid8(sid)
+                continued = bind_session(store, sid, cwd, source, client=client) != sid8(sid)
             m = load_meta_stamped(sid)
             m.update({"cwd": cwd, "scope": scope_label(cwd), "transcript": tpath, "ended": ""})
             m.setdefault("started", ts())
@@ -6411,7 +6663,7 @@ def cmd_hook(args):
                 m["compactions"] = m.get("compactions", 0) + 1
             save_meta(store, sid, m)
             journal(store, sid, "session %s (%s)" % (source, inp.get("model", "")))
-        envf = os.environ.get("CLAUDE_ENV_FILE")
+        envf = os.environ.get("CLAUDE_ENV_FILE") if client == "claude" else ""
         if envf:
             try:
                 have = read(envf)
@@ -6574,13 +6826,14 @@ def cmd_hook(args):
             if tool in EDIT_TOOLS:  # a command is not an edit: 40 `ls` prove nothing
                 m["edit_tools_since_note"] += 1
             ti = inp.get("tool_input") or {}
-            fp = ti.get("file_path") or ti.get("notebook_path")
-            if fp and fp not in m["files"]:  # read back by the pre-compaction snapshot
-                m["files"] = (m["files"] + [fp])[-60:]
-            if fp and tool in EDIT_TOOLS and fp not in m["turn_files"]:   # what the turn card names
-                m["turn_files"] = (m["turn_files"] + [fp])[-20:]
-            if fp and tool in EDIT_TOOLS and fp not in m["edited"]:       # what the docs delta attributes to you
-                m["edited"] = (m["edited"] + [fp])[-60:]                  # cleared at the turn boundary
+            fps = ti.get("file_paths") or [ti.get("file_path") or ti.get("notebook_path")]
+            for fp in fps:
+                if fp and fp not in m["files"]:  # read back by the pre-compaction snapshot
+                    m["files"] = (m["files"] + [fp])[-60:]
+                if fp and tool in EDIT_TOOLS and fp not in m["turn_files"]:
+                    m["turn_files"] = (m["turn_files"] + [fp])[-20:]
+                if fp and tool in EDIT_TOOLS and fp not in m["edited"]:
+                    m["edited"] = (m["edited"] + [fp])[-60:]
             run = m.get("running") or {}
             tid = inp.get("tool_use_id") or ""
             if tid in run:
@@ -6702,11 +6955,14 @@ def cmd_hook(args):
         journal(store, sid, "compaction %s%s%s%s" % (inp.get("trigger", "?"), (" | instructions: " + clip(ci, 120)) if ci else "",
                                                      (" | snapshot " + os.path.relpath(snap, store.local)) if snap else "",
                                                      (" | hint %d B" % len(hint.encode("utf-8"))) if hint else ""))
-        if hint:  # stdout of this hook becomes the "Additional Instructions" of the compaction prompt (see compact_hint)
+        if hint and client == "claude":  # Codex PreCompact stdout does not steer its summariser
             print(hint)
         return 0
     if event == "PostCompact":
         summary = inp.get("compact_summary") or ""
+        if client == "codex" and not summary and tpath:
+            summaries = [text for kind, text in transcript_texts(tpath) if kind == "summary"]
+            summary = summaries[-1] if summaries else ""
         if summary:
             d = os.path.join(store.archive, "compact")
             os.makedirs(d, exist_ok=True)
@@ -6737,7 +6993,7 @@ def cmd_hook(args):
             save_meta(store, sid, m)
         if tell:
             notify_orchestrator(store, "%s [%s]: %s" % (clip(session_display_name(sid, store), 30), session_key(sid)[:8], tell), wake=False, from_sid=sid)
-        if imp or should_notify_turn_end(store):
+        if imp or should_notify_turn_end(store, client):
             name = clip(session_display_name(sid, store), 55) or "Claude Code"
             used = notify_user(("* " + name) if imp else name, last or "finished a turn", link=session_link(store, sid))
             if imp:
@@ -6752,6 +7008,15 @@ def cmd_hook(args):
                 m.pop(k, None)
             save_meta(store, sid, m)
         journal(store, sid, "session end (%s)" % inp.get("reason", "other"))
+        return 0
+    if event == "Interrupt" and client == "codex":
+        with store.shared_lock():
+            m = load_meta_stamped(sid)
+            m["running"] = {}
+            for k in ("turn_started", "waiting_since", "waiting_what"):
+                m.pop(k, None)
+            save_meta(store, sid, m)
+        journal(store, sid, "turn interrupted")
         return 0
     return 0
 
@@ -7040,6 +7305,8 @@ def cmd_onboard(args):
         ac = "not set in Claude Code (compacts at the model's window); longrun expects %s: ask the user to type `/autocompact %s`" % (fmt_tokens(want), fmt_tokens(want))
     else:
         ac = "not set: Claude Code compacts at the model's full window (1M on Fable/Opus/Sonnet 5), ask the user"
+    if current_client() == "codex":
+        ac = "Codex manages compaction; longrun restores notes afterwards. /autocompact is Claude-only"
     lines = [
         "longrun onboarding - tell the user the gist in their language, ask the questions below one by one, apply the answers.",
         "",
@@ -7082,7 +7349,10 @@ def cmd_onboard(args):
         "",
         "SETTINGS TO DECIDE (current value; scope; meaning)",
     ]
-    for i, (k, scope, what) in enumerate(ONBOARD_SETTINGS, 1):
+    onboard_settings = [item for item in ONBOARD_SETTINGS if current_client() != "codex" or item[0] != "autocompact_window"]
+    for i, (k, scope, what) in enumerate(onboard_settings, 1):
+        if current_client() == "codex" and k == "notify_turn_end":
+            what = "a notification on turn end: off, always, or unfocused (only while the Codex app is not in front)"
         v = cfg.get(k)
         shown = fmt_tokens(v) if k == "autocompact_window" and v else json.dumps(v)
         src = " (project)" if k in pcfg else " (global)" if k in g else ""
@@ -7118,8 +7388,10 @@ def cmd_where(args):
     if sid:
         skey = session_key(sid)
         print("session:  %s [%s]  dir: %s" % (clip(session_display_name(sid, st), 50), skey, os.path.join(st.sessions, skey)))
+        if session_client(sid) == "codex":
+            print("client:   codex  thread: %s" % sid)
     else:
-        print("session:  none known here (own notes need a Claude Code session; `--shared` works from any shell)")
+        print("session:  none known here (own notes need a Claude Code or Codex session; `--shared` works from any shell)")
     print("sessions: %s" % st.sessions)
     return 0
 
