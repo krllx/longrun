@@ -15,6 +15,7 @@
   const PF = {
     'NOTES.md': ['共享笔记 [n1]、[n2]…… 每条一行，带作者。预算 5000 字节。笔记默认就写到这里。', '由 agent 写：add, rm, replace, stale, prune --shared'],
     'config.json': ['项目设置：笔记和摘要的预算、各种阈值。', 'init; longrun config set'],
+    'memory.json': ['共享笔记的加载设置：id -> keep 或 defer。默认每次加载 pin 和 doc，其他笔记按主题加载。', 'memory keep|defer|auto'],
     'state.json': ['笔记 id 和任务 id 的计数器。', 'CLI'],
     'stale.json': ['“已经不成立”的标记：id -> 原因、谁标的、什么时候标的。它放在 NOTES.md 旁边而不是里面，这样笔记本身的格式永远不用改。', 'longrun stale'],
     'inbox/<msg>.md': ['给当前没在运行的会话的消息。送达后移到 inbox/.archive/。', 'send, watch, board, ask；由收件会话的 hook 读取'],
@@ -45,7 +46,7 @@
     ['文件夹变成项目', '人或 agent', '在项目文件夹（也就是 Claude Code 打开的那个）里只做一次。多出一个 <b>.longrun/</b> 目录：这就是“项目”，是这个文件夹下所有会话的共享记忆。'],
     ['会话 A 启动：SessionStart hook 打印摘要', 'hook', 'hook 沿目录树向上找到项目（找 .longrun/），在仓库之外建好会话目录，再把摘要打印进模型的上下文。摘要现在还是空的。'],
     ['一条死胡同：agent 给自己记下来', 'agent', '测试挂住了，原因找到了。compaction 最先丢的就是这个，所以马上写一行到磁盘上。这条死胡同只跟一个分支有关，别人用不上，所以加 <code>--own</code>：这条笔记归这个会话自己，<b>[s1]</b>。'],
-    ['一条大家都要的事实：写进共享笔记', 'agent', 'PR 号和选用哪种类型的决定，项目里任何一个会话都用得上，所以什么参数都不用加：<code>add</code> 默认就写进项目的 NOTES.md，也就是 <b>[n1]</b>、<b>[n2]</b>，带上作者标记。'],
+    ['一条大家都要的事实：写进共享笔记', 'agent', 'PR 号和选用哪种类型的决定，项目里任何一个会话都用得上，所以什么参数都不用加：<code>add</code> 默认就写进项目的 NOTES.md，也就是 <b>[n1]</b>、<b>[n2]</b>，带上作者标记。 <code>pin</code> 默认每次都会加载。价格所用数据类型的选择对大多数任务都有用，所以用 <code>memory keep n2</code> 显式设为每次加载。其他共享条目仍可通过 <code>recall</code> 查找。'],
     ['一行放不下？那它就该是一个文件', 'agent', '上线计划塞不进 400 个字符。它就留在项目里当一个文件，共享笔记里只放一行写着它的路径：<b>[n3]</b>。每个会话都看得到这一行，真需要时才去打开那个文件。写下这一行之后文件又变了，摘要会在这个指针上标出来。'],
     ['compaction：机械层做快照和归档', 'hook', '上下文满了，Claude Code 把历史压成一段总结。<b>PreCompact</b> 存下快照（用户最近的几个请求、编辑过的文件、FAIL），<b>PostCompact</b> 把总结原样归档。模型在这一步什么都不做。'],
     ['compaction 之后：笔记回到上下文里', 'hook', '又一次 SessionStart，这回是 <code>source=compact</code>。摘要打印共享笔记、自有笔记和日志的尾巴。Redis 那条死胡同<b>又回到上下文里</b>了，哪怕总结把它丢了。'],

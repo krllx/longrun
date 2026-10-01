@@ -28,7 +28,7 @@
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-337_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-443_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -85,7 +85,7 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 ## 한마디로
 
-**아무것도 하지 않아도, 첫 세션부터**: 프로젝트는 디스크에 메모를 모아 둡니다. 막다른 길, 결정, 사실을 에이전트가 직접 적고, 다시 읽고, 정리합니다. 모든 세션은 그 메모의 내용과, 지금 어떤 세션이 함께 열려 있고 각 세션이 마지막으로 무엇을 했는지를 알고 시작합니다. 매 턴에는 그 뒤로 다른 세션이 무엇을 바꿨는지 longrun이 보여 줍니다.
+**아무것도 하지 않아도, 첫 세션부터**: 프로젝트는 디스크에 메모를 모아 둡니다. 막다른 길, 결정, 사실을 에이전트가 직접 적고, 다시 읽고, 정리합니다. 모든 세션은 중요한 사실과 파일을 가리키는 한 줄을 불러온 상태로 시작하며, 나머지 세부 내용은 `recall`로 찾을 수 있습니다. 프로젝트에 어떤 세션이 있는지와 각 세션이 마지막으로 무엇을 했는지도 알고 있습니다. 매 턴에는 그 뒤로 다른 세션이 무엇을 바꿨는지 longrun이 보여 줍니다.
 
 **요청했을 때, 또는 에이전트가 필요하다고 판단했을 때**: 작업은 이미 컨텍스트가 있는 세션에 넘어갑니다. "PR 머지되면 알려줘"는 기다리는 동안 token을 쓰지 않고 때를 놓치지도 않는 워치가 됩니다. 놓치면 안 되는 세션이 있으면 알림이 사람에게 도착합니다. 한 세션이 정해진 목표를 향해 나머지 세션을 조율하고, 사람만 풀 수 있는 일에서는 사람 앞에 대화 상자를 띄웁니다.
 
@@ -95,7 +95,7 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 | longrun이 없을 때 | longrun이 있을 때 |
 |---|---|
-| 세션이 알아낸 내용은 전부 그 대화 하나 안에만 남습니다. 다음 세션은 내일 여는 세션이든 옆 창의 세션이든 아무것도 없는 상태에서 시작해, 사람에게 지금 무슨 상황이냐고 묻습니다. | **기억하는 프로젝트**. 프로젝트마다 `.longrun/` 하나. 에이전트가 직접 적고, 다시 읽고, 정리하는 메모가 거기에 들어 있습니다. 모든 세션은 그 메모와 함께, 지금 또 누가 일하고 있고 각자 마지막으로 무엇을 했는지를 알고 시작합니다. |
+| 세션이 알아낸 내용은 전부 그 대화 하나 안에만 남습니다. 다음 세션은 내일 여는 세션이든 옆 창의 세션이든 아무것도 없는 상태에서 시작해, 사람에게 지금 무슨 상황이냐고 묻습니다. | **기억하는 프로젝트**. 프로젝트마다 `.longrun/` 하나. 에이전트가 직접 적고, 다시 읽고, 정리하는 메모가 거기에 들어 있습니다. 모든 세션은 중요한 사실과 파일 참조를 불러오고, 나머지 내용은 `recall`로 찾을 수 있으며, 지금 또 누가 일하고 있고 각자 마지막으로 무엇을 했는지를 알고 시작합니다. |
 | 두 번째 세션은 첫 번째 세션이 있다는 것조차 모릅니다. 한쪽은 PR을 만들었는데 다른 쪽은 "PR은 아직 만들어지지 않았다"고 말합니다. | **메시지와 작업**. 작업은 이미 컨텍스트가 있는 세션으로 가고, 그 세션에는 사용자 턴으로 도착합니다. 멈춰 있는 세션에도 보낼 수 있습니다. 메시지는 프로젝트 수신함에서 기다립니다. |
 | "PR 머지되면 알려줘"는 token을 소모하는 폴링 루프가 되거나, 정해진 시간만 기다리는 sleep이 됩니다. sleep이 끝났을 때는 이벤트가 이미 한참 지났거나, 아직 오지 않았습니다. | **워치**. 백그라운드 타이머가 5분마다 모델 없이 조건을 확인하고, 성립하면 세션을 깨웁니다. 확실하고, 반응이 빠르고, 비용이 들지 않습니다. |
 | 프로젝트 하나에 세션이 다섯 개. 무엇이 끝났고 무엇이 막혔고 다음이 무엇인지는 사람만 알고, 그중 한 세션이 사람의 대답을 기다리고 있다는 사실도 사람만 알아챕니다. | **오케스트레이터**. 한 세션이 나머지 세션을 위해 보드를 맡고, 정체된 세션을 알아채고, 사람만 결정할 수 있는 일에서는 모든 창 앞에 대화 상자를 띄웁니다. |
@@ -120,7 +120,9 @@ longrun은 한 턴과 한 세션보다 오래 남는 것을 다룹니다. 기본
 
 ### 1. 디스크 위의 공유 문서
 
-프로젝트마다 하나씩 있는 `.longrun/` 디렉터리에 모든 세션이 보는 메모가 들어 있고, 메모는 기본적으로 이 디렉터리에 저장됩니다. 세션이 혼자만 두고 싶은 내용은 `--own`을 붙여 리포지터리 트리 바깥에 따로 저장합니다. hook은 compaction, `/clear`, resume 때마다 공유 메모와 자체 메모를 모두 되살리고, 매 턴 다른 세션이 무엇을 바꿨는지 보여 줍니다.
+프로젝트마다 하나씩 있는 `.longrun/`에 공유 메모를 저장하며, 메모는 기본적으로 이곳에 기록됩니다. 시작, resume, compaction 때는 중요한 사실을 담은 `pin`과 파일을 가리키는 `doc`만 기본적으로 불러옵니다. 나머지 메모는 디스크에 남아 있다가 `recall`이나 검색 힌트로 필요할 때 불러옵니다. 세션의 자체 메모는 `--own`으로 리포지터리 바깥에 저장할 수 있습니다. hook은 다른 세션이 바꾼 내용도 보여 줍니다.
+
+대부분의 작업에 필요한 제약이나 사실은 `longrun memory keep n12`로 항상 불러오도록 지정합니다. 특정 주제에서만 필요한 내용은 `memory defer n12`로 미루고, `memory auto n12`로 태그에 따른 기본 규칙을 복원합니다. `memory ls`로 선택을 확인합니다. 선택은 모든 세션에 공유되며, 기존 메모와 ID 및 아카이브 보관 기간은 바뀌지 않습니다. 필요할 때 불러오는 메모의 변경은 짧은 알림으로, 항상 불러오는 메모의 변경은 전문으로 전달됩니다. Codex의 셸 호출에서는 따옴표와 여러 `-e` 표현식을 포함한 셸에 직접 작성한 `rg` 명령을 실행할 때도 검색 힌트가 표시됩니다. 해석이 모호한 셸 구문에는 힌트를 표시하지 않습니다. [불러오기 절차](skill/longrun/references/protocol.md)와 [Codex 제한](skill/longrun/references/codex.md)을 참고하십시오.
 
 ```bash
 longrun add -t pin "PR 42 = branch feature/checkout"           # shared: every session sees it
@@ -174,7 +176,7 @@ sequenceDiagram
     participant L as longrun (hooks)
     participant D as 디스크 위의 메모
     S->>L: 세션 시작
-    L->>D: 프로젝트의 공유 메모와 이 세션의 자체 메모 읽기
+    L->>D: read the resident shared layer and this session's own notes
     L-->>S: 다이제스트: 무엇이 알려져 있고, 누가 일하고 있고, 무엇이 대기 중인지
     Note over S: 에이전트가 작업하며 막다른 길과 결정을 한 줄씩 기록
     S->>D: longrun add ...
@@ -186,9 +188,9 @@ sequenceDiagram
     L-->>S: 같은 다이제스트, 그리고 어디서 멈췄는지
 ```
 
-**시작**. hook은 디렉터리로 프로젝트를 찾아 다이제스트를 출력합니다. 다이제스트에는 공유 메모, 자체 메모, 다른 세션(살아 있는지, 각자 마지막으로 무엇을 했는지), 대기 중인 워치, 아직 전달되지 않은 메시지가 들어 있습니다.
+**시작**. hook은 디렉터리로 프로젝트를 찾아 다이제스트를 출력합니다. 다이제스트에는 항상 불러오는 공유 메모, 필요할 때 불러오는 메모의 개수와 `recall`로 찾는 방법, 자체 메모, 다른 세션(살아 있는지, 각자 마지막으로 무엇을 했는지), 대기 중인 워치, 아직 전달되지 않은 메시지가 들어 있습니다.
 
-**작업**. 에이전트는 막다른 길, 결정, 어렵게 얻은 사실을 한 줄씩 적습니다. hook은 편집 횟수를 세고 실패한 명령을 기록합니다. 메모 없이 편집만 길게 이어지면 에이전트에게 메모를 남기라고 한 번 알려 줍니다.
+**작업**. 에이전트는 막다른 길, 결정, 어렵게 얻은 사실을 한 줄씩 적습니다. hook은 편집 횟수를 세고 실패한 명령을 기록합니다. 메모 없이 일정 횟수 이상 편집하거나, 명령이 실패하거나, 읽기만 하는 턴에서 도구를 6회 이상 호출하면 저장할 만한 결론이 있는지 묻습니다. 알림 빈도에는 제한이 있습니다.
 
 **매 턴**. 수신함의 메시지가 전달됩니다. 다른 세션이 공유 메모를 바꾼 내용은 변경분으로 표시됩니다. `+`는 추가, `~`는 수정, `-`는 삭제입니다.
 
@@ -228,6 +230,7 @@ worktree는 `longrun link <project>`로 프로젝트에 붙이며, worktree 자�
 ```bash
 longrun init [--external] | link <project> | where | onboard | config
 longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune | recall <term>
+longrun memory ls | keep|defer|auto n12
 longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
@@ -253,10 +256,11 @@ longrun orchestrate start --goal "..." | board [add --fact|ack] | ask | halt | r
 ## 개발
 
 ```bash
-bash tests/run.sh            # 222 regression checks, no API calls
-bash tests/scenarios.sh      # 37 scenarios, one per goal
-bash tests/orchestrator.sh   # 51: the orchestrator layer
+bash tests/run.sh            # 293 regression checks, no API calls
+bash tests/scenarios.sh      # 47 scenarios, one per goal
+bash tests/orchestrator.sh   # 53: the orchestrator layer
 bash tests/ask.sh            # 27: the dialog and the MCP server
+python3 tests/codex.py       # 23: Codex and mixed-client integration
 ```
 
 설치 스크립트는 파일을 `~/.claude/skills/longrun/`로 복사하며, checkout한 디렉터리에서 직접 읽어 들이는 것은 없습니다. hook은 이벤트마다 별도 프로세스로 실행되기 때문에, 돌아가고 있는 세션도 재시작 없이 업데이트를 받습니다.

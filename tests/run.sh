@@ -64,6 +64,7 @@ SP="$(cd "$STP" && "$LR" prune --shared)"; check "prune offers the marked entry 
 ( cd "$STP" && "$LR" stale --clear n2 >/dev/null ); check "stale --clear takes the mark back" "! (cd '$STP' && '$LR' digest | grep -q 'STALE since')"
 ( cd "$STP" && "$LR" stale n3 "gone for good" >/dev/null && "$LR" rm n3 >/dev/null )
 check "a mark does not outlive its entry" "! grep -q 'gone for good' '$STP/.longrun/stale.json'"
+( cd "$STP" && "$LR" memory keep n1 >/dev/null )
 # mute: take an entry out of MY digest, change nothing on disk and nothing for anyone else
 MU=eeeeeeee-2222-4333-8444-555555555555; MV=ffffffff-2222-4333-8444-555555555555
 for m in $MU $MV; do ( cd "$STP" && hook SessionStart "{\"session_id\":\"$m\",\"transcript_path\":\"/x.jsonl\",\"cwd\":\"$STP\",\"hook_event_name\":\"SessionStart\",\"source\":\"startup\"}" >/dev/null ); done
@@ -75,7 +76,7 @@ check "muting changes nothing on disk and nothing for another session" "grep -q 
 ( cd "$STP" && LONGRUN_SESSION=$MU "$LR" unmute --all >/dev/null )
 check "unmute --all brings them back" "(cd '$STP' && LONGRUN_SESSION=$MU '$LR' digest | grep -q 'retry on 429')"
 "$LR" rm n1 >/dev/null; check "rm n1 archives" "! grep -q '\[n1\]' '$LOCAL/NOTES.md' && grep -q 'rm | - \[n1\]' '$LOCAL/archive/notes.md'"
-"$LR" replace n2 "STQ v2 chosen (self-serve queues)" >/dev/null; check "replace n2" "grep -q 'n2\] .*STQ v2 chosen' '$LOCAL/NOTES.md'"
+"$LR" replace n2 "STQ v2 chosen (self-serve queues)" >/dev/null; "$LR" memory keep n2 >/dev/null; check "replace n2" "grep -q 'n2\] .*STQ v2 chosen' '$LOCAL/NOTES.md'"
 "$LR" add --shared -t pin "never rm this" >/dev/null; check "add after prune fits" "grep -q 'pin (.*): never rm this' '$LOCAL/NOTES.md'"
 check "shared entries carry the author label" "grep -q '\[n2\] .* decision (EDAINAPP-1375-screen)' '$LOCAL/NOTES.md'"
 
@@ -306,7 +307,7 @@ hook PostToolUse "{$COMMON,\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"E
 PC="{$COMMON,\"hook_event_name\":\"PreCompact\",\"trigger\":\"auto\",\"custom_instructions\":\"\"}"
 HINT="$(hook PreCompact "$PC")"
 check "PreCompact prints the summariser instructions on stdout (this is what Claude Code appends to the compaction prompt)" "echo \"\$HINT\" | grep -q 'did not work, each with the reason it failed' && echo \"\$HINT\" | grep -q 'post_v_1_screen.go' && echo \"\$HINT\" | grep -q 'keep the exact 403 body verbatim'"
-check "the hint names the notes that come back by themselves, and is plain text (JSON stdout would be read as a decision object)" "echo \"\$HINT\" | grep -q 'longrun notes .*s1' && ! echo \"\$HINT\" | head -1 | grep -q '^[[{]'"
+check "the hint distinguishes resident restoration from deferred recall, names stored IDs, and is plain text (JSON stdout would be read as a decision object)" "echo \"\$HINT\" | grep -q 'resident notes return' && echo \"\$HINT\" | grep -q 'deferred details stay available' && echo \"\$HINT\" | grep -q 'longrun recall' && echo \"\$HINT\" | grep -q 's1' && ! echo \"\$HINT\" | head -1 | grep -q '^[[{]'"
 check "the hint stays inside compact_hint_max_bytes" "test \$(printf '%s' \"\$HINT\" | wc -c) -le 1200"
 PREVIEW="$("$LR" compact-hint 2>/dev/null)"
 check "the compact-hint command previews exactly what the hook sends" "test \"\$PREVIEW\" = \"\$HINT\""
@@ -398,6 +399,7 @@ while sum(len(x) + 1 for x in b) < 2900:
     b.append("- [L%d] waiting @%s 09-01: approve TVM draft 1072534%d for eats-payments%s" % (i, who, i, nxt)); i += 1
 open(l, "w").write("# longrun ledger\n" + "\n".join(b) + "\n")
 PY
+( cd "$BOTH" && "$LR" memory keep $(sed -n 's/^- \[\(n[0-9]*\)\].*/\1/p' .longrun/NOTES.md) >/dev/null )
 printf '{"sid":"99990000-2222-4333-8444-555555555555","skey":"99990000","cwd":"%s","tools":3,"turns":1,"last_seen":"2026-09-06 10:00"}\n' "$BOTH" > "$BSESS/99990000/meta.json"
 D2="$(cd "$BOTH" && LONGRUN_SESSION=99990000-2222-4333-8444-555555555555 "$LR" digest --source compact)"; D2B=$(printf '%s' "$D2" | wc -c | tr -d ' ')
 check "all budgets full: the digest still fits ($D2B B <= 9000)" "test $D2B -le 9000 && echo \"\$D2\" | grep -q '</longrun>'"
@@ -411,7 +413,8 @@ PY
 printf 'material too long for a note, which is the whole point of keeping it here\n' > "$SHED/long.md"
 ( cd "$SHED" && "$LR" doc add long.md "where the long material of this project lives" >/dev/null
   "$LR" add --shared -t pin "PIN: PR 42 = branch feature/checkout" >/dev/null
-  for i in $(seq 1 12); do "$LR" add --shared -t fact "shed filler $i: a line long enough to push this file past what one digest can carry" >/dev/null; done )
+  for i in $(seq 1 12); do "$LR" add --shared -t fact "shed filler $i: a line long enough to push this file past what one digest can carry" >/dev/null; done
+  "$LR" memory keep $(sed -n 's/^- \[\(n[0-9]*\)\].*/\1/p' .longrun/NOTES.md) >/dev/null )
 D3="$(cd "$SHED" && "$LR" digest --source compact)"; D3B=$(printf '%s' "$D3" | wc -c | tr -d ' ')
 check "over budget: the digest sheds the OLDEST entries and keeps the newest ($D3B B <= 1400)" "test $D3B -le 1400 && echo \"\$D3\" | grep -q 'shed filler 12' && ! echo \"\$D3\" | grep -q 'shed filler 1:' && echo \"\$D3\" | grep -q 'older entries left out to fit'"
 check "over budget: a pin is never the entry that gives way" "echo \"\$D3\" | grep -q 'PR 42 = branch feature/checkout'"

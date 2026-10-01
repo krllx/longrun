@@ -40,6 +40,7 @@ echo "== S1: a new session orients itself in the project (shared picture + who i
 cd "$WT_E"; start $A "$WT_E" startup >/dev/null
 as $A add --shared -t pin "PR E = 15526210, branch EDAINAPP-1375-screen, opened 2026-09-04" >/dev/null
 as $A add --shared -t decision "STQ v2 over v1 for payment callbacks: v1 needs a TPS ticket per env" >/dev/null
+as $A memory keep n2 >/dev/null
 as $A add --own -t dead "own: LC client path gives 400 whatever the body; bdui-catalog testing lacks the screen" >/dev/null
 as $A stale n1 "PR E is merged, the branch is gone" >/dev/null   # any write the session journals
 edit(){ printf '{"session_id":"%s","transcript_path":"/x.jsonl","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{"file_path":"%s"},"tool_response":{}}' "$1" "$2" "$3" | "$LR" hook PostToolUse >/dev/null; }
@@ -71,7 +72,7 @@ echo "== S3: shared changes reach running sessions on their next turn; own write
 cd "$WT_C"; turn $B "$WT_C" >/dev/null   # B's baseline turn
 ( cd "$WT_E" && as $A add --shared -t fact "arc trunk lags Arcanum merges: wait for the commit, not the PR status" >/dev/null )
 TB="$(turn $B "$WT_C")"
-check "S3.1 B's next turn shows the entry A just added, as a delta, not the whole file" "echo \"\$TB\" | grep -q 'SHARED notes of project lottery-dev changed' && echo \"\$TB\" | grep -q '+ - \[n3\] .*arc trunk lags' && ! echo \"\$TB\" | grep -q 'PR E = 15526210'"
+check "S3.1 B's next turn shows the entry A just added, as a delta, not the whole file" "echo \"\$TB\" | grep -q 'SHARED notes of project lottery-dev changed' && echo \"\$TB\" | grep -q '+ \[n3\] .*on demand: arc trunk lags' && ! echo \"\$TB\" | grep -q 'PR E = 15526210'"
 TB2="$(turn $B "$WT_C")"; check "S3.2 nothing changed -> nothing injected" "test -z \"\$TB2\""
 as $B add --shared -t pin "PR C = 15473925, branch EDAINAPP-1376-payment-cycle" >/dev/null
 TB3="$(turn $B "$WT_C")"; check "S3.3 B's own shared write is not reported back to B" "test -z \"\$TB3\""
@@ -91,7 +92,7 @@ printf -- '- the payment cycle is frozen until the tariff import lands\n' >> "$H
 MID=""; for i in 1 2 3 4 5 6; do MID="$MID$(tool $B "$WT_C")"; done
 check "S3.5c a line added by hand is not reported mid-turn, under an id it does not have yet" "! echo \"\$MID\" | grep -q 'tariff import'"
 TB4D="$(turn $B "$WT_C")"
-check "S3.5d ...the turn boundary adopts it, and then it arrives once, under a real id" "echo \"\$TB4D\" | grep -qE '\+ - \[n[1-9][0-9]*\].*tariff import'"
+check "S3.5d ...the turn boundary adopts it, and then it arrives once, under a real id" "echo \"\$TB4D\" | grep -qE '\+ \[n[1-9][0-9]*\].*on demand:.*payment cycle'"
 # More changed at once than one turn's slice can carry: the rest must come on the following turns.
 # Clipping the text and marking everything seen - what this used to do - hid them from B for good.
 python3 - "$HQ/.longrun/config.json" <<'PY'
@@ -109,10 +110,10 @@ PY
 turn $B "$WT_C" >/dev/null
 ( cd "$WT_E" && as $A add --shared -t dead "eats-payments retry via STQ v1: the task is dropped when the payload grows past 128 kB" >/dev/null )
 MT=""; for i in 1 2 3 4 5 6; do MT="$MT$(tool $B "$WT_C")"; done
-check "S3.8 a peer's note reaches a session INSIDE its turn, between two tool calls" "echo \"\$MT\" | grep -q 'additionalContext' && echo \"\$MT\" | grep -q 'past 128 kB'"
+check "S3.8 a peer's note reaches a session INSIDE its turn, between two tool calls" "echo \"\$MT\" | grep -q 'additionalContext' && echo \"\$MT\" | grep -q 'eats-payments retry'"
 MT2=""; for i in 1 2 3 4 5 6; do MT2="$MT2$(tool $B "$WT_C")"; done
-check "S3.9 ...and once only: the mid-turn delta marks it seen like the boundary one does" "! echo \"\$MT2\" | grep -q 'past 128 kB'"
-TB9="$(turn $B "$WT_C")"; check "S3.10 ...so the turn boundary does not repeat it either" "! echo \"\$TB9\" | grep -q 'past 128 kB'"
+check "S3.9 ...and once only: the mid-turn delta marks it seen like the boundary one does" "! echo \"\$MT2\" | grep -q 'eats-payments retry'"
+TB9="$(turn $B "$WT_C")"; check "S3.10 ...so the turn boundary does not repeat it either" "! echo \"\$TB9\" | grep -q 'eats-payments retry'"
 # Rate-limited, and asked with something waiting to be delivered: with nothing new to say, the delta is
 # empty whether the limit exists or not, and the check passed with the limit taken out altogether.
 ( cd "$WT_E" && as $A add --shared -t fact "the settlement cron runs at 03:15 UTC, not at midnight" >/dev/null )

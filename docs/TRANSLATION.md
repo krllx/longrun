@@ -87,6 +87,9 @@ These are translated, and translated the same way every time.
 | note, notes | заметка, заметки | メモ | 메모 | 笔记 |
 | shared notes | общие заметки | 共有メモ | 공유 메모 | 共享笔记 |
 | own notes | свои заметки | 自分のメモ | 자체 메모 | 自有笔记 |
+| resident layer | постоянный слой | 毎回読み込むメモ | 항상 불러오는 메모 | 每次加载的笔记 |
+| deferred entries | отложенные записи | 必要なときに読み込むメモ | 필요할 때 불러오는 메모 | 延后加载的条目 |
+| search hint | подсказка при поиске | 検索時のヒント | 검색 힌트 | 搜索提示 |
 | digest | дайджест | ダイジェスト | 다이제스트 | 摘要 |
 | ledger | `ledger` (kept Latin) | 台帳 | 원장 | 台账 |
 | inbox | `inbox` (kept Latin) | 受信箱 | 수신함 | 收件箱 |
