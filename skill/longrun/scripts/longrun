@@ -6,6 +6,7 @@ Two levels, nothing else:
            that starts inside the project or in a directory linked to it (git or arc worktrees):
              NOTES.md      shared notes [n<id>], hard byte budget, one entry per line
              inbox/        messages between sessions and reports, one file each
+             memory.json  shared startup selection (pin/doc by default, per-ID keep/defer overrides)
              config.json, state.json, stale.json, board.json, archive/ (compaction summaries, removed notes, dead sessions)
   SESSION  ~/.claude/longrun/sessions/<project-key>/<session-key>/ (never inside a repo or a synced vault):
              notes.md      own notes [s<id>], own budget
@@ -423,6 +424,47 @@ def _tgt(x):
 
 def load_notes(t):
     return parse_notes(read(_tgt(t)["path"]))
+
+
+def memory_policy(store):
+    policy = read_json(os.path.join(store.local, "memory.json"))
+    return policy if isinstance(policy, dict) else {}
+
+
+def memory_resident(e, policy):
+    """Loading policy only; NOTES.md, IDs, recall and archive retention stay intact."""
+    choice = policy.get(str(e["id"]))
+    if choice in ("keep", "defer"):
+        return choice == "keep"
+    return e["tag"] in ("pin", "doc")
+
+
+def cmd_memory(store, args):
+    action = args[0] if args else "ls"
+    if action not in ("ls", "keep", "defer", "auto"):
+        die("usage: longrun memory ls | keep|defer|auto n12 [n13 ...]", 2)
+    with store.lock():
+        entries = load_notes(notes_target(store, True))
+        policy = memory_policy(store)
+        if action == "ls":
+            for e in entries:
+                print("%-9s %s%s" % ("keep" if memory_resident(e, policy) else "on demand", fmt_note(e),
+                                      " (explicit)" if str(e["id"]) in policy else " (by tag)"))
+            return 0
+        ids = parse_ids(args[1:])
+        known = {e["id"] for e in entries}
+        if not ids or len(ids) != len(args[1:]) or any(p != "n" or i not in known for p, i in ids):
+            die("choose existing shared IDs: `longrun memory %s n12` (`longrun memory ls`)" % action, 2)
+        policy = {k: v for k, v in policy.items() if k.isdigit() and int(k) in known}
+        for _, i in ids:
+            if action == "auto":
+                policy.pop(str(i), None)
+            else:
+                policy[str(i)] = action
+        write_json(os.path.join(store.local, "memory.json"), policy)
+    print("memory %s: %s (shared loading policy; all entries remain available through recall)" %
+          (action, ", ".join("n%d" % i for _, i in ids)))
+    return 0
 
 
 def save_notes(t, entries):
@@ -4985,7 +5027,9 @@ def notes_block(t, budget, label="", drop_oldest=0, muted=()):
     `muted` are ids this session asked not to be shown; they stay in the file and for everyone else."""
     all_entries = load_notes(t)
     muted_here = [e for e in all_entries if e["id"] in set(muted or ())]
-    entries = [e for e in all_entries if e not in muted_here]
+    policy = memory_policy(t["store"]) if t["shared"] else {}
+    deferred = [e for e in all_entries if t["shared"] and not memory_resident(e, policy)]
+    entries = [e for e in all_entries if e not in muted_here and e not in deferred]
     cfg = t.get("cfg") or load_config(None)
     cap = t["cap"]
     used = notes_bytes(all_entries)   # the file, not what this session chose to see
@@ -4997,14 +5041,17 @@ def notes_block(t, budget, label="", drop_oldest=0, muted=()):
     # already full: a project set to 15000 B with inject_max_bytes 9800 has thousands of bytes of budget
     # that will never reach a session, and the number in the head would otherwise read as a promise.
     tight = ("  (only ~%d B of these fit a digest: `longrun config`)" % eff) if eff < cap else ""
-    head = "%s %d entries %d/%d B (~%d tok)%s%s%s" % (label or t["label"], len(all_entries), used, cap,
-                                                      est_tokens(notes_body(all_entries)), prune, tight,
+    head = "%s %d entries %d/%d B (~%d resident tok)%s%s%s" % (label or t["label"], len(all_entries), used, cap,
+                                                      est_tokens(notes_body(entries)), prune, tight,
                                                       ("  (%d muted here: `longrun unmute --all`)" % len(muted_here)) if muted_here else "")
     body = list(entries)
     if drop_oldest > 0:
         for e in sheddable(entries)[:drop_oldest]:
             body.remove(e)
     lines = [head]
+    if t["shared"]:
+        lines.append("  MEMORY: %d resident, %d on demand. `longrun recall <term>` / `longrun notes --shared` searches all; "
+                     "`longrun memory keep|defer|auto n<ID>` changes startup loading." % (len(entries), len(deferred)))
     if len(body) != len(entries):
         lines.append("  (%d older entr%s left out to fit; still on disk: `longrun notes%s`)"
                      % (len(entries) - len(body), "y" if len(entries) - len(body) == 1 else "ies",
@@ -5025,7 +5072,9 @@ def notes_block(t, budget, label="", drop_oldest=0, muted=()):
 
 def shared_state_map(store):
     marks = load_stale(store)
-    return {str(e["id"]): hashlib.md5((e["text"] + (marks.get(str(e["id"]), {}) or {}).get("why", "")).encode("utf-8")).hexdigest()[:8]
+    policy = memory_policy(store)
+    return {str(e["id"]): hashlib.md5((fmt_note(e) + str(memory_resident(e, policy)) +
+            (marks.get(str(e["id"]), {}) or {}).get("why", "")).encode("utf-8")).hexdigest()[:8]
             for e in load_notes(notes_target(store, True)) if e["id"]}
 
 
@@ -5058,8 +5107,8 @@ def shared_delta(store, m, budget):
     # id 0 would only mean reporting it again under the real id it is about to get.
     entries = {str(e["id"]): e for e in load_notes(notes_target(store, True)) if e["id"]}
     marks = load_stale(store)
-    cur = {k: hashlib.md5((e["text"] + (marks.get(k, {}) or {}).get("why", "")).encode("utf-8")).hexdigest()[:8]
-           for k, e in entries.items()}   # a stale mark changes an entry's standing without changing its text
+    policy = memory_policy(store)
+    cur = shared_state_map(store)   # text, tag, stale mark and loading policy all matter to peers
     seen = m.get("shared_seen")
     if seen is None:
         m["shared_seen"] = cur
@@ -5074,7 +5123,11 @@ def shared_delta(store, m, budget):
     lines, used, left = [head], len(head.encode("utf-8")), 0
     shown = dict(seen)
     for mark, k, e in todo:
-        line = "  %s %s%s" % (mark, fmt_note(e), stale_suffix(store, e, marks))
+        if memory_resident(e, policy):
+            line = "  %s %s%s" % (mark, fmt_note(e), stale_suffix(store, e, marks))
+        else:
+            line = "  %s [n%s] %s on demand: %s%s - `longrun recall %s`" % (
+                mark, k, e["tag"], clip(e["text"], 80), stale_suffix(store, e, marks), shlex.quote(e["text"][:40]))
         n = len(line.encode("utf-8")) + 1
         if used + n > budget and len(lines) > 1:  # the first entry always goes, or nothing ever would
             left = len(todo) - len(lines) + 1
@@ -5218,6 +5271,96 @@ def term_names_something(raw):
     return len(raw) >= RECALL_SPECIFIC_LEN
 
 
+def rg_queries(command):
+    """Read a single literal rg argv, never evaluate shell syntax or infer intent from paths.
+
+    Reject expansion, pipelines, redirection, wrappers and unknown options rather than treating an
+    option value as a pattern. Quoting/escaping is handled by shlex after checking shell syntax.
+    This conservative subset is shared by Codex's Bash adapter and Claude Code's Bash calls.
+    """
+    if not isinstance(command, str) or len(command) > 16000 or "\n" in command or "\r" in command:
+        return []
+    quote, escaped = "", False
+    for c in command:
+        if escaped:
+            escaped = False
+            continue
+        if c == "\\" and quote != "'":
+            escaped = True
+            continue
+        if quote:
+            if c == quote:
+                quote = ""
+            elif quote == '"' and c in "$`":
+                return []
+        elif c in "\"'":
+            quote = c
+        elif c in "$`;&|<>()*?[]{}~#":
+            return []
+    if quote or escaped:
+        return []
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return []
+    if not argv or (argv[0] != "rg" and not (os.path.isabs(argv[0]) and os.path.basename(argv[0]) == "rg")):
+        return []
+    switches = set("--line-number --no-line-number --ignore-case --case-sensitive --smart-case --fixed-strings "
+                   "--word-regexp --line-regexp --hidden --no-hidden --no-ignore --no-ignore-vcs --no-ignore-parent "
+                   "--no-ignore-global --no-ignore-dot --follow --text --count --count-matches --files-with-matches "
+                   "--files-without-match --only-matching --quiet --invert-match --with-filename --no-filename "
+                   "--heading --no-heading --multiline --multiline-dotall --pcre2 --json --trim --stats --no-messages "
+                   "--null --null-data --crlf --passthru --no-unicode --unicode --debug --trace --one-file-system".split())
+    values = set("--regexp --glob --iglob --type --type-not --type-add --type-clear --context --before-context "
+                 "--after-context --max-count --max-depth --max-columns --max-filesize --encoding --engine "
+                 "--threads --color --colors --sort --sortr --ignore-file --path-separator --context-separator".split())
+    short_switches = set("nNiIsSFwxlLacoqvHhUPz0u")
+    short_values = set("eg tTABCMmdj".replace(" ", ""))
+    expressions, positional, options = [], [], True
+    i = 1
+    while i < len(argv):
+        arg = argv[i]
+        i += 1
+        if options and arg == "--":
+            options = False
+        elif options and arg.startswith("--"):
+            flag, eq, value = arg.partition("=")
+            if flag in switches and not eq:
+                continue
+            if flag not in values:
+                return []
+            if not eq:
+                if i == len(argv):
+                    return []
+                value = argv[i]
+                i += 1
+            if flag == "--regexp":
+                expressions.append(value)
+        elif options and arg.startswith("-") and arg != "-":
+            j = 1
+            while j < len(arg):
+                flag = arg[j]
+                j += 1
+                if flag in short_switches:
+                    continue
+                if flag not in short_values:
+                    return []
+                value = arg[j:]
+                if not value:
+                    if i == len(argv):
+                        return []
+                    value = argv[i]
+                    i += 1
+                if flag == "e":
+                    expressions.append(value)
+                break
+        else:
+            positional.append(arg)
+    # With -e, every positional argument is a path. Without it, the first is the query.
+    queries = expressions if expressions else positional[:1]
+    return queries if queries and all(q.strip() for q in queries) else []
+
+
 def search_terms(calls):
     """What the session said out loud it is looking for: [(term, names_something, verbatim)] for a batch
     of [(tool, tool_input)].
@@ -5249,17 +5392,22 @@ def search_terms(calls):
             raw = str(ti.get("query") or ti.get("prompt") or "")
         elif tool in ("Task", "Agent"):
             raw = str(ti.get("description") or "")
-        if not raw:
-            continue
-        words = []
-        for w in RECALL_WORD_RE.split(RECALL_ESCAPE_RE.sub(" ", raw)):  # \bfoo\b must not yield "bfoo"
-            w = w.strip("_")
-            if len(w) < RECALL_MIN_TERM or w.isdigit() or w.lower() in seen:
-                continue
-            seen.add(w.lower())
-            words.append(w)
-        alone = verbatim and len(words) == 1   # the whole pattern was this one word
-        out += [(w.lower(), alone or term_names_something(w), verbatim) for w in words]
+        queries = [raw] if raw else []
+        if tool == "Bash":
+            queries, verbatim = rg_queries(ti.get("command")), True
+        for raw in queries:
+            words = []
+            for w in RECALL_WORD_RE.split(RECALL_ESCAPE_RE.sub(" ", raw)):  # \bfoo\b must not yield "bfoo"
+                w = w.strip("_")
+                if len(w) < RECALL_MIN_TERM or w.isdigit():
+                    continue
+                words.append(w)
+            alone = verbatim and len(words) == 1
+            for w in words:
+                if w.lower() in seen:
+                    continue
+                seen.add(w.lower())
+                out.append((w.lower(), alone or term_names_something(w), verbatim))
     return out[:RECALL_MAX_TERMS]
 
 
@@ -5268,8 +5416,9 @@ def recall_scan_files(store, m):
 
     Two exclusions, and the second was measured rather than guessed.
 
-    What this session carries: the shared notes and its own notes are injected whole at every start, so a
-    hit in them is not news, it is the digest read back. Files it has already opened go the same way -
+    What this session carries: the resident shared layer and its own notes. Deferred shared entries,
+    including ctx, remain candidates; a hit in the resident layer is just the digest read back.
+    Files it has already opened go the same way -
     `files` is what it edited, `opened` is what it merely looked at, which only `PostToolBatch` can see
     (the PostToolUse matcher does not pay a process per Read).
 
@@ -5282,7 +5431,7 @@ def recall_scan_files(store, m):
     notes the archive kept when they were pruned."""
     read_here = {os.path.realpath(p) for p in ((m.get("files") or []) + (m.get("opened") or []))}
     me = m.get("skey") or ""
-    files = [(doc_path(store, e), "prose") for e in doc_entries(store)]
+    files = [(store.notes, "deferred")] + [(doc_path(store, e), "prose") for e in doc_entries(store)]
     for d in sorted(glob.glob(os.path.join(store.sessions, "*"))):
         if os.path.basename(d) == me:
             continue
@@ -5328,6 +5477,8 @@ def recall_hint(store, m, calls):
     if not files:
         return ""
     names = {t: n for t, n, _v in pairs}
+    policy = memory_policy(store)
+    muted = set(m.get("muted") or [])
     verbatim = {t: v for t, _n, v in pairs}
     # A term that names something is reported first: with two of them on a line, the one worth printing
     # is the one that named the question, not whichever happened to come earlier in the sentence.
@@ -5355,6 +5506,10 @@ def recall_hint(store, m, calls):
             hit = [t for t in terms if t in low]
             if not hit:
                 continue
+            if kind == "deferred":
+                entries = parse_notes(line)
+                if not entries or (memory_resident(entries[0], policy) and entries[0]["id"] not in muted):
+                    continue
             if kind == "notes":
                 tag = RECALL_TAG_RE.search(line)
                 if not tag or tag.group(1) not in RECALL_TAGS:
@@ -5733,7 +5888,9 @@ def build_digest(store, sid, source="manual", cwd=None, continued=False):
     # time (oldest first across both files), never by clipping the rendered text - a clip removes the
     # tail, and the tail is what was written last, which is the part a session is most likely to need.
     if over():
-        pools = {k: sheddable(load_notes(v[0])) for k, v in note_blocks.items()}
+        policy = memory_policy(store)
+        pools = {k: sheddable([e for e in load_notes(v[0]) if k != "shared" or memory_resident(e, policy)])
+                 for k, v in note_blocks.items()}
         shed = {k: 0 for k in note_blocks}
         while over():
             cands = [(k, pools[k][shed[k]]) for k in note_blocks if shed[k] < len(pools[k])]
@@ -6267,7 +6424,9 @@ def codex_hook_input(event, inp):
                         code = r.get("exit_code", r.get("exitCode"))
                 except ValueError:
                     pass
-        if code is not None and str(code) != "0":
+        # rg uses 1 for an empty search result, which is a useful recall signal, not a shell failure.
+        rg_miss = str(code) == "1" and bool(rg_queries(ti.get("command")))
+        if code is not None and str(code) != "0" and not rg_miss:
             event = "PostToolUseFailure"
             inp["error"] = "exit %s\n%s" % (code, output)
     return event, inp
@@ -6365,8 +6524,8 @@ def compact_hint(store, sid):
     if skey:
         ids += ["s%d" % e["id"] for e in load_notes(notes_target(store, False, skey=skey)) if e["id"]][-12:]
     if ids:
-        parts.append(["notes", "- Already on disk and re-injected automatically after the compaction, so the summary "
-                               "does not need to restate them: longrun notes " + clip(", ".join(ids), 200)])
+        parts.append(["notes", "- Already on disk: resident notes return after compaction; deferred details stay available "
+                               "through `longrun recall <term>` and `longrun notes`. No need to restate these IDs: " + clip(", ".join(ids), 200)])
     for key in ("compact_instructions", "compact_hint_text"):
         text = (cfg.get(key) if key == "compact_instructions" else m.get(key)) or ""
         if str(text).strip():
@@ -7266,9 +7425,9 @@ ONBOARD_SETTINGS = [
                                      "stay rare, the warning comes 50k before. After the answer: `longrun config set autocompact_window "
                                      "300k --global`, then ask the user to type `/autocompact 300k` in Claude Code (a hook cannot do that)"),
     ("stuck_tool_min", "global", "a tool call running longer than this (minutes) is flagged to the orchestrator. Long builds -> 60"),
-    ("notes_max_bytes", "project", "hard cap of the shared notes, read at every start. Four or more sessions -> 8000"),
+    ("notes_max_bytes", "project", "hard cap of all shared notes on disk; only the resident layer loads at startup"),
     ("session_notes_max_bytes", "project", "hard cap of a session's own notes. Long tasks -> 4000"),
-    ("nudge_tools", "project", "tool calls without a note before one reminder (only after edits or failures). Annoying -> 80"),
+    ("nudge_tools", "project", "calls without a note before a mid-turn reminder after edits/failures; read-only cards wait for the turn boundary. Annoying -> 80"),
     ("notes_max_age_days", "project", "entries older than this go to the archive (pin is exempt). Rare sessions -> 30"),
     ("pr_tool", "global", "how pr-merged checks ask: gh (GitHub CLI) or arc (Arcadia). auto = by the folder of the watch"),
     ("watch_timer", "global", "what runs the watch tick: launchd (macOS), systemd (a user timer), cron. auto picks what "
@@ -7436,6 +7595,7 @@ ORCHESTRATION (one session coordinates the others through the board; `longrun or
 SETTINGS
   onboard [done]              the first-conversation brief: what longrun does, the nuances, this machine's state, the settings to decide
   config                      effective settings and where each comes from (default / global / project)
+  memory ls | keep|defer|auto n12 [n13 ...]  shared startup layer; pin/doc by default, all other entries on demand
   config set KEY VALUE [--global] | unset KEY [--global]   e.g. `config set notes_max_bytes 8000`, `config set notify_turn_end unfocused --global`
   notify "text" [--title T] | notify --test   a desktop notification; --test says which program carried it
 
@@ -7510,7 +7670,7 @@ def main(argv):
         return empty_digest(rest)
     store = require_store()
     table = {"add": cmd_add, "rm": cmd_rm, "replace": cmd_replace, "notes": cmd_notes, "prune": cmd_prune,
-             "ask": cmd_ask,
+             "ask": cmd_ask, "memory": cmd_memory,
              "recall": cmd_recall, "status": cmd_status, "digest": cmd_digest, "gc": cmd_gc, "send": cmd_send,
              "doc": cmd_doc, "stale": cmd_stale, "mute": cmd_mute,
              "unmute": lambda st, a: cmd_mute(st, ["unmute-mode"] + a), "board": cmd_board, "orchestrate": cmd_orchestrate, "halt": cmd_halt, "resume": cmd_resume,

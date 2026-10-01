@@ -28,7 +28,7 @@
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-337_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-443_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -85,17 +85,17 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 ## ひとことで
 
-**何も言わなくても、最初のセッションから**：プロジェクトはディスク上にメモの束を持ちます。行き止まり・決定・事実を、エージェント自身が書き、読み直し、整理します。どのセッションも、そこに何が書かれていて、ほかにどんなセッションがあり、それぞれが最後に何をしたかを知った状態で始まり、毎ターン、その後ほかのセッションが何を変えたかが表示されます。
+**何も言わなくても、最初のセッションから**：プロジェクトはディスク上にメモの束を持ちます。行き止まり・決定・事実を、エージェント自身が書き、読み直し、整理します。どのセッションも、重要な事実とファイルへの参照を読み込み、残りの詳細は`recall`で取得でき、ほかにどんなセッションがあり、それぞれが最後に何をしたかを知った状態で始まり、毎ターン、その後ほかのセッションが何を変えたかが表示されます。
 
 **頼んだとき、またはエージェントが必要だと判断したとき**：仕事はすでにコンテキストを持っているセッションへ渡されます。「PRがマージされたら教えて」は、待つ間tokenを使わず取りこぼしもないウォッチになります。見逃したくないセッションについては通知が人間に届きます。1つのセッションがほかのセッションを決めた目標へ向けてまとめ、人間にしか解けない詰まりがあれば目の前にダイアログを出します。
 
-**そして副産物として**：ディスク上のメモは劣化しないので、hookがcompaction（会話履歴が自動で要約されること）、`/clear`、resumeのたびにそれをコンテキストへ戻します。この点の重みは以前より小さくなりました。同じhookが要約するモデルにも何を残すかを伝えるようになり、普通のcompactionでも失われるものが減ったからです。
+**そして副産物として**：ディスク上のメモは劣化しないので、hookがcompaction（会話履歴が自動で要約されること）、`/clear`、resumeのたびに毎回読み込むメモを戻し、詳細は`recall`で取得できるようにします。この点の重みは以前より小さくなりました。同じhookが要約するモデルにも何を残すかを伝えるようになり、普通のcompactionでも失われるものが減ったからです。
 
 ## なぜ
 
 | longrunがない場合 | longrunがある場合 |
 |---|---|
-| セッションが突き止めたことは、すべてその会話の中だけに残ります。次のセッション、つまり明日のセッションや隣のウィンドウのセッションは、何も知らないところから始まり、いま何が起きているのかを人間に尋ねます。 | **覚えているプロジェクト**。プロジェクトごとに1つの`.longrun/`。中のメモを書き、読み直し、整理するのはエージェント自身です。どのセッションもそのメモから始まり、ほかに誰が作業していて、それぞれが最後に何をしたかも分かります。 |
+| セッションが突き止めたことは、すべてその会話の中だけに残ります。次のセッション、つまり明日のセッションや隣のウィンドウのセッションは、何も知らないところから始まり、いま何が起きているのかを人間に尋ねます。 | **覚えているプロジェクト**。プロジェクトごとに1つの`.longrun/`。中のメモを書き、読み直し、整理するのはエージェント自身です。どのセッションも重要な事実とファイルへの参照を読み込んだ状態で始まり、詳細は`recall`で取得でき、ほかに誰が作業していて、それぞれが最後に何をしたかも分かります。 |
 | 2つ目のセッションは1つ目の存在を知りません。片方がPRを作ったのに、もう片方は「PRはまだ作られていない」と言います。 | **メッセージとタスク**。仕事はすでにコンテキストを持っているセッションへ渡り、相手にはユーザーのターンとして届きます。止まっているセッションにも渡せます。そのメッセージはプロジェクトの受信箱で待ちます。 |
 | 「PRがマージされたら教えて」は、tokenを浪費するポーリングループか、決めた時間だけ待つsleepになります。sleepが明けたころには、イベントはとうに過ぎているか、まだ来ていません。 | **ウォッチ**。バックグラウンドのタイマーが5分ごとにモデルなしで条件を確かめ、成立したらセッションを起こします。確実で、反応が速く、コストはゼロです。 |
 | 1つのプロジェクトに5つのセッション。何が終わり、何が詰まり、次が何かを知っているのは人間だけで、そのうちの1つが自分の返事を待っていることに気づけるのも人間だけです。 | **オーケストレーター**。1つのセッションがほかのセッションのためにボードを持ち、停滞しているセッションを見つけ、人間にしか決められないときは全ウィンドウの手前にダイアログを出します。 |
@@ -120,7 +120,9 @@ longrunが受け持つのは、1つのターンや1つのセッションより�
 
 ### 1. ディスク上の共有ドキュメント
 
-プロジェクトごとに1つの`.longrun/`が、全セッションから見えるメモを持ちます。メモは何も指定しなければここへ入ります。自分のところだけに留めたいときは`--own`で、リポジトリのツリーの外に置かれます。hookはcompaction、`/clear`、resumeのたびに両方を戻し、毎ターン他のセッションが何を変えたかを表示します。
+プロジェクトごとに1つの`.longrun/`が共有メモを持ち、何も指定しなければメモはここへ入ります。起動、resume、compactionの際にデフォルトで読み込むのは、重要な事実を記す`pin`とファイルへの参照を記す`doc`です。それ以外のメモはディスクに残り、`recall`や検索時のヒントで必要なときに読み込めます。作業中の自分のメモは`--own`でリポジトリの外に保存します。hookは他のセッションによる変更も表示します。
+
+多くのタスクに必要な制約や事実は`longrun memory keep n12`で毎回読み込む対象にします。特定の話題でだけ必要な詳細は`memory defer n12`、タグによる判定に戻すには`memory auto n12`を使います。`memory ls`で選択を確認できます。選択は全セッションで共有され、メモ本文、ID、アーカイブの保持期間は変わりません。必要時に読むメモの変更は短い通知で、毎回読むメモの変更は全文で届きます。Codexのシェル呼び出しでは、引用符で囲んだパターンや複数の`-e`を含む、直接記述された`rg`コマンドにも検索ヒントが出ます。解釈が曖昧なシェル構文には出ません。[読み込みの手順](skill/longrun/references/protocol.md)と[Codexの制限](skill/longrun/references/codex.md)を参照してください。
 
 ```bash
 longrun add -t pin "PR 42 = branch feature/checkout"           # shared: every session sees it
@@ -174,7 +176,7 @@ sequenceDiagram
     participant L as longrun (hooks)
     participant D as ディスク上のメモ
     S->>L: セッション開始
-    L->>D: プロジェクトの共有メモと、このセッションの自分のメモを読む
+    L->>D: read the resident shared layer and this session's own notes
     L-->>S: ダイジェスト：何が分かっているか、他に誰が作業中か、何が待機中か
     Note over S: エージェントが作業し、行き止まりや決定を1行ずつ書く
     S->>D: longrun add ...
@@ -186,9 +188,9 @@ sequenceDiagram
     L-->>S: 同じダイジェストと、どこで中断したか
 ```
 
-**開始**。hookはディレクトリからプロジェクトを見つけ、ダイジェストを出力します。中身は共有メモ、自分のメモ、他のセッション（動いているかどうか、それぞれの最後の作業）、待機中のウォッチ、未配送のメッセージです。
+**開始**。hookはディレクトリからプロジェクトを見つけ、ダイジェストを出力します。中身は毎回読み込む共有メモ、必要なときに読み込むメモの件数と`recall`で取得する方法、自分のメモ、他のセッション（動いているかどうか、それぞれの最後の作業）、待機中のウォッチ、未配送のメッセージです。
 
-**作業**。エージェントは行き止まり・決定・苦労して得た事実を1行ずつ書きます。hookは編集回数を数え、失敗したコマンドを記録します。メモなしの編集が長く続くと、メモを書くよう1度だけ促します。
+**作業**。エージェントは行き止まり・決定・苦労して得た事実を1行ずつ書きます。hookは編集回数を数え、失敗したコマンドを記録します。メモを書かないまま一定回数の編集をした場合やコマンドが失敗した場合、また読み取りだけのターンでツールを少なくとも6回呼び出した場合には、hookが保存すべき結論がないか尋ねます。確認を出す頻度には上限があります。
 
 **毎ターン**。受信箱のメッセージが配送されます。他のセッションが共有メモに加えた変更は差分として現れます。`+`が追加、`~`が書き換え、`-`が削除です。
 
@@ -228,6 +230,7 @@ worktreeは`longrun link <project>`で紐づけます。worktree自体はメモ�
 ```bash
 longrun init [--external] | link <project> | where | onboard | config
 longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune | recall <term>
+longrun memory ls | keep|defer|auto n12
 longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
@@ -253,10 +256,11 @@ longrun orchestrate start --goal "..." | board [add --fact|ack] | ask | halt | r
 ## 開発
 
 ```bash
-bash tests/run.sh            # 222 regression checks, no API calls
-bash tests/scenarios.sh      # 37 scenarios, one per goal
-bash tests/orchestrator.sh   # 51: the orchestrator layer
+bash tests/run.sh            # 293 regression checks, no API calls
+bash tests/scenarios.sh      # 47 scenarios, one per goal
+bash tests/orchestrator.sh   # 53: the orchestrator layer
 bash tests/ask.sh            # 27: the dialog and the MCP server
+python3 tests/codex.py       # 23: Codex and mixed-client integration
 ```
 
 インストーラーはファイルを`~/.claude/skills/longrun/`にコピーします。checkoutから読み込まれるものはありません。hookはイベントごとに別プロセスなので、動いているセッションも再起動なしで更新を拾います。

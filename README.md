@@ -29,7 +29,7 @@ English | [Русский](README.ru.md) | [简体中文](README.zh-CN.md) | [�
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-435_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-443_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -103,21 +103,21 @@ From there, nothing to call: *"write that down"*, *"what have we tried"*, *"tell
 
 ## In short
 
-**By itself, from the first session:** the project keeps a set of notes on disk that the agents write, re-read and prune themselves - dead ends, decisions, facts. Every session starts knowing what is in them, which other sessions exist and what each one did last, and every turn shows what the others changed since.
+**By itself, from the first session:** the project keeps a set of notes on disk that the agents write, re-read and prune themselves - dead ends, decisions, facts. Every session starts with the important facts and pointers, can recall the remaining details, and knows which other sessions exist and what each one did last, and every turn shows what the others changed since.
 
 **When you ask, or the agent sees the need:** work is handed to the session that already has the context; "tell me when the PR merges" becomes a watch that spends no tokens waiting and cannot be slept through; a notification reaches you for the session you must not miss; one session coordinates the others toward the goal you set and puts a dialog in front of you when only you can unblock it.
 
-**And along the way:** notes on disk do not degrade, so the hooks bring them back after every compaction, `/clear` and resume. That part matters less than it used to - the same hooks now tell the summariser what to keep, so an ordinary compaction already loses less than it did.
+**And along the way:** notes on disk do not degrade, so the hooks restore the resident layer after every compaction and keep the details available through `recall`, `/clear` and resume. That part matters less than it used to - the same hooks now tell the summariser what to keep, so an ordinary compaction already loses less than it did.
 
 ## Why
 
 | Without longrun | With longrun |
 |---|---|
-| Everything a session worked out lives inside that one conversation. The next one - tomorrow's, or the one in the other window - starts from nothing and asks you what is going on. | **A project that remembers.** One `.longrun/` per project: notes the agents write, re-read and prune themselves. Every session starts with them, plus who else is working and what each did last. |
+| Everything a session worked out lives inside that one conversation. The next one - tomorrow's, or the one in the other window - starts from nothing and asks you what is going on. | **A project that remembers.** One `.longrun/` per project: notes the agents write, re-read and prune themselves. Every session starts with important facts and pointers, can recall the details, and sees who else is working and what each did last. |
 | A second session does not know the first one exists. One opened a PR, the other says "the PR is not created yet". | **Messages and tasks.** Work goes to the session that already has the context, and arrives there as a user turn. A stopped session too: it waits in the project inbox. |
 | "Tell me when the PR merges" turns into a polling loop that burns tokens, or into a fixed sleep that ends long after the event, or before it. | **Watches.** A background timer checks the condition every five minutes without a model and wakes the session when it holds. Reliable, reactive, free. |
 | Five sessions on one project, and you are the only one who knows what is done, stuck and next - and the only one who notices when one of them is waiting for you. | **An orchestrator.** One session keeps the board for the others, spots a peer that is stuck, and puts a dialog in front of every window when only you can decide. |
-| Compaction squeezes the history into a summary, and the reasons go first: why an approach was dropped, why this path was taken. | **Notes on disk do not degrade,** and the hooks re-inject them afterwards. They also tell the summariser what to keep, so the compaction itself loses less. |
+| Compaction squeezes the history into a summary, and the reasons go first: why an approach was dropped, why this path was taken. | **Notes on disk do not degrade,** and the hooks restore the resident layer afterwards and leave details available through `recall`. They also tell the summariser what to keep, so the compaction itself loses less. |
 
 One python file, no dependencies.
 
@@ -138,7 +138,9 @@ longrun is for what outlives a turn and a session. Reach for the built-in thing 
 
 ### 1. Shared documents on disk
 
-One `.longrun/` per project holds the notes every session sees - that is where a note goes by default. A session can keep something to itself with `--own`, outside the repository tree. Hooks bring both back after every compaction, `/clear` and resume, and show on every turn what other sessions changed.
+One `.longrun/` per project holds shared notes - that is where a note goes by default. Startup, resume and compaction load a compact resident layer: important `pin` facts and `doc` pointers. Other entries stay on disk and return through `recall` or search hints. A session can keep its active working notes with `--own`, outside the repository tree. Hooks also show what other sessions changed.
+
+Use `longrun memory keep n12` for a constraint or fact needed across most tasks; `memory defer n12` for details needed only by topic, and `memory auto n12` to restore the tag rule. `memory ls` shows the selection. These choices are shared, preserve existing entries and IDs, and do not change archive retention. Deferred changes arrive as short notices; resident changes arrive in full. Search hints also recognize literal `rg` commands in Codex shell calls, including quoted patterns and multiple `-e` expressions. Ambiguous shell syntax stays quiet. See the [loading protocol](skill/longrun/references/protocol.md) and [Codex limits](skill/longrun/references/codex.md).
 
 ```bash
 longrun add -t pin "PR 42 = branch feature/checkout"           # shared: every session sees it
@@ -192,7 +194,7 @@ sequenceDiagram
     participant L as longrun (hooks)
     participant D as notes on disk
     S->>L: session starts
-    L->>D: read the project's shared notes and this session's own
+    L->>D: read the resident shared layer and this session's own notes
     L-->>S: digest: what is known, who else is working, what is waiting
     Note over S: the agent works, writes a line per dead end or decision
     S->>D: longrun add ...
@@ -204,9 +206,9 @@ sequenceDiagram
     L-->>S: the same digest, plus where you left off
 ```
 
-**Start.** The hook finds the project by directory and prints the digest: shared notes, own notes, the other sessions (alive or not, what each did last), pending watches, undelivered messages.
+**Start.** The hook finds the project by directory and prints the digest: resident shared notes, the count and recall route for deferred entries, own notes, the other sessions (alive or not, what each did last), pending watches, undelivered messages.
 
-**Work.** The agent writes one line per dead end, decision or hard-won fact. Hooks count edits and log failed commands. After a long stretch of edits without a note, one reminder to the agent to write one.
+**Work.** The agent writes one line per dead end, decision or hard-won fact. Hooks count edits and log failed commands. After enough edits, a failure or a read-only turn of at least six calls without a note, a rate-limited reminder asks whether there is a conclusion worth saving.
 
 **Every turn.** Messages from the inbox are delivered. Changes other sessions made to the shared notes appear as a diff: `+` added, `~` rewritten, `-` removed.
 
@@ -246,6 +248,7 @@ The journal keeps the mechanical record by itself - what was edited, what failed
 ```bash
 longrun init [--external] | link <project> | where | onboard | config
 longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune | recall <term>
+longrun memory ls | keep|defer|auto n12
 longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
@@ -275,7 +278,7 @@ bash tests/run.sh            # 293 regression checks, no API calls
 bash tests/scenarios.sh      # 47 scenarios, one per goal
 bash tests/orchestrator.sh   # 53: the orchestrator layer
 bash tests/ask.sh            # 27: the dialog and the MCP server
-python3 tests/codex.py       # 15: Codex and mixed-client integration
+python3 tests/codex.py       # 23: Codex and mixed-client integration
 ```
 
 The installer copies files into the selected client's skill directory; nothing is loaded from the checkout. Existing hook commands run the updated script on their next event. In Codex, review newly registered hooks in `/hooks` and restart if the skill or MCP tools do not appear.

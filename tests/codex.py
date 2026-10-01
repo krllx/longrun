@@ -11,7 +11,7 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = ROOT / "skill/longrun/scripts/longrun"
+CLI = Path(os.environ.get("LONGRUN_TEST_CLI", ROOT / "skill/longrun/scripts/longrun"))
 CLAUDE = "11111111-2222-4333-8444-555555555555"
 CODEX = "aaaaaaaa-2222-4333-8444-555555555555"
 OTHER = "bbbbbbbb-2222-4333-8444-555555555555"
@@ -28,6 +28,7 @@ class CodexTests(unittest.TestCase):
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("LONGRUN_", "CLAUDE_", "CODEX_"))}
         self.env.update({"HOME": str(self.fake_home), "CLAUDE_CONFIG_DIR": str(self.fake_home / ".claude"),
                          "CODEX_HOME": str(self.fake_home / ".codex"), "LONGRUN_NO_TIMER": "1", "LONGRUN_NO_UI": "1",
+                         "XDG_CONFIG_HOME": str(self.fake_home / ".config"),
                          "LONGRUN_DESKTOP_DIR": str(self.base / "desktop"), "LONGRUN_STUB_LOG": str(self.base / "calls.jsonl")})
         self.run_cli("init")
 
@@ -79,6 +80,7 @@ if 'resume' in sys.argv:
         self.hook("SessionStart", sid=CLAUDE, client="claude", source="startup")
         self.hook("SessionStart", source="startup")
         self.run_cli("add", "-t", "decision", "Use one store across clients", sid=CODEX)
+        self.run_cli("memory", "keep", "n1", sid=CODEX)
         self.run_cli("add", "--own", "-t", "ctx", "Only the Codex conversation", sid=CODEX)
         restored = self.hook("SessionStart", source="compact")
         self.assertIn("Use one store across clients", restored)
@@ -140,6 +142,158 @@ if 'resume' in sys.argv:
                   tool_response={"session_id": 123, "output": "running"})
         self.assertEqual(self.meta()["fails"], 1)
         self.assertEqual(self.meta()["turn_tools"], 3)
+
+    def test_codex_rg_hint_payload(self):
+        self.run_cli("add", "-t", "dead", "payment_callback retries reuse an invalid idempotency key")
+        self.hook("SessionStart", source="startup")
+        self.hook("UserPromptSubmit", prompt="Find the retry path")
+        out = self.hook("PostToolUse", tool_name="exec_command", tool_use_id="rg1",
+                        tool_input={"cmd": "rg -n 'payment_callback' src", "workdir": str(self.project)},
+                        tool_response={"exit_code": 0, "output": "src/callback.py:42"})
+        self.assertIn("already written down", out)
+        self.assertIn("NOTES.md", out)
+        self.assertIn("invalid idempotency key", out)
+        self.assertIn("longrun recall payment_callback", out)
+        self.assertEqual(self.meta()["turn_tools"], 1)
+
+    def test_memory_layers_lifecycle(self):
+        self.run_cli("add", "-t", "pin", "Release branch codex/memory-layer")
+        (self.project / "design.md").write_text("payment_callback needs a fresh idempotency key\n")
+        self.run_cli("doc", "add", "design.md", "Callback contract and retry experiments")
+        self.run_cli("add", "-t", "dead", "payment_callback: reused keys are rejected after a decline")
+        self.run_cli("add", "-t", "ctx", "callback_scratch: comparison of the failed payloads")
+        path = self.project / ".longrun/NOTES.md"
+        original = path.read_bytes()
+        for client, sid in (("codex", CODEX), ("claude", CLAUDE)):
+            self.hook("SessionStart", sid=sid, client=client, source="startup")
+            self.run_cli("add", "--own", "-t", "ctx", "Active investigation checkpoint", sid=sid)
+            for source in ("startup", "resume", "compact"):
+                with self.subTest(client=client, source=source):
+                    out = self.hook("SessionStart", sid=sid, client=client, source=source)
+                    self.assertIn("Release branch", out)
+                    self.assertIn("design.md - Callback contract", out)
+                    self.assertIn("Active investigation checkpoint", out)
+                    self.assertIn("2 resident, 2 on demand", out)
+                    self.assertNotIn("reused keys are rejected", out)
+                    self.assertNotIn("callback_scratch", out)
+                    for term in ("payment_callback", "callback_scratch", "Release branch", "Active investigation"):
+                        self.assertIn(term, self.run_cli("recall", term, "--no-transcript", sid=sid))
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_project_context_measurement(self):
+        spec = importlib.util.spec_from_file_location("measure_memory_test", ROOT / "research/measure-memory.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        result = module.measure(None)
+        self.assertEqual(result["entries"], 21)
+        self.assertEqual(result["resident"], 4)
+        self.assertGreater(result["reduction_pct"], 50)
+        self.assertTrue(result["recall_and_hook_hint"])
+
+    def test_memory_selection_is_shared_and_reversible(self):
+        self.run_cli("add", "-t", "decision", "callback_selection: use the explicit retry contract")
+        original = (self.project / ".longrun/NOTES.md").read_bytes()
+        self.run_cli("memory", "keep", "n1")
+        self.assertIn("callback_selection", self.hook("SessionStart", sid=OTHER, source="startup"))
+        self.assertIn("(explicit)", self.run_cli("memory", "ls"))
+        self.run_cli("memory", "defer", "n1")
+        self.assertNotIn("callback_selection", self.hook("SessionStart", sid=OTHER, source="resume"))
+        self.run_cli("memory", "auto", "n1")
+        self.assertNotIn("(explicit)", self.run_cli("memory", "ls"))
+        self.assertIn("callback_selection", self.run_cli("recall", "callback_selection", "--no-transcript"))
+        self.run_cli("memory", "keep", "s1", expected=2)
+        self.run_cli("memory", "defer", "n999", expected=2)
+        self.assertEqual((self.project / ".longrun/NOTES.md").read_bytes(), original)
+
+    def test_deferred_notes_hint_including_ctx(self):
+        self.run_cli("add", "-t", "ctx", "callback_scratch: payload comparison explains the failed retry")
+        self.hook("SessionStart", source="startup")
+        out = self.hook("PostToolUse", tool_name="Grep", tool_input={"pattern": "callback_scratch"})
+        self.assertIn("payload comparison explains", out)
+        self.assertIn("NOTES.md", out)
+        self.assertIn("longrun recall callback_scratch", out)
+
+    def test_memory_peer_changes_and_selection_delivery(self):
+        self.run_cli("add", "-t", "fact", "callback_contract: legacy retry detail")
+        self.hook("SessionStart", source="startup")
+        self.hook("SessionStart", sid=OTHER, source="startup")
+        self.hook("UserPromptSubmit", prompt="Investigate")
+        text = "callback_contract: " + "retry analysis " * 8 + "the definitive outcome"
+        self.run_cli("replace", "n1", text, sid=OTHER)
+        out = self.hook("UserPromptSubmit", prompt="Continue")
+        self.assertIn("n1", out)
+        self.assertIn("on demand", out)
+        self.assertNotIn("the definitive outcome", out)
+        self.assertIn("the definitive outcome", self.run_cli("recall", "callback_contract", "--no-transcript", sid=CODEX))
+        self.assertNotIn("callback_contract", self.hook("UserPromptSubmit", prompt="Continue"))
+        self.run_cli("memory", "keep", "n1", sid=OTHER)
+        out = self.hook("UserPromptSubmit", prompt="Continue")
+        self.assertIn("the definitive outcome", out)
+        self.run_cli("memory", "defer", "n1", sid=OTHER)
+        out = self.hook("UserPromptSubmit", prompt="Continue")
+        self.assertIn("on demand", out)
+        self.assertNotIn("the definitive outcome", out)
+        self.run_cli("add", "-t", "fact", "callback_midturn: retry budget is exhausted", sid=OTHER)
+        out = "".join(self.hook("PostToolUse", tool_name="read_file", tool_use_id="r%d" % i,
+                                tool_input={}) for i in range(5))
+        self.assertIn("callback_midturn", out)
+        self.assertIn("on demand", out)
+        self.assertIn("retry budget is exhausted", self.run_cli("recall", "callback_midturn", "--no-transcript", sid=CODEX))
+
+    def test_rg_variants_through_hook(self):
+        self.run_cli("add", "-t", "dead", "payment_callback: cache retry uses a fresh idempotency key")
+        commands = ["rg payment_callback", "rg -n 'payment_callback' src", 'rg -nS "payment_callback" src',
+                    "rg -n --glob '*.py' --type py payment_callback src", "rg --color=never -A 3 payment_callback",
+                    "rg -e payment_callback -e absent_query src", "rg -eabsent_query --regexp=payment_callback src",
+                    "rg --regexp payment_callback -- src", "rg -- payment_callback src", "/usr/local/bin/rg -nFi payment_callback",
+                    "rg -e cache -e retry src", "rg -n '\\bpayment_callback\\b' src"]
+        for i, cmd in enumerate(commands):
+            sid = "rgtest%02d-2222-4333-8444-555555555555" % i
+            with self.subTest(cmd=cmd):
+                self.hook("SessionStart", sid=sid, source="startup")
+                out = self.hook("PostToolUse", sid=sid, tool_name="exec_command", tool_use_id="r1",
+                                tool_input={"cmd": cmd}, tool_response={"exit_code": 0, "output": ""})
+                self.assertIn("already written down", out)
+                self.assertIn("fresh idempotency key", out)
+        # Empty rg results still reach recall, with no spurious failure telemetry.
+        self.hook("SessionStart", sid=OTHER, source="startup")
+        out = self.hook("PostToolUse", sid=OTHER, tool_name="exec_command", tool_input={"cmd": "rg payment_callback"},
+                        tool_response={"exit_code": 1, "output": ""})
+        self.assertIn("already written down", out)
+        self.assertEqual(self.meta(OTHER)["fails"], 0)
+        # The existing Claude Bash handler uses the same literal argv parser.
+        self.hook("SessionStart", sid=CLAUDE, client="claude", source="startup")
+        self.assertIn("already written down", self.hook("PostToolUse", sid=CLAUDE, client="claude", tool_name="Bash",
+                      tool_input={"command": "rg -e payment_callback"}, tool_response={}))
+
+    def test_rg_quiet_unsafe_unrelated_and_repeated(self):
+        for term in ("payment_callback", "retry_budget", "callback_contract"):
+            self.run_cli("add", "-t", "fact", term + ": recorded outcome")
+        self.hook("SessionStart", source="startup")
+        marker = self.base / "must-not-exist"
+        commands = ["echo payment_callback", "cat payment_callback", "rg --files payment_callback",
+                    "rg --files -g '*payment_callback*'", "rg --unknown payment_callback", "rg -g payment_callback",
+                    "rg -e", "rg -e '' payment_callback", "rg 'payment_callback", "rg $QUERY",
+                    'rg "payment_callback $(true)"', 'rg "$(touch %s)payment_callback"' % marker, "rg `touch %s` payment_callback" % marker,
+                    "rg payment_callback; touch %s" % marker, "rg payment_callback | head", "cd src && rg payment_callback",
+                    "rg payment_callback > out", "rg payment_callback\necho done", "rg payment_*", "rg unrelated_query",
+                    "rg --glob payment_callback unrelated_query src"]
+        for cmd in commands:
+            with self.subTest(cmd=cmd):
+                out = self.hook("PostToolUse", tool_name="exec_command", tool_input={"cmd": cmd},
+                                tool_response={"exit_code": 0, "output": ""})
+                self.assertNotIn("already written down", out)
+        self.assertFalse(marker.exists())
+        for term in ("payment_callback", "retry_budget"):
+            self.assertIn("already written down", self.hook("PostToolUse", tool_name="exec_command",
+                          tool_input={"cmd": "rg " + term}, tool_response={"exit_code": 0}))
+        self.assertNotIn("already written down", self.hook("PostToolUse", tool_name="exec_command",
+                         tool_input={"cmd": "rg callback_contract"}, tool_response={"exit_code": 0}))
+        self.hook("UserPromptSubmit", prompt="Continue")
+        self.assertNotIn("already written down", self.hook("PostToolUse", tool_name="exec_command",
+                         tool_input={"cmd": "rg payment_callback"}, tool_response={"exit_code": 0}))
+        self.assertIn("already written down", self.hook("PostToolUse", tool_name="exec_command",
+                      tool_input={"cmd": "rg callback_contract"}, tool_response={"exit_code": 0}))
 
     def test_read_turn_card_and_interrupt(self):
         self.hook("SessionStart", source="startup")

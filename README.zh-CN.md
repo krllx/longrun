@@ -28,7 +28,7 @@
   <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B%2C_no_deps-3776ab">
   <img alt="macOS and Linux" src="https://img.shields.io/badge/macOS-launchd-000000">
   <img alt="Linux" src="https://img.shields.io/badge/Linux-systemd_%2F_cron-e95420">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-337_checks%2C_no_API_calls-2ea44f">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-443_checks%2C_no_API_calls-2ea44f">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
 
@@ -85,17 +85,17 @@ cd ~/my-project && longrun init && claude "set up longrun"
 
 ## 一句话概括
 
-**不用你开口，从第一个会话起就有**：项目把一组笔记记在磁盘上，由 agent 自己写、自己重读、自己清理，记的是死胡同、决定和事实。每个会话一上来就知道笔记里有什么、还有哪些会话在、各自最后做了什么，之后每一轮都显示其他会话在这期间改了什么。
+**不用你开口，从第一个会话起就有**：项目把一组笔记记在磁盘上，由 agent 自己写、自己重读、自己清理，记的是死胡同、决定和事实。每个会话启动时都会加载重要事实和指向文件的笔记，其余细节可以通过 `recall` 找回；会话也知道还有哪些会话在、各自最后做了什么，之后每一轮都显示其他会话在这期间改了什么。
 
 **你开口，或者 agent 自己看出需要时**：活交给手里已经有上下文的那个会话；“PR 合了告诉我”变成一项事件监听，等待期间不花 token，也不会漏掉事件；你绝对不能错过的那个会话有动静时，通知会找到你；一个会话带着其余会话走向既定目标，碰到只有你能解开的事，就把对话框摆到你面前。
 
-**顺带还有一层**：磁盘上的笔记不会退化，所以每次 compaction（对话历史被自动摘要）、`/clear` 和 resume 之后 hook 都把它们带回来。这一层已经不像从前那么要紧了：同一批 hook 现在还会告诉做总结的模型该留下什么，所以一次普通的 compaction 本身就比过去丢得少。
+**顺带还有一层**：磁盘上的笔记不会退化，所以每次 compaction（对话历史被自动摘要）、`/clear` 和 resume 之后 hook 都恢复每次加载的笔记，其余细节仍可通过 `recall` 找回。这一层已经不像从前那么要紧了：同一批 hook 现在还会告诉做总结的模型该留下什么，所以一次普通的 compaction 本身就比过去丢得少。
 
 ## 为什么
 
 | 没有 longrun | 有了 longrun |
 |---|---|
-| 一个会话琢磨出来的一切，都只留在那一次对话里。下一个会话，明天那个也好、另一个窗口里那个也好，都从零开始，还要回头问你现在是什么情况。 | **一个记得住事的项目**。每个项目一个 `.longrun/`：笔记由 agent 自己写、自己重读、自己清理。每个会话一上来就拿到这些笔记，外加还有谁在干活、各自最后做了什么。 |
+| 一个会话琢磨出来的一切，都只留在那一次对话里。下一个会话，明天那个也好、另一个窗口里那个也好，都从零开始，还要回头问你现在是什么情况。 | **一个记得住事的项目**。每个项目一个 `.longrun/`：笔记由 agent 自己写、自己重读、自己清理。每个会话启动时加载重要事实和指向文件的笔记，其余细节可通过 `recall` 找回，外加还有谁在干活、各自最后做了什么。 |
 | 第二个会话根本不知道第一个存在。一个已经开了 PR，另一个还在说“PR 还没建”。 | **消息和任务**。活交给手里已经有上下文的那个会话，到了那边是一轮用户输入。已经停了的会话也一样：消息在项目收件箱里等着。 |
 | “PR 合了告诉我”要么变成烧 token 的轮询循环，要么变成一段定时的 sleep，醒来时事件不是早已发生，就是还没到。 | **事件监听**。后台定时器每五分钟检查一次条件，不调用模型，条件成立就唤醒会话。可靠、及时、还不花钱。 |
 | 五个会话在一个项目上，只有你自己知道什么做完了、什么卡住了、下一步是什么，也只有你会注意到其中某个会话正在等你。 | **编排器**。一个会话替其余会话维护任务板，发现卡住的同伴，只有你能拍板时，把对话框摆到所有窗口之上。 |
@@ -120,7 +120,9 @@ longrun 管的是比一轮对话、比一个会话活得更久的东西。能用
 
 ### 1. 磁盘上的共享文档
 
-每个项目有一个 `.longrun/`，里面放着所有会话都看得到的笔记，一条笔记默认就写到这里。会话想把某条只留给自己，就加 `--own`，存到仓库目录树之外。每次 compaction、`/clear` 和 resume 之后 hook 会把两者都带回来，并在每一轮显示其他会话改了什么。
+每个项目有一个 `.longrun/` 存放共享笔记，笔记默认就写到这里。启动、resume 和 compaction 时，默认只加载重要事实 `pin` 和`doc`（指向文件的一行）。其他条目留在磁盘上，需要时通过 `recall` 或搜索提示加载。会话的自有笔记可以用 `--own` 存到仓库目录之外。hook 也会显示其他会话改了什么。
+
+大多数任务都需要的约束或事实，用 `longrun memory keep n12` 设为每次加载；只在特定主题下需要的细节，用 `memory defer n12` 延后加载；用 `memory auto n12` 恢复按标签选择的默认规则。`memory ls` 显示当前选择。选择对所有会话生效，笔记正文、ID 和归档保留期限不变。延后加载的条目有变更时会发来简短通知，每次加载的条目则会发来完整内容。Codex 的 shell 调用中，直接写出的 `rg` 命令也能触发搜索提示，包括带引号的模式和多个 `-e` 表达式。含义不明确的 shell 语法不会触发提示。详见[加载协议](skill/longrun/references/protocol.md)和 [Codex 限制](skill/longrun/references/codex.md)。
 
 ```bash
 longrun add -t pin "PR 42 = branch feature/checkout"           # shared: every session sees it
@@ -174,7 +176,7 @@ sequenceDiagram
     participant L as longrun (hook)
     participant D as 磁盘上的笔记
     S->>L: 会话启动
-    L->>D: 读取项目的共享笔记和本会话的自有笔记
+    L->>D: read the resident shared layer and this session's own notes
     L-->>S: 摘要：已知什么、还有谁在干活、有什么在等
     Note over S: agent 干活，每遇到一个死胡同或决定就写一行
     S->>D: longrun add ...
@@ -186,9 +188,9 @@ sequenceDiagram
     L-->>S: 同样的摘要，外加你上次停在哪
 ```
 
-**启动**。hook 按目录找到项目并打印摘要：共享笔记、自有笔记、其他会话（是否还活着、各自最后干了什么）、待触发的事件监听、未送达的消息。
+**启动**。hook 按目录找到项目并打印摘要：每次加载的共享笔记、延后加载的条目数量和通过 `recall` 找回这些条目的方法、自有笔记、其他会话（是否还活着、各自最后干了什么）、待触发的事件监听、未送达的消息。
 
-**干活**。agent 每碰到一个死胡同、做出一个决定或拿到一条来之不易的事实，就写一行。hook 统计编辑次数并记录失败的命令。连着编辑了很久却一条笔记都没写，会提醒 agent 记一条。
+**干活**。agent 每碰到一个死胡同、做出一个决定或拿到一条来之不易的事实，就写一行。hook 统计编辑次数并记录失败的命令。如果还没有写笔记，编辑次数达到一定次数、命令失败，或只读取内容的一轮调用工具至少六次时，hook 会询问有没有值得保存的结论。提醒的频率有限制。
 
 **每一轮**。投递收件箱里的消息。其他会话对共享笔记做的改动以差异形式出现：`+` 新增、`~` 改写、`-` 删除。
 
@@ -228,6 +230,7 @@ worktree 用 `longrun link <project>` 挂上去，本身不存放笔记。
 ```bash
 longrun init [--external] | link <project> | where | onboard | config
 longrun add [--own] -t TAG "..." | rm | replace | stale | mute | notes | prune | recall <term>
+longrun memory ls | keep|defer|auto n12
 longrun doc add <path> "what is in it" | doc ls | doc touch n12 "..." 
 longrun status | send [--list] [--resume] WHO "..."
 longrun watch add --to WHO --then "..." -- pr-merged 42 | at 10:00 | cmd '...' | file /path | http URL
@@ -253,10 +256,11 @@ longrun orchestrate start --goal "..." | board [add --fact|ack] | ask | halt | r
 ## 开发
 
 ```bash
-bash tests/run.sh            # 222 regression checks, no API calls
-bash tests/scenarios.sh      # 37 scenarios, one per goal
-bash tests/orchestrator.sh   # 51: the orchestrator layer
+bash tests/run.sh            # 293 regression checks, no API calls
+bash tests/scenarios.sh      # 47 scenarios, one per goal
+bash tests/orchestrator.sh   # 53: the orchestrator layer
 bash tests/ask.sh            # 27: the dialog and the MCP server
+python3 tests/codex.py       # 23: Codex and mixed-client integration
 ```
 
 安装脚本把文件复制到 `~/.claude/skills/longrun/`；运行时不会从 checkout 里加载任何东西。正在运行的会话不用重启也能用上更新，因为每个事件的 hook 都是一个单独的进程。

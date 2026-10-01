@@ -1,0 +1,21 @@
+[
+  ["pin", "Project longrun: shared state for Claude Code and Codex; implementation lives in skill/longrun/scripts/longrun."],
+  ["pin", "All verification uses temporary stores, LONGRUN_NO_TIMER=1 and LONGRUN_NO_UI=1; never install a test timer."],
+  ["decision", "Keep the existing ~/.claude/longrun registry for Codex compatibility. Splitting stores would hide peers and their notes."],
+  ["dead", "Matching recall hints on file paths points at material the session is already opening; use explicit search expressions."],
+  ["fact", "codex_hook_input maps exec_command.cmd to Bash.command before common handlers count tools, journal failures and deliver deltas."],
+  ["fact", "MIDTURN_DELTA_TOOLS counts turn_tools instead of tools; Grep calls must advance peer update delivery even during a search-only turn."],
+  ["fact", "PostToolBatch adds Read calls and opened files; matched PostToolUse calls are charged once by tool_use_id."],
+  ["decision", "doc_stamps keep size and hash as well as mtime: a branch switch can change mtime without changing the document's contents."],
+  ["dead", "Ageing a missing doc pointer from its creation date archived newly missing old files; start the clock at the first missing observation."],
+  ["fact", "watch_timer supports launchd, systemd user timers and cron. The timer evaluates conditions without model calls and sleep delays the check."],
+  ["decision", "Inbox delivery and --resume are separate operations: waking a stopped Codex conversation starts codex exec resume and consumes tokens."],
+  ["fact", "mcp_run requires explicit session_id and absolute cwd, because one MCP process can serve several conversations."],
+  ["fact", "Codex PreCompact saves a mechanical snapshot; source=compact restores the digest, but hook stdout does not steer its summarizer."],
+  ["fact", "Claude Code resume may assign a new CLI ID; priorCliSessionIds rebinds it to the old directory instead of losing own notes."],
+  ["fact", "recall_hints permits two hints per turn; recalled stores term/file pairs to suppress repeated suggestions across turns."],
+  ["decision", "Curated recall hints exclude journals and compaction summaries; explicit recall still searches those mechanical records."],
+  ["fact", "ask uses a detached dialog process; late answers are routed through the session inbox rather than issuing the same question again."],
+  ["fact", "stale marks keep the reason beside NOTES.md; pruning takes marked entries before even a pin, so obsolete constraints are not protected."],
+  ["fact", "Hook payload cwd can follow a shell cd; the bound session project must continue receiving counters, failures and post-compaction state."]
+]
