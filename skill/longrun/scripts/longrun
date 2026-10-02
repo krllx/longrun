@@ -1317,16 +1317,16 @@ def current_session(store, cwd=None):
     """Session id for CLI commands run by the model: env first, else the freshest meta with the same cwd."""
     sid = session_id()
     if sid:
-        if current_client() == "codex" and not index_read(sid):
-            # Manual mode on older Codex versions still has a real thread ID.
-            # Bind it once, so own notes and later wakeups use the right client.
+        if current_client() in ("codex", "zcode") and not index_read(sid):
+            # Manual mode with an explicit conversation ID still needs a binding.
+            # Keep own notes and client-specific behavior attached to that ID.
             with store.shared_lock():
-                bind_session(store, sid, os.path.realpath(cwd or os.getcwd()), "startup", client="codex")
+                bind_session(store, sid, os.path.realpath(cwd or os.getcwd()), "startup", client=current_client())
                 m = load_meta(store, sid)
-                m.update({"cwd": os.path.realpath(cwd or os.getcwd()), "client": "codex"})
+                m.update({"cwd": os.path.realpath(cwd or os.getcwd()), "client": current_client()})
                 save_meta(store, sid, m)
         return sid
-    if current_client() == "codex":
+    if current_client() in ("codex", "zcode"):
         return ""  # a shared MCP process or a shell without a thread ID must not borrow another thread
     cwd = os.path.realpath(cwd or os.getcwd())
     best = None
@@ -1342,7 +1342,7 @@ def session_client(sid):
 
 
 def current_client():
-    if os.environ.get("LONGRUN_CLIENT") in ("claude", "codex"):
+    if os.environ.get("LONGRUN_CLIENT") in ("claude", "codex", "zcode"):
         return os.environ["LONGRUN_CLIENT"]
     sid = session_id()
     return index_read(sid).get("client") or ("codex" if os.environ.get("CODEX_THREAD_ID") and
@@ -1485,6 +1485,8 @@ def sample_ctx(store, m, tpath="", force=False):
     tpath = tpath or m.get("transcript") or ""
     if not force and int(m.get("tools", 0)) % CTX_SAMPLE_EVERY:
         return
+    if m.get("client") == "zcode":
+        return  # temporary transcript; no documented context-window telemetry
     if m.get("client") == "codex":
         # Codex rollouts are optional and not a stable API. Never apply Claude model
         # windows or settings to a Codex session when its telemetry is unavailable.
@@ -1501,7 +1503,7 @@ def ctx_warning(store, m, key="ctx_warned"):
     """The near-compaction warning, once per 20k of growth once the context is within ctx_warn_before of the
     auto-compact window; '' otherwise. Resets when the context shrinks (a compaction happened). `key` keeps
     the session's own warning and the note to the orchestrator on separate counters."""
-    if m.get("client") == "codex":
+    if m.get("client") in ("codex", "zcode"):
         return ""  # its reported model window does not establish the auto-compaction threshold
     tok, win = int(m.get("ctx_tokens") or 0), int(m.get("ctx_window") or 0)
     if not tok or not win or tok < win - int(store.cfg["ctx_warn_before"]):
@@ -2725,7 +2727,7 @@ def mcp_session():
     server is that process's child (verified 2026-09-09). -> (sid, cwd, name), empty when not under a session."""
     # Some Codex clients share one MCP process across threads. Such callers must
     # pass session_id/cwd on each call; never guess from the newest heartbeat.
-    if current_client() == "codex":
+    if current_client() in ("codex", "zcode"):
         return "", "", ""
     parents = {}
     for pid, ppid, _, _ in proc_rows():
@@ -2744,7 +2746,7 @@ def mcp_session():
 
 for _mcp_tool in MCP_TOOLS:
     _mcp_tool["inputSchema"]["properties"].update({
-        "session_id": {"type": "string", "description": "Current thread ID. Required for session-bound calls from a shared Codex MCP server; obtain from CODEX_THREAD_ID in the shell environment."},
+        "session_id": {"type": "string", "description": "Current conversation ID. Required for session-bound calls from a shared MCP server; use CODEX_THREAD_ID in Codex or the session_id supplied by the ZCode hook."},
         "cwd": {"type": "string", "description": "Absolute project working directory for this call."},
     })
 
@@ -2978,8 +2980,17 @@ def halt_exempt(tool, ti):
     if RESUME_RE.search(cmd):
         return True
     cmd = re.sub(r"^(cd\s+\S+\s*(&&|;)\s*)+", "", cmd)
-    cmd = re.sub(r"^(env\s+(-u\s+\S+\s+|\S+=\S*\s+)*)", "", cmd)
-    first = cmd.split()[0] if cmd.split() else ""
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        return False
+    if argv and argv[0] == "env":
+        argv.pop(0)
+        while len(argv) >= 2 and argv[0] == "-u":
+            del argv[:2]
+    while argv and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argv[0]):
+        argv.pop(0)
+    first = argv[0] if argv else ""
     return first == "longrun" or first.endswith("/longrun")
 
 
@@ -3280,6 +3291,8 @@ def cmd_send(store, args):
         sid, cwd = t["sid"], t["cwd"]
     if opts["resume"]:
         client = session_client(sid)
+        if client == "zcode":
+            die("ZCode headless resume is unsupported; queue a message without --resume", 2)
         if client == "codex" and (opts["mode"] or "--max-turns" in args):
             die("Codex resume does not support --mode or --max-turns; use --timeout to bound the run", 2)
         cmd = resume_command(sid, stamp + "\n" + text, opts["model"], opts["mode"], opts["max_turns"])
@@ -3317,6 +3330,8 @@ def cmd_send(store, args):
 
 def resume_command(sid, text, model="", mode="", turns="8", path=None):
     client = session_client(sid)
+    if client == "zcode":
+        raise ValueError("ZCode headless resume is unsupported; queue a message without --resume or --wake")
     binary = shutil.which(client, path=path) or (os.path.join(HOME, ".local", "bin", client) if path is not None else client)
     if client == "codex":
         if mode:
@@ -3414,6 +3429,8 @@ def desktop_entry_for(sid):
     """The desktop session whose CURRENT CLI id is sid (the app keeps its own stable id per sidebar entry, and
     the CLI id behind it changes on resume: 196 of 208 sessions on the user's Mac had a different one on
     2026-09-07). Messages are therefore addressed by the desktop id when there is one."""
+    if session_client(sid) == "zcode":
+        return None
     for d in desktop_sessions():
         if d["sid"] == sid:
             return d
@@ -3967,6 +3984,8 @@ def should_notify_turn_end(store, client="claude"):
         return True
     if mode != "unfocused":
         return False
+    if client == "zcode":
+        return False  # unknown app bundle: use always or an important-session flag
     app = "com.openai.codex" if client == "codex" else "com.anthropic.claudefordesktop"
     return frontmost_bundle() != app
 
@@ -4889,6 +4908,8 @@ def watch_add(store, args):
         die("missing `-- CHECK` (longrun watch help)", 2)
     check = parse_check(check_argv, os.getcwd())
     target = resolve_session(store, opts["to"])
+    if session_client(target["sid"]) == "zcode" and opts["wake"]:
+        die("ZCode headless resume is unsupported; create a watch without --wake", 2)
     if session_client(target["sid"]) == "codex" and (opts["wake_mode"] or "--wake-turns" in args[:i]):
         die("Codex watch wake does not support --wake-mode or --wake-turns", 2)
     if check["kind"] == "at":
@@ -6010,6 +6031,8 @@ def transcript_paths(sid, cwd, limit=6):
     """This session's transcript first, then the project's other transcripts, newest first.
     A detail lost to /clear or a restart lives in the *previous* session's transcript, not this one's,
     so searching only the current one answers the question exactly when it does not matter."""
+    if session_client(sid) == "zcode" or current_client() == "zcode":
+        return []  # ZCode hook transcripts disappear after that hook; never scan Claude history
     base = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "projects")
     cur = os.environ.get("LONGRUN_TRANSCRIPT") or ""
     # Hook-provided paths also cover Codex history formats without scanning its
@@ -6432,6 +6455,37 @@ def codex_hook_input(event, inp):
     return event, inp
 
 
+ZCODE_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse",
+                "PostToolUseFailure", "PermissionRequest", "Stop")
+
+
+def zcode_hook_input(inp):
+    """ZCode documents Claude-compatible snake_case inputs; normalize tool aliases only."""
+    inp = dict(inp)
+    if inp.get("tool_name") == "ApplyPatch":
+        inp["tool_name"] = "apply_patch"
+    # Unlike Codex, ZCode has its own failure event. Do not synthesize one from
+    # PostToolUse: hookEventName in the reply must match the original event.
+    return codex_hook_input("PreToolUse", inp)[1]
+
+
+def hook_context(event, text, client):
+    if not text:
+        return
+    if client == "zcode":
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
+    else:
+        sys.stdout.write(text + "\n")
+
+
+def zcode_session_context(sid):
+    # Hook subprocess environment cannot propagate into the model's shell.
+    # Give every prompt an explicit route rather than borrowing the latest peer.
+    route = "env LONGRUN_CLIENT=zcode LONGRUN_SESSION=%s LONGRUN_HOME=%s %s" % (
+        shlex.quote(sid), shlex.quote(GLOBAL_DIR), shlex.quote(os.path.abspath(__file__)))
+    return "longrun ZCode session_id=%s. Run protocol commands with: %s <args>. For MCP run, pass this session_id and absolute cwd." % (sid, route)
+
+
 def hook_input():
     try:
         raw = sys.stdin.read()
@@ -6545,6 +6599,8 @@ def cmd_compact_hint(store, args):
     longrun compact-hint --clear       drop that line
 
     The project-wide version of the same thing is `longrun config set compact_instructions "..."`."""
+    if current_client() == "zcode":
+        die("ZCode has no supported PreCompact hook; keep durable state with add or doc instead", 2)
     text, rest = _flag(args, "--set", None)
     clear, rest = _flag(rest, "--clear", False, takes_value=False)
     if rest:
@@ -6756,10 +6812,16 @@ def cmd_hook(args):
     if not args:
         die("usage: longrun hook <EventName>  (reads the hook JSON on stdin)", 2)
     client, args = _flag(args, "--client", "claude")
-    if client not in ("claude", "codex") or len(args) != 1:
-        die("usage: longrun hook [--client claude|codex] <EventName>", 2)
+    if client not in ("claude", "codex", "zcode") or len(args) != 1:
+        die("usage: longrun hook [--client claude|codex|zcode] <EventName>", 2)
     event = args[0]
     inp = hook_input()
+    if client == "zcode":
+        if event not in ZCODE_EVENTS:
+            die("unsupported ZCode hook event: %s" % event, 2)
+        if not isinstance(inp, dict) or not isinstance(inp.get("session_id"), str) or not inp["session_id"]:
+            return 0  # no identity: do not consume another conversation's inbox
+        inp = zcode_hook_input(inp)
     if client == "codex":
         event, inp = codex_hook_input(event, inp)
     cwd = inp.get("cwd") or os.getcwd()
@@ -6783,12 +6845,12 @@ def cmd_hook(args):
     if not local:
         return 0  # inert: this directory belongs to no longrun project
     store = Store(local)
-    tpath = inp.get("transcript_path", "")
+    tpath = "" if client == "zcode" else inp.get("transcript_path", "")
     pmode = inp.get("permission_mode") or ""
     if event != "SessionStart":  # a session running across an upgrade: its old-layout files are moved before they are read
         with store.shared_lock():
             migrate_sessions(store)
-            if client == "codex" and sid and not index_read(sid):
+            if client in ("codex", "zcode") and sid and not index_read(sid):
                 # Hooks may be trusted while a thread is already open, before it
                 # gets a SessionStart. Bind before any handler holds this lock.
                 bind_session(store, sid, cwd, "startup", client=client)
@@ -6848,14 +6910,16 @@ def cmd_hook(args):
                 except OSError:
                     pass
                 save_meta(store, sid, m)
-        sys.stdout.write(text + "\n")
+        if client == "zcode":
+            text += "\n" + zcode_session_context(sid)
+        hook_context(event, text, client)
         return 0
     if event == "UserPromptSubmit":
         out, own_note = [], ""
         adopt_hand_edits(notes_target(store, True))   # outside the shared lock: it takes the notes file's own
         with store.shared_lock():
             m = load_meta_stamped(sid)
-            if sid and not m.get("desktop_id"):  # the app writes its metadata after SessionStart: learn it on a turn
+            if client == "claude" and sid and not m.get("desktop_id"):  # the app writes its metadata after SessionStart: learn it on a turn
                 d, rebound = learn_desktop(store, sid)
                 if rebound:
                     m = load_meta_stamped(sid)  # now read from the chain's directory
@@ -6911,8 +6975,9 @@ def cmd_hook(args):
             out.append(nt)
         if sw:
             out.append(sw)
-        if out:
-            sys.stdout.write("\n".join(out) + "\n")
+        if client == "zcode":
+            out.append(zcode_session_context(sid))
+        hook_context(event, "\n".join(out), client)
         return 0
     if event == "PostToolBatch":
         # One event for a whole batch of parallel calls, and no matcher: it sees every tool, including the
@@ -7025,11 +7090,18 @@ def cmd_hook(args):
         return 0
     if event == "PostToolUseFailure":
         if inp.get("is_interrupt"):
+            if client == "zcode":
+                with store.shared_lock():
+                    m = load_meta_stamped(sid)
+                    (m.get("running") or {}).pop(inp.get("tool_use_id") or "", None)
+                    save_meta(store, sid, m)
             return 0
         tool = inp.get("tool_name", "")
         err = str(inp.get("error", ""))
-        if tool in ("Bash", "PowerShell"):
+        if tool in ("Bash", "PowerShell") or client == "zcode":
             cmdl = clip((inp.get("tool_input") or {}).get("command", ""), 120)
+            if client == "zcode" and not cmdl:
+                cmdl = clip("%s %s" % (tool, (inp.get("tool_input") or {}).get("file_path", "")), 120)
             first = clip(err.splitlines()[0] if err.strip() else "", 60)
             body = clip(" ".join(err.splitlines()[1:3]), 140)
             with store.shared_lock():
@@ -7056,6 +7128,13 @@ def cmd_hook(args):
                     lines.remove(drop)
                     write_atomic(jp, "\n".join(lines) + "\n")
                 journal(store, sid, "FAIL `%s` -> %s %s" % (cmdl, first, body))
+        if client == "zcode":
+            with store.shared_lock():
+                m = load_meta_stamped(sid)
+                ctx = [midturn_deltas(store, m), board_delta(store, m)]
+                save_meta(store, sid, m)
+            ctx.insert(0, deliver_inbox(store, sid))
+            hook_context(event, "\n".join(c for c in ctx if c), client)
         return 0
     if event == "PreToolUse":
         tool = inp.get("tool_name", "")
@@ -7464,6 +7543,8 @@ def cmd_onboard(args):
         ac = "not set in Claude Code (compacts at the model's window); longrun expects %s: ask the user to type `/autocompact %s`" % (fmt_tokens(want), fmt_tokens(want))
     else:
         ac = "not set: Claude Code compacts at the model's full window (1M on Fable/Opus/Sonnet 5), ask the user"
+    if current_client() == "zcode":
+        ac = "ZCode loads notes on SessionStart(compact); pre-compaction snapshots and context telemetry are unsupported"
     if current_client() == "codex":
         ac = "Codex manages compaction; longrun restores notes afterwards. /autocompact is Claude-only"
     lines = [
@@ -7508,8 +7589,10 @@ def cmd_onboard(args):
         "",
         "SETTINGS TO DECIDE (current value; scope; meaning)",
     ]
-    onboard_settings = [item for item in ONBOARD_SETTINGS if current_client() != "codex" or item[0] != "autocompact_window"]
+    onboard_settings = [item for item in ONBOARD_SETTINGS if current_client() == "claude" or item[0] != "autocompact_window"]
     for i, (k, scope, what) in enumerate(onboard_settings, 1):
+        if current_client() == "zcode" and k == "notify_turn_end":
+            what = "a notification on turn end: off or always; unfocused is unsupported for ZCode"
         if current_client() == "codex" and k == "notify_turn_end":
             what = "a notification on turn end: off, always, or unfocused (only while the Codex app is not in front)"
         v = cfg.get(k)
@@ -7547,10 +7630,10 @@ def cmd_where(args):
     if sid:
         skey = session_key(sid)
         print("session:  %s [%s]  dir: %s" % (clip(session_display_name(sid, st), 50), skey, os.path.join(st.sessions, skey)))
-        if session_client(sid) == "codex":
-            print("client:   codex  thread: %s" % sid)
+        if session_client(sid) in ("codex", "zcode"):
+            print("client:   %s  thread: %s" % (session_client(sid), sid))
     else:
-        print("session:  none known here (own notes need a Claude Code or Codex session; `--shared` works from any shell)")
+        print("session:  none known here (own notes need an explicit conversation ID; `--shared` works from any shell)")
     print("sessions: %s" % st.sessions)
     return 0
 
