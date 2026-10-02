@@ -1,0 +1,82 @@
+{
+  "description": "ZCode adapter: JSON context output, explicit session identity, no headless resume or pre-compaction events.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook --client zcode SessionStart",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook --client zcode UserPromptSubmit",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook --client zcode PreToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook --client zcode PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook --client zcode PostToolUseFailure",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook --client zcode PermissionRequest",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "LONGRUN_BIN hook --client zcode Stop",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,9 +1,10 @@
 #!/bin/bash
-# Idempotent install for either client. The no-flag Claude Code interface stays compatible.
+# Idempotent install for the selected clients. The no-flag Claude Code interface stays compatible.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+ZCODE_DIR="${LONGRUN_ZCODE_DIR:-$HOME/.zcode}"
 CODEX_SKILLS="${LONGRUN_CODEX_SKILLS_DIR:-$HOME/.agents/skills}"
 BIN_DIR="${LONGRUN_BIN_DIR:-$HOME/.local/bin}"
 DATA_DIR="${LONGRUN_HOME:-$CLAUDE_DIR/longrun}"
@@ -15,23 +16,27 @@ for a in "$@"; do
   case "$a" in
     --claude) CLIENTS=claude ;;
     --codex) CLIENTS=codex ;;
+    --zcode) CLIENTS=zcode ;;
     --both) CLIENTS="claude codex" ;;
+    --all) CLIENTS="claude codex zcode" ;;
     --uninstall) MODE=uninstall ;;
     --purge) MODE=purge ;;
     --notify) NOTIFY=1 ;;
     --no-notify) NOTIFY=0 ;;
     --no-timer) TIMER=0 ;;
     -h|--help) cat <<'HELP'
-usage: install.sh [--claude | --codex | --both] [--uninstall | --purge]
+usage: install.sh [--claude | --codex | --zcode | --both | --all] [--uninstall | --purge]
                   [--notify | --no-notify] [--no-timer]
   --claude     Claude Code (default, existing install command unchanged)
   --codex      Codex: ~/.agents/skills/longrun and $CODEX_HOME/hooks.json
-  --both       install or remove both clients; notes and watches are shared
+  --zcode      ZCode: ~/.zcode/skills/longrun and ~/.zcode/cli/config.json
+  --both       Claude Code and Codex (existing meaning unchanged)
+  --all        all three clients; notes and watches are shared
   --no-timer   skip the five-minute background timer
   --purge      also remove shared global data; refuses while another client remains
 
 Without a notify flag, asks about desktop notifications (skips when non-interactive).
-CLAUDE_CONFIG_DIR, CODEX_HOME, LONGRUN_CODEX_SKILLS_DIR and LONGRUN_BIN_DIR override paths.
+CLAUDE_CONFIG_DIR, CODEX_HOME, LONGRUN_CODEX_SKILLS_DIR, LONGRUN_ZCODE_DIR and LONGRUN_BIN_DIR override paths.
 LONGRUN_HOME relocates shared data (default: ~/.claude/longrun, including on Codex).
 
 From a checkout: ./install.sh --codex
@@ -56,25 +61,38 @@ if [ "$MODE" = install ] && [ ! -f "$HERE/skill/longrun/SKILL.md" ]; then
   [ -f "$HERE/skill/longrun/SKILL.md" ] || { echo "tarball has no longrun skill" >&2; exit 1; }
 fi
 
-# Refuse a data purge before modifying either installation.
+# Client paths are also used to keep a surviving installation's CLI and timer.
+client_dest() {
+  case "$1" in
+    claude) printf '%s' "$CLAUDE_DIR/skills/longrun" ;;
+    codex) printf '%s' "$CODEX_SKILLS/longrun" ;;
+    zcode) printf '%s' "$ZCODE_DIR/skills/longrun" ;;
+  esac
+}
+client_settings() {
+  case "$1" in
+    claude) printf '%s' "$CLAUDE_DIR/settings.json" ;;
+    codex) printf '%s' "$CODEX_DIR/hooks.json" ;;
+    zcode) printf '%s' "$ZCODE_DIR/cli/config.json" ;;
+  esac
+}
+# Refuse a data purge before modifying any installation.
 if [ "$MODE" = purge ]; then
-  if { [ "$CLIENTS" = claude ] && [ -f "$CODEX_SKILLS/longrun/SKILL.md" ]; } ||
-     { [ "$CLIENTS" = codex ] && [ -f "$CLAUDE_DIR/skills/longrun/SKILL.md" ]; }; then
-    echo "shared data is still used by the other client; use --uninstall or --both --purge" >&2
-    exit 2
-  fi
+  for OTHER in claude codex zcode; do
+    case " $CLIENTS " in *" $OTHER "*) continue ;; esac
+    if [ -f "$(client_dest "$OTHER")/SKILL.md" ]; then
+      echo "shared data is still used by another client; use --uninstall or --all --purge" >&2
+      exit 2
+    fi
+  done
 fi
 mkdir -p "$BIN_DIR"
 STAMP="$(date +%Y%m%d-%H%M%S).$$"
 
 # Validate all selected config files before copying files or registering servers.
 for CLIENT in $CLIENTS; do
-  if [ "$CLIENT" = claude ]; then
-    SETTINGS="$CLAUDE_DIR/settings.json"
-  else
-    SETTINGS="$CODEX_DIR/hooks.json"
-  fi
-  python3 - "$SETTINGS" <<'PY_VALIDATE'
+  SETTINGS="$(client_settings "$CLIENT")"
+  python3 - "$SETTINGS" "$CLIENT" <<'PY_VALIDATE'
 import json, os, sys
 p = sys.argv[1]
 if os.path.exists(p):
@@ -82,7 +100,14 @@ if os.path.exists(p):
         d = json.load(open(p))
         if not isinstance(d, dict) or not isinstance(d.get("hooks", {}), dict):
             raise ValueError("expected an object with a hooks object")
-        for entries in d.get("hooks", {}).values():
+        hooks = d.get("hooks", {})
+        if sys.argv[2] == "zcode":
+            if "enabled" in hooks and not isinstance(hooks["enabled"], bool):
+                raise ValueError("hooks.enabled must be a boolean")
+            hooks = hooks.get("events", {})
+            if not isinstance(hooks, dict):
+                raise ValueError("hooks.events must be an object")
+        for entries in hooks.values():
             if not isinstance(entries, list):
                 raise ValueError("hook events must contain arrays")
             for entry in entries:
@@ -94,24 +119,23 @@ PY_VALIDATE
 done
 
 for CLIENT in $CLIENTS; do
-  if [ "$CLIENT" = claude ]; then
-    CONFIG_DIR="$CLAUDE_DIR"
-    DEST="$CLAUDE_DIR/skills/longrun"
-    SETTINGS="$CLAUDE_DIR/settings.json"
-    ENTRY=SKILL.md
-    SPEC=hooks.json
-  else
-    CONFIG_DIR="$CODEX_DIR"
-    DEST="$CODEX_SKILLS/longrun"
-    SETTINGS="$CODEX_DIR/hooks.json"
-    ENTRY=SKILL.codex.md
-    SPEC=hooks.codex.json
-  fi
+  DEST="$(client_dest "$CLIENT")"
+  SETTINGS="$(client_settings "$CLIENT")"
+  case "$CLIENT" in
+    claude) CONFIG_DIR="$CLAUDE_DIR"; ENTRY=SKILL.md; SPEC=hooks.json ;;
+    codex) CONFIG_DIR="$CODEX_DIR"; ENTRY=SKILL.codex.md; SPEC=hooks.codex.json ;;
+    zcode) CONFIG_DIR="$ZCODE_DIR"; ENTRY=SKILL.zcode.md; SPEC=hooks.zcode.json ;;
+  esac
   mkdir -p "$CONFIG_DIR/backups"
   if [ -f "$SETTINGS" ]; then
     cp "$SETTINGS" "$CONFIG_DIR/backups/$(basename "$SETTINGS").$STAMP.longrun.bak"
   fi
   if [ "$MODE" = install ]; then
+    # ZCode can import another client's skill as a symlink. Keep that link as a
+    # backup and install independently instead of overwriting the source skill.
+    if [ "$CLIENT" = zcode ] && [ -L "$DEST" ]; then
+      mv "$DEST" "$CONFIG_DIR/backups/longrun.skill.$STAMP.symlink"
+    fi
     mkdir -p "$DEST/scripts" "$DEST/references"
     cp "$HERE/skill/longrun/$ENTRY" "$DEST/SKILL.md"
     cp "$HERE/skill/longrun/$SPEC" "$DEST/hooks.json"
@@ -127,7 +151,8 @@ for CLIENT in $CLIENTS; do
 import json, os, shlex, sys
 settings_path, bin_path, spec_path, mode, client, data_path = sys.argv[1:]
 settings = json.load(open(settings_path)) if os.path.exists(settings_path) else {}
-hooks = settings.setdefault("hooks", {})
+hook_config = settings.setdefault("hooks", {})
+hooks = hook_config.setdefault("events", {}) if client == "zcode" else hook_config
 def ours(h):
     try:
         return any(p.endswith("/longrun/scripts/longrun") for p in shlex.split(h.get("command") or ""))
@@ -146,6 +171,9 @@ for event in list(hooks):
     else:
         del hooks[event]
 if mode == "install":
+    if client == "zcode":
+        # Respect an explicit user disable; only a fresh hook configuration is enabled.
+        hook_config.setdefault("enabled", True)
     for event, entries in json.load(open(spec_path))["hooks"].items():
         for entry in entries:
             entry = json.loads(json.dumps(entry))
@@ -161,8 +189,14 @@ if client == "claude":
                 perms.append(rule)
     else:
         settings["permissions"]["allow"] = [p for p in perms if p != "Bash(longrun:*)" and "/skills/longrun/scripts/longrun" not in p]
-if not hooks:
-    settings.pop("hooks", None)
+if client == "zcode":
+    if not hooks:
+        hook_config.pop("events", None)
+    if not hook_config:
+        settings.pop("hooks", None)
+else:
+    if not hooks:
+        settings.pop("hooks", None)
 os.makedirs(os.path.dirname(settings_path), exist_ok=True)
 with open(settings_path + ".tmp", "w") as f:
     json.dump(settings, f, indent=2, ensure_ascii=False)
@@ -170,7 +204,11 @@ os.replace(settings_path + ".tmp", settings_path)
 print("%s hooks: removed %d old handlers, added %d entries" % (client, removed, added))
 PY_HOOKS
 
-  if command -v "$CLIENT" >/dev/null 2>&1; then
+  if [ "$CLIENT" = zcode ]; then
+    if [ "$MODE" = install ]; then
+      echo 'ZCode: CLI protocol installed; optional MCP registration is documented in references/zcode.md.'
+    fi
+  elif command -v "$CLIENT" >/dev/null 2>&1; then
     if [ "$CLIENT" = claude ]; then
       claude mcp remove --scope user longrun >/dev/null 2>&1 || true
       if [ "$MODE" = install ]; then
@@ -264,20 +302,26 @@ if [ "$MODE" = install ]; then
     *) echo "PATH: add $BIN_DIR to PATH; hooks already use absolute paths" ;;
   esac
   echo "next: cd <project> && longrun init"
-  if [ "$CLIENTS" != claude ]; then
+  case " $CLIENTS " in *" codex "*)
     echo 'Codex: open /hooks to review and trust the installed hooks, then invoke $longrun.'
     echo 'Restart Codex if the skill or MCP server is not visible. No hook trust or sandbox settings were changed.'
-  fi
-  if [ "$CLIENTS" != codex ]; then
+  ;; esac
+  case " $CLIENTS " in *" claude "*)
     echo 'Claude Code: type /longrun to load the digest in an existing session.'
-  fi
+  ;; esac
+  case " $CLIENTS " in *" zcode "*)
+    echo 'ZCode: review Settings -> Hooks, enable hooks if previously disabled, then start a new session and invoke $longrun.'
+    echo 'ZCode headless resume/wake and pre-compaction snapshots are unsupported.'
+  ;; esac
 else
   SURVIVOR=""
-  if [ "$CLIENTS" = claude ] && [ -x "$CODEX_SKILLS/longrun/scripts/longrun" ]; then
-    SURVIVOR="$CODEX_SKILLS/longrun/scripts/longrun"
-  elif [ "$CLIENTS" = codex ] && [ -x "$CLAUDE_DIR/skills/longrun/scripts/longrun" ]; then
-    SURVIVOR="$CLAUDE_DIR/skills/longrun/scripts/longrun"
-  fi
+  for OTHER in claude codex zcode; do
+    case " $CLIENTS " in *" $OTHER "*) continue ;; esac
+    if [ -x "$(client_dest "$OTHER")/scripts/longrun" ]; then
+      SURVIVOR="$(client_dest "$OTHER")/scripts/longrun"
+      break
+    fi
+  done
   RESTART_TIMER=0
   if [ -x "$BIN_DIR/longrun" ]; then
     if ! "$BIN_DIR/longrun" watch status | head -n1 | grep -q 'NOT INSTALLED'; then
@@ -286,11 +330,7 @@ else
     "$BIN_DIR/longrun" watch uninstall >/dev/null 2>&1 || true
   fi
   for CLIENT in $CLIENTS; do
-    if [ "$CLIENT" = claude ]; then
-      rm -rf "$CLAUDE_DIR/skills/longrun"
-    else
-      rm -rf "$CODEX_SKILLS/longrun"
-    fi
+    rm -rf "$(client_dest "$CLIENT")"
   done
   if [ -n "$SURVIVOR" ]; then
     ln -sfn "$SURVIVOR" "$BIN_DIR/longrun"

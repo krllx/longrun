@@ -61,6 +61,8 @@ curl -fsSL https://krllx.github.io/longrun/install.sh | bash -s -- --codex
 
 In Codex, review and trust the installed hooks in `/hooks`, then invoke `$longrun` in your project. The skill goes in `~/.agents/skills/longrun`, hooks in `${CODEX_HOME:-~/.codex}/hooks.json`, and MCP tools are registered with `codex mcp add`. Both clients share the same `.longrun/` and existing `~/.claude/longrun/` data. `--codex --uninstall` removes only the Codex integration. [Codex setup and compatibility](skill/longrun/references/codex.md) covers manual operation on older clients and the differences below.
 
+For [ZCode from Z.ai](https://zcode.z.ai/), run `./install.sh --zcode` (or use `--all` for all three clients). Review Settings -> Hooks, then start a new session and invoke `$longrun`. The adapter shares notes, board, inbox and HALT with the other clients; ZCode headless resume/wake and pre-compaction snapshots are unsupported. [ZCode setup and compatibility](skill/longrun/references/zcode.md).
+
 The lifecycle examples below describe Claude Code. Codex also restores notes after compaction and receives messages through the shared inbox. Its MCP `run` tool runs the protocol commands when the shell sandbox cannot write the session store. Codex's `PreCompact` saves a snapshot; it does not steer its summarizer. `send --resume` and watch `--wake` use `codex exec resume` for Codex targets, with normal client permissions.
 
 > [!NOTE]
@@ -71,8 +73,9 @@ The lifecycle examples below describe Claude Code. Codex also restores notes aft
 
 - Claude Code: `~/.claude/settings.json` gets 12 hook entries and two permission rules that let the agent call `longrun`; the skill goes in `~/.claude/skills/longrun/`.
 - Codex: `${CODEX_HOME:-~/.codex}/hooks.json` gets 10 hook entries; the skill goes in `~/.agents/skills/longrun/`. Trust the hooks through `/hooks`.
+- ZCode: `~/.zcode/cli/config.json` gets seven entries in `hooks.events`; the skill goes in `~/.zcode/skills/longrun/`. An explicitly disabled hook configuration stays disabled. MCP registration is manual.
 - Existing configuration files are backed up first, and other hooks are preserved. The shared terminal symlink is `~/.local/bin/longrun`.
-- The MCP server `longrun` is registered through the selected client's CLI. It exposes `run`, `ask` and `notify`.
+- For Claude Code and Codex, the MCP server `longrun` is registered through the selected client's CLI. It exposes `run`, `ask` and `notify`.
 - **a background timer**, every five minutes: a launchd agent on macOS, a systemd user timer or a cron line on Linux. It checks the watches you registered and looks at the sessions - a few shell checks, no model and no tokens, and it wakes a session only when one of your conditions comes true. `--no-timer` skips it.
 - **desktop notifications**, if you answered yes to the installer's question: on macOS `brew install terminal-notifier` when it is missing, plus one test notification that makes macOS ask for permission. On Linux it only checks for `notify-send`. `--notify` and `--no-notify` answer the question in advance.
 
@@ -278,7 +281,8 @@ bash tests/run.sh            # 293 regression checks, no API calls
 bash tests/scenarios.sh      # 47 scenarios, one per goal
 bash tests/orchestrator.sh   # 53: the orchestrator layer
 bash tests/ask.sh            # 27: the dialog and the MCP server
-python3 tests/codex.py       # 23: Codex and mixed-client integration
+python3 tests/codex.py       # Codex and mixed-client integration
+python3 tests/zcode.py       # ZCode hooks, session routing and installer lifecycle
 ```
 
 The installer copies files into the selected client's skill directory; nothing is loaded from the checkout. Existing hook commands run the updated script on their next event. In Codex, review newly registered hooks in `/hooks` and restart if the skill or MCP tools do not appear.
